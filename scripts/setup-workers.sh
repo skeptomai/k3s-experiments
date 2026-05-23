@@ -19,12 +19,14 @@ for worker in "${WORKERS[@]}"; do
     echo "--- Configuring $worker ---"
 
     scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+        -o "ProxyJump cb@${SERVER}" \
         "$SCRIPT_DIR/remote/configure-worker.sh" \
-        cb@"$SERVER":/tmp/configure-worker.sh
+        cb@"${worker}":/tmp/configure-worker.sh
 
-    ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no cb@"$SERVER" \
-        "scp -o StrictHostKeyChecking=no /tmp/configure-worker.sh cb@${worker}:/tmp/configure-worker.sh && \
-         ssh -o StrictHostKeyChecking=no cb@${worker} 'bash /tmp/configure-worker.sh; rm /tmp/configure-worker.sh'"
+    ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+        -o "ProxyJump cb@${SERVER}" \
+        cb@"${worker}" \
+        "bash /tmp/configure-worker.sh; rm /tmp/configure-worker.sh"
 
     echo "Done: $worker"
     echo ""
