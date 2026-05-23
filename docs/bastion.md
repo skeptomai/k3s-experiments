@@ -20,40 +20,10 @@ ipc2 and ipc3 accept SSH only from ipc1's LAN IP (192.168.88.53).
 
 ## Setup
 
-```
-bash scripts/setup-cluster-ssh.sh
-```
+### Step 1: Configure your client machine (omen or any machine you SSH from)
 
-Or individually:
-```
-bash scripts/setup-bastion.sh
-bash scripts/setup-workers.sh
-```
-
-All scripts are idempotent — safe to run multiple times.
-
-## What Each Script Does
-
-**`scripts/remote/configure-bastion.sh`** (runs on ipc1)
-- Writes `/etc/ssh/sshd_config.d/10-bastion.conf`
-- Enables `AllowTcpForwarding yes` (required for ProxyJump)
-- Disables agent forwarding, tunneling, X11, gateway ports
-- Reloads sshd if config changed
-
-**`scripts/remote/configure-worker.sh`** (runs on ipc2/ipc3)
-- Writes `/etc/ssh/sshd_config.d/10-bastion-lockdown.conf`
-- Sets `AllowUsers cb@192.168.88.53` — only cb from ipc1 can authenticate
-- Configures UFW:
-  - Allow SSH from bastion only (192.168.88.53:22)
-  - Deny SSH from all other sources
-  - Allow kubelet API (10250/TCP) from LAN — required for k3s
-  - Allow Flannel VXLAN (8472/UDP) from LAN — required for pod networking
-  - Default: deny incoming, allow outgoing
-- Enables UFW if not already active
-
-## SSH Config for omen
-
-Add to `~/.ssh/config`:
+Add this to `~/.ssh/config` on the client. This tells SSH to reach ipc2 and
+ipc3 by jumping through ipc1 automatically.
 
 ```
 Host ipc1
@@ -74,7 +44,54 @@ Host ipc3
     ProxyJump ipc1
 ```
 
-After adding this, `ssh ipc2` and `ssh ipc3` will jump through ipc1 automatically.
+This config is needed on **any machine you want to SSH from** — not just omen.
+The `ProxyJump ipc1` line is what routes the connection through the bastion.
+
+### Step 2: Run the setup script from your client machine
+
+Run this on omen (or any machine with tailnet access to ipc1). It SSHes into
+the cluster nodes and configures them remotely — you do not run it on the
+nodes themselves.
+
+```
+bash scripts/setup-cluster-ssh.sh
+```
+
+Or individually:
+```
+bash scripts/setup-bastion.sh
+bash scripts/setup-workers.sh
+```
+
+All scripts are idempotent — safe to run multiple times.
+
+## What Each Script Does
+
+**`scripts/setup-cluster-ssh.sh`** — run on your **client machine** (omen)
+- Calls `setup-bastion.sh` then `setup-workers.sh` in order
+
+**`scripts/setup-bastion.sh`** — run on your **client machine** (omen)
+- Copies `scripts/remote/configure-bastion.sh` to ipc1 and runs it via SSH
+
+**`scripts/setup-workers.sh`** — run on your **client machine** (omen)
+- Stages `scripts/remote/configure-worker.sh` through ipc1 to each worker and runs it
+
+**`scripts/remote/configure-bastion.sh`** — runs **on ipc1** (copied there by setup-bastion.sh)
+- Writes `/etc/ssh/sshd_config.d/10-bastion.conf`
+- Enables `AllowTcpForwarding yes` (required for ProxyJump)
+- Disables agent forwarding, tunneling, X11, gateway ports
+- Reloads sshd if config changed
+
+**`scripts/remote/configure-worker.sh`** — runs **on ipc2/ipc3** (staged there by setup-workers.sh)
+- Writes `/etc/ssh/sshd_config.d/10-bastion-lockdown.conf`
+- Sets `AllowUsers cb@192.168.88.53` — only cb from ipc1 can authenticate
+- Configures UFW:
+  - Allow SSH from bastion only (192.168.88.53:22)
+  - Deny SSH from all other sources
+  - Allow kubelet API (10250/TCP) from LAN — required for k3s
+  - Allow Flannel VXLAN (8472/UDP) from LAN — required for pod networking
+  - Default: deny incoming, allow outgoing
+- Enables UFW if not already active
 
 ## Testing
 
