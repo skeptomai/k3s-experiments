@@ -185,6 +185,9 @@ CNI, but `RunPodSandbox` must call CNI to stay compatible with k3s's Flannel ove
 3. **Path 3 when ready** — the full CRI server, starting with pod sandbox, is the end goal.
    The CNI work and conformance testing are the long poles.
 
+The pod sandbox primitive is tracked as a standalone pelagos issue:
+[pelagos#234 — feat(sandbox): pod sandbox — named namespace group for multi-container sharing](https://github.com/pelagos-containers/pelagos/issues/234)
+
 ---
 
 ## k3s cluster reference
