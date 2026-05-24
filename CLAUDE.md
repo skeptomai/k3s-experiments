@@ -15,6 +15,11 @@ Kubernetes learning cluster on three ipc machines. Scripts and docs for cluster 
 - kubectl requires sudo on the nodes: `sudo kubectl ...`
 - k3s token lives at `/var/lib/rancher/k3s/server/node-token` on ipc1
 
+## Repo Locations on Nodes
+
+- ipc1: `~/Projects/k3s-experiments` (cloned 2026-05-24)
+- ipc2/ipc3: not cloned — apply via ipc1
+
 ## What Claude Can Do Directly
 
 Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes and run kubectl/k3s commands. Scripts in `scripts/` are the preferred way to do repeatable operations.
