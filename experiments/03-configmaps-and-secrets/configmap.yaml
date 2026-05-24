@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: config-demo
+data:
+  APP_ENV: production
+  APP_LOG_LEVEL: info
+  config.ini: |
+    [server]
+    port = 8080
+    timeout = 30
+
+    [database]
+    host = db.internal
+    port = 5432
