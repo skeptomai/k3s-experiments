@@ -10,10 +10,10 @@
 ## Apply
 
 ```
-kubectl apply -f experiments/01-namespaces-and-deployments/
+kubectl apply -f experiments/01-namespaces-and-deployments/namespace.yaml && kubectl apply -f experiments/01-namespaces-and-deployments/
 ```
 
-This applies all three manifests: namespace, deployment, service.
+The namespace must exist before the deployment. `kubectl apply -f <dir>` applies alphabetically, so `deployment.yaml` would run before `namespace.yaml` — apply the namespace explicitly first.
 
 ## Watch it come up
 
