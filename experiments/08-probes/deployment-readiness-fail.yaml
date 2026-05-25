@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readiness-fail
+  namespace: probes-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: readiness-demo
+      variant: fail
+  template:
+    metadata:
+      labels:
+        app: readiness-demo
+        variant: fail
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:stable
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5

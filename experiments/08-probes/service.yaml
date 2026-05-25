@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: readiness-demo
+  namespace: probes-demo
+spec:
+  selector:
+    app: readiness-demo
+  ports:
+    - port: 80
+      targetPort: 80

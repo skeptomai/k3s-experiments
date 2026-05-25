@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readiness-ok
+  namespace: probes-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: readiness-demo
+      variant: ok
+  template:
+    metadata:
+      labels:
+        app: readiness-demo
+        variant: ok
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:stable
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5
