@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rbac-tester
+  namespace: rbac-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rbac-tester
+  template:
+    metadata:
+      labels:
+        app: rbac-tester
+    spec:
+      serviceAccountName: pod-reader
+      containers:
+        - name: kubectl
+          image: bitnami/kubectl:latest
+          command: ["sleep", "infinity"]
