@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: rolling-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
