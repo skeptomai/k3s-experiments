@@ -1,0 +1,15 @@
+nfs:
+  server: 192.168.89.2
+  path: /mnt/primary_storage/k8s-nfs
+
+storageClass:
+  name: nfs
+  defaultClass: true
+  reclaimPolicy: Retain
+  accessModes: ReadWriteMany
+
+# Allow root on the NFS server to manage directories
+mountOptions:
+  - nfsvers=4
+  - hard
+  - intr
