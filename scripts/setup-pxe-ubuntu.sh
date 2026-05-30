@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ASSETS=/mnt/primary_storage/pxe_assets
-ISO_NAME=ubuntu-24.04-live-server-amd64.iso
+ISO_NAME=ubuntu-24.04.4-live-server-amd64.iso
 ISO_URL=https://releases.ubuntu.com/noble/${ISO_NAME}
 ISO_FILE=${ASSETS}/${ISO_NAME}
 BOOT_DIR=${ASSETS}/ubuntu-24.04

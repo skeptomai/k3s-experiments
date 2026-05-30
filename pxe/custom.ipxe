@@ -7,7 +7,7 @@
 # for any non-ipc machine.
 
 set base http://192.168.89.2:31011
-set iso-url ${base}/ubuntu-24.04-live-server-amd64.iso
+set iso-url ${base}/ubuntu-24.04.4-live-server-amd64.iso
 
 iseq ${net0/mac} a8:a1:59:43:2a:67 && goto ipc1 ||
 iseq ${net0/mac} a8:a1:59:43:2a:74 && goto ipc2 ||
