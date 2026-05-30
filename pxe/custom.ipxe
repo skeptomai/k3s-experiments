@@ -1,41 +1,22 @@
 #!ipxe
-# ipc node autoinstall menu — paste this into the netboot.xyz web UI
-# custom menu section (http://192.168.89.2:31010).
-#
-# Matches by MAC address and boots the right Ubuntu 24.04 autoinstall
-# config automatically. Falls through to the normal netboot.xyz menu
-# for any non-ipc machine.
+# ipc node autoinstall — matches by MAC and boots the right config automatically.
+# Falls through to the normal netboot.xyz menu for any non-ipc machine.
+# Paste into the custom.ipxe file in the netboot.xyz web UI Menus section.
 
-set base http://192.168.89.2:31011
-set iso-url ${base}/ubuntu-24.04.4-live-server-amd64.iso
+set nb   http://192.168.89.2:31011
+set kurl ${nb}/ubuntu-squash/releases/download/24.04.4-717d3a1a
+set iso  ${nb}/ubuntu-24.04.4-live-server-amd64.iso
 
-iseq ${net0/mac} a8:a1:59:43:2a:67 && goto ipc1 ||
-iseq ${net0/mac} a8:a1:59:43:2a:74 && goto ipc2 ||
-iseq ${net0/mac} a8:a1:59:43:2a:ed && goto ipc3 ||
-goto no_match
-
-:ipc1
-set ai-url ${base}/autoinstall/a8-a1-59-43-2a-67/
-goto install
-
-:ipc2
-set ai-url ${base}/autoinstall/a8-a1-59-43-2a-74/
-goto install
-
-:ipc3
-set ai-url ${base}/autoinstall/a8-a1-59-43-2a-ed/
-goto install
+iseq ${net0/mac} a8:a1:59:43:2a:67 && set ai ${nb}/autoinstall/a8-a1-59-43-2a-67/ && goto install ||
+iseq ${net0/mac} a8:a1:59:43:2a:74 && set ai ${nb}/autoinstall/a8-a1-59-43-2a-74/ && goto install ||
+iseq ${net0/mac} a8:a1:59:43:2a:ed && set ai ${nb}/autoinstall/a8-a1-59-43-2a-ed/ && goto install ||
+exit 0
 
 :install
-echo MAC ${net0/mac} matched — installing Ubuntu 24.04
-echo Autoinstall config: ${ai-url}
-echo OS image: ${iso-url}
-sleep 3
-kernel ${base}/ubuntu-24.04/vmlinuz ip=dhcp url=${iso-url} autoinstall quiet ds=nocloud-net\;s=${ai-url}
-initrd ${base}/ubuntu-24.04/initrd
-boot
-
-:no_match
-echo MAC ${net0/mac} not an ipc node — continuing to main menu
+imgfree
+echo Installing Ubuntu 24.04 on ${net0/mac}
+echo Autoinstall config: ${ai}
 sleep 2
-exit
+kernel ${kurl}/vmlinuz root=/dev/ram0 ramdisk_size=3500000 cloud-config-url=/dev/null ip=dhcp url=${iso} autoinstall ds=nocloud-net\;s=${ai} initrd=initrd.magic
+initrd ${kurl}/initrd
+boot
