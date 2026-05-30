@@ -1,0 +1,41 @@
+#!ipxe
+# ipc node autoinstall menu — paste this into the netboot.xyz web UI
+# custom menu section (http://192.168.89.2:31010).
+#
+# Matches by MAC address and boots the right Ubuntu 24.04 autoinstall
+# config automatically. Falls through to the normal netboot.xyz menu
+# for any non-ipc machine.
+
+set base http://192.168.89.2:31011
+set iso-url ${base}/ubuntu-24.04-live-server-amd64.iso
+
+iseq ${net0/mac} a8:a1:59:43:2a:67 && goto ipc1 ||
+iseq ${net0/mac} a8:a1:59:43:2a:74 && goto ipc2 ||
+iseq ${net0/mac} a8:a1:59:43:2a:ed && goto ipc3 ||
+goto no_match
+
+:ipc1
+set ai-url ${base}/autoinstall/a8-a1-59-43-2a-67/
+goto install
+
+:ipc2
+set ai-url ${base}/autoinstall/a8-a1-59-43-2a-74/
+goto install
+
+:ipc3
+set ai-url ${base}/autoinstall/a8-a1-59-43-2a-ed/
+goto install
+
+:install
+echo MAC ${net0/mac} matched — installing Ubuntu 24.04
+echo Autoinstall config: ${ai-url}
+echo OS image: ${iso-url}
+sleep 3
+kernel ${base}/ubuntu-24.04/vmlinuz ip=dhcp url=${iso-url} autoinstall quiet ds=nocloud-net\;s=${ai-url}
+initrd ${base}/ubuntu-24.04/initrd
+boot
+
+:no_match
+echo MAC ${net0/mac} not an ipc node — continuing to main menu
+sleep 2
+exit
