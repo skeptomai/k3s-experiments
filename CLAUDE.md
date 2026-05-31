@@ -4,11 +4,11 @@ Kubernetes learning cluster on three ipc machines. Scripts and docs for cluster 
 
 ## Cluster
 
-| Node | Role | IP | SSH |
-|------|------|----|-----|
-| ipc1 | control-plane | 192.168.88.53 | Direct via tailnet: `ipc1.taildd208.ts.net` |
-| ipc2 | worker | 192.168.88.52 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc2` |
-| ipc3 | worker | 192.168.88.54 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc3` |
+| Node | Role | IP | SSH | MAC (enp2s0) |
+|------|------|----|-----|--------------|
+| ipc1 | control-plane | 192.168.88.53 | Direct via tailnet: `ipc1.taildd208.ts.net` | `a8:a1:59:43:2a:67` (enp2s0) |
+| ipc2 | worker | 192.168.88.52 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc2` | `a8:a1:59:43:2a:ed` (enp2s0) |
+| ipc3 | worker | 192.168.88.54 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc3` | `a8:a1:59:43:2a:74` (enp2s0) |
 
 - k3s v1.32.x, Ubuntu 24.04, x86_64, 4 cores, 30GB RAM per node
 - SSH key: `~/.ssh/id_rsa` (cb@omen)

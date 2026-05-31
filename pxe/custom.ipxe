@@ -8,8 +8,8 @@ set kurl ${nb}/ubuntu-squash/releases/download/24.04.4-717d3a1a
 set iso  ${nb}/ubuntu-24.04.4-live-server-amd64.iso
 
 iseq ${net0/mac} a8:a1:59:43:2a:67 && set ai ${nb}/autoinstall/a8-a1-59-43-2a-67/ && goto install ||
-iseq ${net0/mac} a8:a1:59:43:2a:74 && set ai ${nb}/autoinstall/a8-a1-59-43-2a-74/ && goto install ||
 iseq ${net0/mac} a8:a1:59:43:2a:ed && set ai ${nb}/autoinstall/a8-a1-59-43-2a-ed/ && goto install ||
+iseq ${net0/mac} a8:a1:59:43:2a:74 && set ai ${nb}/autoinstall/a8-a1-59-43-2a-74/ && goto install ||
 exit 0
 
 :install

@@ -6,7 +6,7 @@ autoinstall:
     layout: us
   timezone: America/Los_Angeles
   identity:
-    hostname: ipc2
+    hostname: ipc3
     username: cb
     password: "$6$QimoX1zBxWmBnE2H$mkU./oEWT/bvdPfpYmiCgfNtC9Nh1.hIlsi67kJhMBeDwRh/RIQcsHE7rX7hilprk7FQK7Kd8Rrnl4FHDMM3u."
   ssh:
