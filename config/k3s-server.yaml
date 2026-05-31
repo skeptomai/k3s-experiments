@@ -1,0 +1,2 @@
+container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
+flannel-backend: wireguard-native

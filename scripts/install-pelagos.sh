@@ -5,13 +5,14 @@
 #
 # Installs the latest pelagos release deb (which includes both pelagos and
 # pelagos-cri), sets up /usr/local/bin symlinks, writes the pelagos-cri
-# systemd unit, configures k3s to use Pelagos as its CRI, and restarts the
-# k3s service. Safe to run multiple times (idempotent).
+# systemd unit, and deploys the canonical k3s config from config/k3s-server.yaml
+# or config/k3s-agent.yaml in the repo root. Safe to run multiple times (idempotent).
 #
 # Usage: ./install-pelagos.sh [node...]
 #   node: ipc1 | ipc2 | ipc3 (default: ipc1 ipc2 ipc3)
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 DEFAULT_NODES=(ipc1 ipc2 ipc3)
 NODES=("${@:-${DEFAULT_NODES[@]}}")
@@ -24,23 +25,26 @@ echo "Latest: $LATEST  deb: $DEB_URL"
 
 install_node() {
     local node=$1
-    local ssh_cmd
+    local ssh_cmd k3s_service k3s_config_b64
 
     if [ "$node" = "ipc1" ]; then
         ssh_cmd="ssh -o StrictHostKeyChecking=no cb@$SERVER"
         k3s_service="k3s"
+        k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
     else
         ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@$SERVER cb@$node"
         k3s_service="k3s-agent"
+        k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent.yaml")
     fi
 
     echo ""
     echo "=== Installing Pelagos $LATEST on $node ==="
 
-    $ssh_cmd bash -s -- "$DEB_URL" "$k3s_service" <<'REMOTE'
+    $ssh_cmd bash -s "$DEB_URL" "$k3s_service" "$k3s_config_b64" <<'REMOTE'
 set -euo pipefail
 DEB_URL=$1
 K3S_SERVICE=$2
+K3S_CONFIG=$(echo "$3" | base64 -d)
 
 echo "--- Installing deb ---"
 curl -sL "$DEB_URL" -o /tmp/pelagos.deb
@@ -71,11 +75,11 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 UNIT
 
-echo "--- Configuring k3s CRI endpoint ---"
+echo "--- Deploying k3s config ---"
 sudo mkdir -p /etc/rancher/k3s
-sudo tee /etc/rancher/k3s/config.yaml >/dev/null <<CFG
-container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
-CFG
+echo "$K3S_CONFIG" | sudo tee /etc/rancher/k3s/config.yaml >/dev/null
+echo "Config written:"
+sudo cat /etc/rancher/k3s/config.yaml
 
 echo "--- Enabling and starting pelagos-cri ---"
 sudo systemctl daemon-reload
