@@ -40,6 +40,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/upgrade-server.sh [channel]` | Upgrades ipc1 control plane |
 | `scripts/upgrade-agents.sh [channel]` | Upgrades ipc2/ipc3 workers (fetches token automatically) |
 | `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order |
+| `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (default: all three) |
 
 ## Agent Upgrade Notes
 
