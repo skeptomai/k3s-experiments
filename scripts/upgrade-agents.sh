@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Upgrades the k3s agents (worker nodes) on ipc2 and ipc3.
-# Run from any machine with SSH access to ipc1 via the tailnet.
+# Run from any machine with SSH access to ipc1 via the tailnet (not from ipc1 itself).
 # ipc2 and ipc3 are reached by jumping through ipc1.
 #
 # IMPORTANT: K3S_URL and K3S_TOKEN must always be passed explicitly when
