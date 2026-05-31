@@ -10,7 +10,10 @@ Kubernetes learning cluster on three ipc machines. Scripts and docs for cluster 
 | ipc2 | worker | 192.168.88.52 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc2` | `a8:a1:59:43:2a:ed` (enp2s0) |
 | ipc3 | worker | 192.168.88.54 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc3` | `a8:a1:59:43:2a:74` (enp2s0) |
 
-- k3s v1.32.x, Ubuntu 24.04, x86_64, 4 cores, 30GB RAM per node
+- k3s v1.35.5, Ubuntu 24.04, x86_64, 4 cores, 30GB RAM per node
+- Container runtime: Pelagos v0.65.2 on all three nodes (`pelagos://0.1.0`)
+- Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
+- Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
 - SSH key: `~/.ssh/id_rsa` (cb@omen)
 - kubectl requires sudo on the nodes: `sudo kubectl ...`
 - k3s token lives at `/var/lib/rancher/k3s/server/node-token` on ipc1
