@@ -7,9 +7,10 @@ set nb   http://192.168.89.2:31011
 set kurl ${nb}/ubuntu-squash/releases/download/24.04.4-717d3a1a
 set iso  ${nb}/ubuntu-24.04.4-live-server-amd64.iso
 
+echo DEBUG: autoexec.ipxe is running
 echo net0/mac: ${net0/mac}
 echo net1/mac: ${net1/mac}
-sleep 10
+prompt Press any key to continue...
 
 iseq ${net0/mac} a8:a1:59:43:2a:67 && set ai ${nb}/autoinstall/a8-a1-59-43-2a-67/ && goto install ||
 iseq ${net0/mac} a8:a1:59:43:2a:ed && set ai ${nb}/autoinstall/a8-a1-59-43-2a-ed/ && goto install ||
