@@ -20,7 +20,7 @@ NODES=("${@:-${DEFAULT_NODES[@]}}")
 echo "=== Fetching latest Pelagos release ==="
 LATEST=$(gh release list --repo pelagos-containers/pelagos --limit 1 --json tagName --jq '.[0].tagName')
 DEB_URL=$(gh release view "$LATEST" --repo pelagos-containers/pelagos --json assets \
-    --jq '.assets[] | select(.name | test("pelagos_.*_amd64\\.deb")) | .url')
+    --jq '.assets[] | select(.name | test("amd64[.]deb")) | .url')
 echo "Latest: $LATEST  deb: $DEB_URL"
 
 install_node() {
