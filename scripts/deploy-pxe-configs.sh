@@ -6,7 +6,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-NAZGUL_MENUS="root@nazgul:/mnt/.ix-apps/app_mounts/netbootxyz/config/menus"
+NAZGUL_MENUS_PATH="/mnt/.ix-apps/app_mounts/netbootxyz/config/menus"
+NAZGUL_MENUS="root@nazgul:${NAZGUL_MENUS_PATH}"
 NAZGUL_AUTOINSTALL="root@nazgul:/mnt/primary_storage/pxe_assets/autoinstall"
 
 echo "Deploying pxe-control.sh to nazgul..."
@@ -17,6 +18,7 @@ for f in "$REPO"/pxe/MAC-*.ipxe; do
     name="$(basename "$f")"
     echo "  $name"
     scp "$f" "${NAZGUL_MENUS}/${name}.disabled"
+    ssh root@nazgul "chown apps:apps ${NAZGUL_MENUS_PATH}/${name}.disabled"
 done
 
 echo "Deploying autoinstall configs..."

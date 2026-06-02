@@ -50,7 +50,8 @@ enable_node() {
     local file="${MENUS}/${NODE_MAC[$node]}"
     local disabled="${file}.disabled"
     if [ -f "$file" ]; then
-        echo "$node: already enabled"
+        chown apps:apps "$file"
+        echo "$node: already enabled (ownership fixed)"
     elif [ -f "$disabled" ]; then
         mv "$disabled" "$file"
         chown apps:apps "$file"
