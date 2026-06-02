@@ -69,10 +69,24 @@ ipc1 (control-plane)          ipc2, ipc3 (workers)
 - Verify: `spire-server healthcheck` and `spire-agent healthcheck` both pass
 - Verify: all three nodes show as attested in `spire-server agent list`
 
-### Phase 2 — Workload identity (follow-on experiment)
-- Register a demo workload entry
-- Deploy a pod that fetches its SVID via the Workload API
-- Verify the SVID contains the expected SPIFFE ID and is signed by the cluster CA
+### Phase 2 — Workload identity (blocked on Pelagos hostPID bug)
+
+Manifests exist (`demo-namespace.yaml`, `demo-registration-rbac.yaml`, `demo-registration-job.yaml`, `demo-workload.yaml`) and the registration entries are deployed. The workload pod can connect to the socket, but SPIRE fails at the first step of workload attestation with `"could not resolve caller information"`.
+
+**Root cause**: SPIRE's k8s workload attestor identifies the calling process by reading `SO_PEERCRED` on the Workload API Unix socket. The PID it receives is then resolved against `/proc/<pid>/cgroup` to map the process to a container. This requires the SPIRE agent to share the **host PID namespace** (set via `hostPID: true` in the DaemonSet spec) so that PIDs from all containers are visible.
+
+Pelagos v0.65.6 does not implement the `hostPID` (CRI: `namespace_options.pid = NODE`) pod spec field — every container gets its own isolated PID namespace regardless. This means the SPIRE agent's PID namespace is isolated from workload containers. When `getsockopt(SO_PEERCRED)` is called from inside the isolated namespace, the calling process's PID is not visible and returns 0, which SPIRE rejects.
+
+Confirmed by inspecting `NSpid` in `/proc/<pid>/status`:
+- `spire-agent` process (hostPID=true): `NSpid: 20289 1` — **two entries, separate PID namespace**
+- host systemd (pid 1): `NSpid: 1` — one entry, initial namespace
+
+Filed as Pelagos issue [#299](https://github.com/pelagos-containers/pelagos/issues/299). Steps to verify workload attestation is working once fixed:
+1. `kubectl apply -f experiments/11-spire/demo-namespace.yaml`
+2. `kubectl apply -f experiments/11-spire/demo-registration-rbac.yaml`
+3. `kubectl apply -f experiments/11-spire/demo-registration-job.yaml`
+4. Wait for job to complete, then: `kubectl apply -f experiments/11-spire/demo-workload.yaml`
+5. `kubectl logs -n spire-demo demo-workload --all-containers`
 
 ### Phase 3 — mTLS between workloads (follow-on experiment)
 - Two services; each gets a SPIFFE ID
@@ -106,8 +120,9 @@ Check agent health on a node: `kubectl exec -n spire daemonset/spire-agent -- /o
 | Decision | Choice | Reason |
 |----------|--------|--------|
 | Node attestor | `k8s_psat` | No TPM, no cloud — PSAT is the standard for bare-metal k3s |
-| Workload attestor | `k8s` | Maps PID → pod via CRI socket |
-| Cgroup parsing | verify at runtime | Pelagos cgroup path format may need `container_id_cgroup_matchers` |
+| Workload attestor | `k8s` | Maps PID → pod via kubelet API; requires host PID namespace |
+| Cgroup parsing | `use_new_container_locator=true` + 32-char matcher | Pelagos uses 32-char hex IDs; legacy locator expects 64-char Docker IDs |
+| `hostPID` support | blocked on Pelagos | Pelagos ignores `hostPID: true`; SPIRE agent gets isolated PID namespace, workload attestation fails (Pelagos issue filed) |
 | Trust domain | `ipc.local` | Matches cluster naming convention |
 | CA storage | NFS PVC | Persistent across server restarts; only storage class available |
 | Server port | 8081 | SPIRE default |
