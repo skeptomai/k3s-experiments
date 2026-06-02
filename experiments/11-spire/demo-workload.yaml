@@ -22,34 +22,30 @@ spec:
           mountPath: /run/spire/sockets
           readOnly: true
 
-    # Fetch the X.509 SVID from the Workload API and write it to a shared volume.
-    # The spire-agent image is distroless (no shell), so we invoke the binary directly.
-    - name: fetch-svid
+    # Copy the spire-agent binary (distroless image) into a shared emptyDir
+    # so the main container can invoke it.
+    - name: copy-spire-bin
       image: ghcr.io/spiffe/spire-agent:1.9.6
-      command:
-        - /opt/spire/bin/spire-agent
-        - api
-        - fetch
-        - x509
-        - -socketPath
-        - /run/spire/sockets/agent.sock
-        - -write
-        - /tmp/svids
+      command: ["cp", "/opt/spire/bin/spire-agent", "/spire-bin/spire-agent"]
       volumeMounts:
-        - name: spire-agent-socket
-          mountPath: /run/spire/sockets
-          readOnly: true
-        - name: svids
-          mountPath: /tmp/svids
+        - name: spire-bin
+          mountPath: /spire-bin
 
   containers:
+    # Main container: fetch SVID using the copied binary, then inspect with openssl.
+    # Running as the main container (not an init container) avoids the race condition
+    # where the kubelet may not have registered the container ID in initContainerStatuses
+    # before the SPIRE workload attestor queries it.
     - name: demo
       image: ubuntu:22.04
       command: ["bash", "-c"]
       args:
         - |
+          set -e
           echo "=== Fetching X.509 SVID from Workload API ==="
-          ls /tmp/svids/
+          /opt/spire/bin/spire-agent api fetch x509 \
+            -socketPath /run/spire/sockets/agent.sock \
+            -write /tmp/svids
 
           echo ""
           echo "=== SPIFFE ID from SVID ==="
@@ -66,15 +62,22 @@ spec:
           openssl x509 -in /tmp/svids/bundle.0.pem -noout \
             -subject -dates
       volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+        - name: spire-bin
+          mountPath: /opt/spire/bin
+          readOnly: true
         - name: svids
           mountPath: /tmp/svids
-          readOnly: true
 
   volumes:
     - name: spire-agent-socket
       hostPath:
         path: /run/spire/sockets
         type: Directory
+    - name: spire-bin
+      emptyDir: {}
     - name: svids
       emptyDir: {}
 
