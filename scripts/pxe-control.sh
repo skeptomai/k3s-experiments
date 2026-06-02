@@ -2,7 +2,7 @@
 # Controls PXE autoinstall for ipc nodes by enabling/disabling MAC boot files
 # on the netboot.xyz TFTP server.
 #
-# Run on nazgul. Enabling a node causes it to autoinstall Ubuntu on next PXE boot.
+# Run from omen. Enabling a node causes it to autoinstall Ubuntu on next PXE boot.
 # Disabling a node causes it to fall through to local disk on next PXE boot.
 #
 # Usage:
@@ -12,6 +12,11 @@
 #
 # Requires BIOS boot order: PXE first, local disk second.
 set -euo pipefail
+
+# If not running on nazgul, re-exec via SSH
+if [ "$(hostname)" != "nazgul" ]; then
+    exec ssh root@nazgul "bash ~/pxe-control.sh $*"
+fi
 
 MENUS=/mnt/.ix-apps/app_mounts/netbootxyz/config/menus
 

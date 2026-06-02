@@ -9,6 +9,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 NAZGUL_MENUS="root@nazgul:/mnt/.ix-apps/app_mounts/netbootxyz/config/menus"
 NAZGUL_AUTOINSTALL="root@nazgul:/mnt/primary_storage/pxe_assets/autoinstall"
 
+echo "Deploying pxe-control.sh to nazgul..."
+scp "$REPO/scripts/pxe-control.sh" "root@nazgul:~/pxe-control.sh"
+
 echo "Deploying MAC iPXE boot scripts..."
 for f in "$REPO"/pxe/MAC-*.ipxe; do
     name="$(basename "$f")"
