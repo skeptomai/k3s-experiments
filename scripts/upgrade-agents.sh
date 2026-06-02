@@ -26,8 +26,12 @@ for agent in "${AGENTS[@]}"; do
     ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"$agent" \
         "curl -sfL https://get.k3s.io | sudo K3S_URL=$SERVER_URL K3S_TOKEN=$TOKEN INSTALL_K3S_CHANNEL=$CHANNEL sh -"
     echo "Done: $agent"
+
+    echo "=== Clearing stale node password secret for $agent ==="
+    ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
+        "sudo kubectl delete secret ${agent}.node-password.k3s -n kube-system 2>/dev/null && echo Deleted || echo Not present, skipping"
 done
 
 echo ""
-echo "=== Node status ==="
-ssh -o StrictHostKeyChecking=no cb@"$SERVER" "sudo kubectl get nodes"
+echo "=== Installing Pelagos CRI on agents ==="
+"$(dirname "$0")/install-pelagos.sh" "${AGENTS[@]}"
