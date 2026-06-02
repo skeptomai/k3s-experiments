@@ -14,6 +14,7 @@ data:
       # Bundle file is mounted from the spire-bundle ConfigMap; the server's
       # k8s_bundle Notifier writes bundle.crt into it after startup.
       trust_bundle_path = "/run/spire/bundle/bundle.crt"
+      socket_path = "/run/spire/sockets/agent.sock"
     }
 
     plugins {
