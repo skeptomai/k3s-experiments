@@ -11,7 +11,7 @@ metadata:
   name: spire-server
 rules:
   - apiGroups: [""]
-    resources: ["nodes"]
+    resources: ["nodes", "pods"]
     verbs: ["get"]
   - apiGroups: ["authentication.k8s.io"]
     resources: ["tokenreviews"]
