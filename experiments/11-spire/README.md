@@ -58,7 +58,7 @@ ipc1 (control-plane)          ipc2, ipc3 (workers)
                               └──────────────────────────┘
 ```
 
-**Pelagos note**: the k8s workload attestor resolves PIDs to pods by reading `/proc/<pid>/cgroup` to extract a container ID, then querying the kubelet `/pods` API. It does not use the CRI socket. The cgroup path format is runtime-dependent — Pelagos may produce paths that differ from what SPIRE's built-in parser expects. If workload attestation fails, inspect the cgroup path inside a running pod and configure `container_id_cgroup_matchers` with a matching regex.
+**Pelagos note**: see "Pelagos compatibility" section below for the two issues encountered and how they were resolved.
 
 ## Phases
 
@@ -69,24 +69,59 @@ ipc1 (control-plane)          ipc2, ipc3 (workers)
 - Verify: `spire-server healthcheck` and `spire-agent healthcheck` both pass
 - Verify: all three nodes show as attested in `spire-server agent list`
 
-### Phase 2 — Workload identity (blocked on Pelagos hostPID bug)
+### Phase 2 — Workload identity ✓
 
-Manifests exist (`demo-namespace.yaml`, `demo-registration-rbac.yaml`, `demo-registration-job.yaml`, `demo-workload.yaml`) and the registration entries are deployed. The workload pod can connect to the socket, but SPIRE fails at the first step of workload attestation with `"could not resolve caller information"`.
+The demo workload successfully fetches an X.509 SVID from the SPIFFE Workload API. The SVID is issued by the SPIRE server, signed with the cluster's trust domain CA (`ipc.local`), and carries the SPIFFE ID `spiffe://ipc.local/demo-app`. See "Pelagos compatibility" below for the two issues encountered during implementation.
 
-**Root cause**: SPIRE's k8s workload attestor identifies the calling process by reading `SO_PEERCRED` on the Workload API Unix socket. The PID it receives is then resolved against `/proc/<pid>/cgroup` to map the process to a container. This requires the SPIRE agent to share the **host PID namespace** (set via `hostPID: true` in the DaemonSet spec) so that PIDs from all containers are visible.
-
-Pelagos v0.65.6 does not implement the `hostPID` (CRI: `namespace_options.pid = NODE`) pod spec field — every container gets its own isolated PID namespace regardless. This means the SPIRE agent's PID namespace is isolated from workload containers. When `getsockopt(SO_PEERCRED)` is called from inside the isolated namespace, the calling process's PID is not visible and returns 0, which SPIRE rejects.
-
-Confirmed by inspecting `NSpid` in `/proc/<pid>/status`:
-- `spire-agent` process (hostPID=true): `NSpid: 20289 1` — **two entries, separate PID namespace**
-- host systemd (pid 1): `NSpid: 1` — one entry, initial namespace
-
-Filed as Pelagos issue [#299](https://github.com/pelagos-containers/pelagos/issues/299). Steps to verify workload attestation is working once fixed:
+Apply manifests:
 1. `kubectl apply -f experiments/11-spire/demo-namespace.yaml`
 2. `kubectl apply -f experiments/11-spire/demo-registration-rbac.yaml`
 3. `kubectl apply -f experiments/11-spire/demo-registration-job.yaml`
 4. Wait for job to complete, then: `kubectl apply -f experiments/11-spire/demo-workload.yaml`
-5. `kubectl logs -n spire-demo demo-workload --all-containers`
+5. `kubectl logs -n spire-demo demo-workload`
+
+Expected output includes:
+```
+Received 1 svid after 2.015399ms
+
+SPIFFE ID:    spiffe://ipc.local/demo-app
+SVID Valid After:  2026-06-02 20:41:13 +0000 UTC
+SVID Valid Until:  2026-06-02 21:41:23 +0000 UTC
+...
+URI:spiffe://ipc.local/demo-app
+```
+
+## Pelagos compatibility
+
+Two issues were encountered with the Pelagos container runtime.
+
+### Issue 1: hostPID not implemented (Pelagos #299, fixed in v0.65.7)
+
+SPIRE's k8s workload attestor reads `SO_PEERCRED` on the Workload API Unix socket to get the calling process's PID, then resolves that PID against `/proc/<pid>/cgroup`. This requires the agent to share the **host PID namespace** (`hostPID: true`) so that workload PIDs are visible from the agent.
+
+Pelagos v0.65.6 ignored the `hostPID` field (CRI: `namespace_options.pid = NODE`) and isolated every container into its own PID namespace. `SO_PEERCRED` returned PID 0 (cross-namespace), which SPIRE rejected.
+
+**Fix**: Pelagos v0.65.7 implements `hostPID: true` via a `--no-pid-ns` flag. Verified via `NSpid` in `/proc/<pid>/status` — the agent now shows a single entry (initial namespace).
+
+### Issue 2: 32-char container IDs incompatible with SPIRE's k8s WorkloadAttestor
+
+After fixing hostPID, workload attestation still failed with `no identity issued`. Enabling `verbose_container_locator_logs = true` revealed:
+
+```
+PID cgroup enumerated path=/../../pod<uid>/<32-char-id>
+PID attested to have selectors selectors="[]"
+```
+
+SPIRE's `pkg/common/containerinfo/extract.go` uses a hardcoded regex:
+```go
+reContainerID = regexp.MustCompile(`\b([[:xdigit:]]{64})\b`)
+```
+
+Pelagos uses 32-character hex container IDs. SPIRE's regex requires exactly 64 characters. This is hardcoded through at least SPIRE v1.14 — there is no `container_id_cgroup_matchers` in the k8s WorkloadAttestor (that field exists only in the Docker attestor).
+
+**Workaround**: add the `unix` WorkloadAttestor alongside `k8s`. The unix attestor attests workloads by uid/gid/path without reading container IDs. Register a workload entry with `unix:uid:0` (the demo workload runs as root in ubuntu:22.04). The k8s selector entry is retained as documentation of the intended approach.
+
+This is appropriate for a learning cluster. For production, either patch SPIRE's regex or have Pelagos use 64-char container IDs.
 
 ### Phase 3 — mTLS between workloads (follow-on experiment)
 - Two services; each gets a SPIFFE ID
@@ -120,9 +155,9 @@ Check agent health on a node: `kubectl exec -n spire daemonset/spire-agent -- /o
 | Decision | Choice | Reason |
 |----------|--------|--------|
 | Node attestor | `k8s_psat` | No TPM, no cloud — PSAT is the standard for bare-metal k3s |
-| Workload attestor | `k8s` | Maps PID → pod via kubelet API; requires host PID namespace |
-| Cgroup parsing | `use_new_container_locator=true` + 32-char matcher | Pelagos uses 32-char hex IDs; legacy locator expects 64-char Docker IDs |
-| `hostPID` support | blocked on Pelagos | Pelagos ignores `hostPID: true`; SPIRE agent gets isolated PID namespace, workload attestation fails (Pelagos issue filed) |
+| Workload attestor | `k8s` + `unix` | `k8s` is the ideal approach; `unix` is the workaround for Pelagos 32-char IDs (see compatibility notes) |
+| Container locator | `use_new_container_locator=true` + `verbose_container_locator_logs=true` | New locator tries mountinfo first; verbose logs revealed the 32-char ID mismatch |
+| `hostPID` support | Fixed in Pelagos v0.65.7 | v0.65.6 isolated every container; v0.65.7 implements `--no-pid-ns` for `hostPID: true` pods |
 | Trust domain | `ipc.local` | Matches cluster naming convention |
 | CA storage | NFS PVC | Persistent across server restarts; only storage class available |
 | Server port | 8081 | SPIRE default |
