@@ -7,7 +7,7 @@ data:
   agent.conf: |
     agent {
       data_dir = "/run/spire/data"
-      log_level = "INFO"
+      log_level = "DEBUG"
       trust_domain = "ipc.local"
       server_address = "spire-server"
       server_port = "8081"
@@ -30,20 +30,10 @@ data:
 
       WorkloadAttestor "k8s" {
         plugin_data {
-          # Uses the kubelet /pods API to map PID→cgroup→container→pod.
-          # skip_kubelet_verification bypasses the kubelet's serving cert check
-          # (self-signed on k3s nodes).
-          #
-          # Pelagos uses 32-char hex container IDs (not the standard 64-char Docker
-          # format). The legacy locator only matches 64-char IDs, so we use the new
-          # locator with an explicit matcher for Pelagos cgroup paths:
-          #   /kubepods/<qos>/pod<uid>/<32-char-id>
           node_name_env = "MY_NODE_NAME"
           skip_kubelet_verification = true
           use_new_container_locator = true
-          container_id_cgroup_matchers = [
-            "/kubepods/[^/]+/[^/]+/([0-9a-f]{32})$",
-          ]
+          verbose_container_locator_logs = true
         }
       }
     }
