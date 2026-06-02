@@ -6,7 +6,7 @@ metadata:
 spec:
   serviceAccountName: demo-sa
   initContainers:
-    # Wait for the agent socket to exist on this node.
+    # Wait for the agent socket on this node.
     - name: init-socket
       image: busybox:1.36
       command: ["sh", "-c"]
@@ -22,28 +22,31 @@ spec:
           mountPath: /run/spire/sockets
           readOnly: true
 
-    # Copy the spire-agent binary (distroless image) into a shared emptyDir
-    # so the main container can invoke it.
-    - name: copy-spire-bin
-      image: ghcr.io/spiffe/spire-agent:1.9.6
-      command: ["cp", "/opt/spire/bin/spire-agent", "/spire-bin/spire-agent"]
-      volumeMounts:
-        - name: spire-bin
-          mountPath: /spire-bin
-
   containers:
-    # Main container: fetch SVID using the copied binary, then inspect with openssl.
-    # Running as the main container (not an init container) avoids the race condition
-    # where the kubelet may not have registered the container ID in initContainerStatuses
-    # before the SPIRE workload attestor queries it.
+    # Main container: ubuntu with curl + openssl. Downloads the spire-agent
+    # binary at startup, fetches the SVID via the Workload API, then inspects
+    # it with openssl. Running as the main container (not an init container)
+    # avoids the race where the kubelet hasn't yet registered the container's
+    # ID in initContainerStatuses before the SPIRE attestor queries it.
     - name: demo
       image: ubuntu:22.04
       command: ["bash", "-c"]
       args:
         - |
           set -e
+          echo "=== Installing tools ==="
+          apt-get update -qq && apt-get install -y --no-install-recommends curl openssl ca-certificates 2>/dev/null | tail -3
+
+          echo ""
+          echo "=== Downloading spire-agent binary ==="
+          curl -sL https://github.com/spiffe/spire/releases/download/v1.9.6/spire-1.9.6-linux-amd64-musl.tar.gz \
+            | tar -xz --strip-components=2 -C /usr/local/bin spire-1.9.6/bin/spire-agent
+          chmod +x /usr/local/bin/spire-agent
+
+          echo ""
           echo "=== Fetching X.509 SVID from Workload API ==="
-          /opt/spire/bin/spire-agent api fetch x509 \
+          mkdir -p /tmp/svids
+          spire-agent api fetch x509 \
             -socketPath /run/spire/sockets/agent.sock \
             -write /tmp/svids
 
@@ -65,20 +68,11 @@ spec:
         - name: spire-agent-socket
           mountPath: /run/spire/sockets
           readOnly: true
-        - name: spire-bin
-          mountPath: /opt/spire/bin
-          readOnly: true
-        - name: svids
-          mountPath: /tmp/svids
 
   volumes:
     - name: spire-agent-socket
       hostPath:
         path: /run/spire/sockets
         type: Directory
-    - name: spire-bin
-      emptyDir: {}
-    - name: svids
-      emptyDir: {}
 
   restartPolicy: Never
