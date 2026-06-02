@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-workload
+  namespace: spire-demo
+spec:
+  serviceAccountName: demo-sa
+  # Wait for the agent socket to exist before starting — the agent DaemonSet
+  # creates /run/spire/sockets/agent.sock on each host.
+  initContainers:
+    - name: init-socket
+      image: busybox:1.36
+      command: ["sh", "-c"]
+      args:
+        - |
+          until [ -S /run/spire/sockets/agent.sock ]; do
+            echo "Waiting for SPIRE agent socket..."
+            sleep 2
+          done
+          echo "Socket ready."
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+  containers:
+    - name: demo
+      image: ghcr.io/spiffe/spire-agent:1.9.6
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          echo "=== Fetching X.509 SVID from Workload API ==="
+          /opt/spire/bin/spire-agent api fetch x509 \
+            -socketPath /run/spire/sockets/agent.sock \
+            -write /tmp/svids
+
+          echo ""
+          echo "=== SPIFFE ID from SVID ==="
+          openssl x509 -in /tmp/svids/svid.0.pem -noout -text \
+            | grep -A1 "Subject Alternative Name" | grep URI
+
+          echo ""
+          echo "=== Certificate details ==="
+          openssl x509 -in /tmp/svids/svid.0.pem -noout \
+            -subject -issuer -dates
+
+          echo ""
+          echo "=== Bundle (trust domain CA) ==="
+          openssl x509 -in /tmp/svids/bundle.0.pem -noout \
+            -subject -dates
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+  volumes:
+    - name: spire-agent-socket
+      hostPath:
+        path: /run/spire/sockets
+        type: Directory
+  restartPolicy: Never

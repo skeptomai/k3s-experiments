@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spire-register-demo
+  namespace: spire
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      serviceAccountName: spire-registrar
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: bitnami/kubectl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+
+              SERVER="statefulset/spire-server"
+              NS="-n spire"
+              BIN="/opt/spire/bin/spire-server entry create"
+
+              echo "=== Creating node alias for all k8s_psat agents in cluster ipc ==="
+              # This alias means: any attested agent in our cluster can issue SVIDs
+              # to workloads whose entries have this alias as their parentID.
+              # Without this, you'd need a separate entry per node UID.
+              kubectl exec $NS $SERVER -- $BIN \
+                -spiffeID spiffe://ipc.local/k8s-node \
+                -parentID spiffe://ipc.local/spire/server \
+                -selector k8s_psat:cluster:ipc \
+                -node \
+              && echo "Node alias created." || echo "Node alias may already exist, continuing."
+
+              echo ""
+              echo "=== Creating workload entry for spire-demo/demo-sa ==="
+              # Any pod in namespace spire-demo running under service account demo-sa
+              # will receive the SVID spiffe://ipc.local/demo-app.
+              kubectl exec $NS $SERVER -- $BIN \
+                -spiffeID spiffe://ipc.local/demo-app \
+                -parentID spiffe://ipc.local/k8s-node \
+                -selector k8s:ns:spire-demo \
+                -selector k8s:sa:demo-sa \
+              && echo "Workload entry created." || echo "Workload entry may already exist."
+
+              echo ""
+              echo "=== Current registration entries ==="
+              kubectl exec $NS $SERVER -- /opt/spire/bin/spire-server entry show
