@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-agent
+  namespace: spire
+data:
+  agent.conf: |
+    agent {
+      data_dir = "/run/spire/data"
+      log_level = "INFO"
+      trust_domain = "ipc.local"
+      server_address = "spire-server"
+      server_port = "8081"
+      # Bootstrap the agent's trust from the bundle ConfigMap written by the server
+      trust_bundle_configmap = "spire-bundle"
+      trust_bundle_configmap_namespace = "spire"
+    }
+
+    plugins {
+      NodeAttestor "k8s_psat" {
+        plugin_data {
+          cluster = "ipc"
+        }
+      }
+
+      KeyManager "memory" {
+        plugin_data {}
+      }
+
+      WorkloadAttestor "k8s" {
+        plugin_data {
+          # Pelagos CRI socket — this cluster uses Pelagos instead of containerd
+          node_name_env = "MY_NODE_NAME"
+          skip_kubelet_verification = true
+        }
+      }
+    }
+
+    health_checks {
+      listener_enabled = true
+      bind_address = "0.0.0.0"
+      bind_port = "8080"
+      live_path = "/live"
+      ready_path = "/ready"
+    }
