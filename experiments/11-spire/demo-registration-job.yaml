@@ -17,7 +17,7 @@ spec:
             - |
               set -e
 
-              SERVER="statefulset/spire-server"
+              SERVER="pod/spire-server-0"
               NS="-n spire"
               BIN="/opt/spire/bin/spire-server entry create"
 
@@ -45,4 +45,4 @@ spec:
 
               echo ""
               echo "=== Current registration entries ==="
-              kubectl exec $NS $SERVER -- /opt/spire/bin/spire-server entry show
+              kubectl exec $NS pod/spire-server-0 -- /opt/spire/bin/spire-server entry show
