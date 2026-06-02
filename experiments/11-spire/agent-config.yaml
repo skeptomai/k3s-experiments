@@ -7,7 +7,7 @@ data:
   agent.conf: |
     agent {
       data_dir = "/run/spire/data"
-      log_level = "INFO"
+      log_level = "DEBUG"
       trust_domain = "ipc.local"
       server_address = "spire-server"
       server_port = "8081"
