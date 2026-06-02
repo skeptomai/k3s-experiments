@@ -11,9 +11,6 @@ data:
       trust_domain = "ipc.local"
       data_dir = "/run/spire/data"
       log_level = "INFO"
-      # Publish the CA bundle into a ConfigMap so agents can bootstrap
-      ca_bundle_configmap = "spire-bundle"
-      ca_bundle_configmap_namespace = "spire"
     }
 
     plugins {
@@ -44,6 +41,7 @@ data:
         plugin_data {
           namespace = "spire"
           config_map = "spire-bundle"
+          config_map_key = "bundle.crt"
         }
       }
     }

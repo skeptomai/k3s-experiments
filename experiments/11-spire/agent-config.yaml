@@ -11,9 +11,9 @@ data:
       trust_domain = "ipc.local"
       server_address = "spire-server"
       server_port = "8081"
-      # Bootstrap the agent's trust from the bundle ConfigMap written by the server
-      trust_bundle_configmap = "spire-bundle"
-      trust_bundle_configmap_namespace = "spire"
+      # Bundle file is mounted from the spire-bundle ConfigMap; the server's
+      # k8s_bundle Notifier writes bundle.crt into it after startup.
+      trust_bundle_path = "/run/spire/bundle/bundle.crt"
     }
 
     plugins {

@@ -15,18 +15,23 @@ spec:
       serviceAccountName: spire-agent
       hostPID: true  # required: workload attestor resolves PIDs to pods
       initContainers:
-        # Wait until the server has written its bundle before the agent starts
+        # Wait until the server has written bundle.crt into the spire-bundle ConfigMap.
+        # Kubernetes syncs ConfigMap volume mounts when the ConfigMap changes; the file
+        # appears once the server's k8s_bundle Notifier has run.
         - name: init-bundle
-          image: ghcr.io/spiffe/spire-agent:1.9.6
-          command:
-            - /bin/sh
-            - -c
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
             - |
-              until kubectl get configmap -n spire spire-bundle -o jsonpath='{.data.bundle\.crt}' 2>/dev/null | grep -q 'BEGIN CERTIFICATE'; do
-                echo "Waiting for spire-bundle to be populated..."
+              until [ -s /run/spire/bundle/bundle.crt ]; do
+                echo "Waiting for spire-bundle..."
                 sleep 5
               done
               echo "Bundle ready."
+          volumeMounts:
+            - name: spire-bundle
+              mountPath: /run/spire/bundle
+              readOnly: true
       containers:
         - name: spire-agent
           image: ghcr.io/spiffe/spire-agent:1.9.6
