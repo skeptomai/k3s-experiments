@@ -7,7 +7,7 @@ data:
   agent.conf: |
     agent {
       data_dir = "/run/spire/data"
-      log_level = "DEBUG"
+      log_level = "INFO"
       trust_domain = "ipc.local"
       server_address = "spire-server"
       server_port = "8081"
@@ -33,12 +33,7 @@ data:
           node_name_env = "MY_NODE_NAME"
           skip_kubelet_verification = true
           use_new_container_locator = true
-          verbose_container_locator_logs = true
         }
-      }
-
-      WorkloadAttestor "unix" {
-        plugin_data {}
       }
     }
 

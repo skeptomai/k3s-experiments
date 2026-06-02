@@ -103,7 +103,7 @@ Pelagos v0.65.6 ignored the `hostPID` field (CRI: `namespace_options.pid = NODE`
 
 **Fix**: Pelagos v0.65.7 implements `hostPID: true` via a `--no-pid-ns` flag. Verified via `NSpid` in `/proc/<pid>/status` — the agent now shows a single entry (initial namespace).
 
-### Issue 2: 32-char container IDs incompatible with SPIRE's k8s WorkloadAttestor
+### Issue 2: 32-char container IDs incompatible with SPIRE's k8s WorkloadAttestor (fixed in Pelagos v0.65.8)
 
 After fixing hostPID, workload attestation still failed with `no identity issued`. Enabling `verbose_container_locator_logs = true` revealed:
 
@@ -112,16 +112,9 @@ PID cgroup enumerated path=/../../pod<uid>/<32-char-id>
 PID attested to have selectors selectors="[]"
 ```
 
-SPIRE's `pkg/common/containerinfo/extract.go` uses a hardcoded regex:
-```go
-reContainerID = regexp.MustCompile(`\b([[:xdigit:]]{64})\b`)
-```
+SPIRE's `pkg/common/containerinfo/extract.go` uses a hardcoded regex requiring exactly 64-char hex container IDs — the de facto standard set by containerd and CRI-O, which generate IDs as 32 random bytes encoded as hex. Pelagos was generating IDs using `uuid::Uuid::new_v4().simple()` (128-bit UUID, 32 hex chars), which is incompatible with SPIRE and the broader ecosystem (Fluentd, Fluent Bit, OpenTelemetry, Datadog, Falco all share the same assumption).
 
-Pelagos uses 32-character hex container IDs. SPIRE's regex requires exactly 64 characters. This is hardcoded through at least SPIRE v1.14 — there is no `container_id_cgroup_matchers` in the k8s WorkloadAttestor (that field exists only in the Docker attestor).
-
-**Workaround**: add the `unix` WorkloadAttestor alongside `k8s`. The unix attestor attests workloads by uid/gid/path without reading container IDs. Register a workload entry with `unix:uid:0` (the demo workload runs as root in ubuntu:22.04). The k8s selector entry is retained as documentation of the intended approach.
-
-This is appropriate for a learning cluster. For production, either patch SPIRE's regex or have Pelagos use 64-char container IDs.
+Filed as [Pelagos #301](https://github.com/pelagos-containers/pelagos/issues/301). Fixed in Pelagos v0.65.8: container and sandbox IDs are now generated as 32 random bytes via `/dev/urandom`, hex-encoded to 64 characters — matching containerd/CRI-O exactly.
 
 ### Phase 3 — mTLS between workloads (follow-on experiment)
 - Two services; each gets a SPIFFE ID
@@ -155,8 +148,8 @@ Check agent health on a node: `kubectl exec -n spire daemonset/spire-agent -- /o
 | Decision | Choice | Reason |
 |----------|--------|--------|
 | Node attestor | `k8s_psat` | No TPM, no cloud — PSAT is the standard for bare-metal k3s |
-| Workload attestor | `k8s` + `unix` | `k8s` is the ideal approach; `unix` is the workaround for Pelagos 32-char IDs (see compatibility notes) |
-| Container locator | `use_new_container_locator=true` + `verbose_container_locator_logs=true` | New locator tries mountinfo first; verbose logs revealed the 32-char ID mismatch |
+| Workload attestor | `k8s` | Maps PID → pod via kubelet API; requires host PID namespace |
+| Container locator | `use_new_container_locator=true` | New locator tries mountinfo first, falls back to cgroup |
 | `hostPID` support | Fixed in Pelagos v0.65.7 | v0.65.6 isolated every container; v0.65.7 implements `--no-pid-ns` for `hostPID: true` pods |
 | Trust domain | `ipc.local` | Matches cluster naming convention |
 | CA storage | NFS PVC | Persistent across server restarts; only storage class available |
