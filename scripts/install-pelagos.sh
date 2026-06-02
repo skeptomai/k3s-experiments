@@ -8,20 +8,34 @@
 # systemd unit, and deploys the canonical k3s config from config/k3s-server.yaml
 # or config/k3s-agent.yaml in the repo root. Safe to run multiple times (idempotent).
 #
-# Usage: ./install-pelagos.sh [node...]
+# Usage: ./install-pelagos.sh [--version vX.Y.Z] [node...]
+#   --version: pin a specific release (default: latest)
 #   node: ipc1 | ipc2 | ipc3 (default: ipc1 ipc2 ipc3)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 DEFAULT_NODES=(ipc1 ipc2 ipc3)
-NODES=("${@:-${DEFAULT_NODES[@]}}")
 
-echo "=== Fetching latest Pelagos release ==="
-LATEST=$(gh release list --repo pelagos-containers/pelagos --limit 1 --json tagName --jq '.[0].tagName')
+VERSION_PIN=""
+NODES=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --version) VERSION_PIN="$2"; shift 2 ;;
+        *) NODES+=("$1"); shift ;;
+    esac
+done
+[[ ${#NODES[@]} -eq 0 ]] && NODES=("${DEFAULT_NODES[@]}")
+
+echo "=== Fetching Pelagos release ==="
+if [[ -n "$VERSION_PIN" ]]; then
+    LATEST="$VERSION_PIN"
+else
+    LATEST=$(gh release list --repo pelagos-containers/pelagos --limit 1 --json tagName --jq '.[0].tagName')
+fi
 DEB_URL=$(gh release view "$LATEST" --repo pelagos-containers/pelagos --json assets \
     --jq '.assets[] | select(.name | test("amd64[.]deb")) | .url')
-echo "Latest: $LATEST  deb: $DEB_URL"
+echo "Version: $LATEST  deb: $DEB_URL"
 
 install_node() {
     local node=$1
