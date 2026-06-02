@@ -50,9 +50,6 @@ spec:
               mountPath: /run/spire/sockets
             - name: spire-token
               mountPath: /var/run/secrets/tokens
-            - name: pelagos-socket
-              mountPath: /run/pelagos/cri.sock
-              readOnly: true
           livenessProbe:
             httpGet:
               path: /live
@@ -83,7 +80,3 @@ spec:
                   path: spire-agent
                   expirationSeconds: 7200
                   audience: spire-server
-        - name: pelagos-socket
-          hostPath:
-            path: /run/pelagos/cri.sock
-            type: Socket

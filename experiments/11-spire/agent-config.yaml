@@ -29,7 +29,11 @@ data:
 
       WorkloadAttestor "k8s" {
         plugin_data {
-          # Pelagos CRI socket — this cluster uses Pelagos instead of containerd
+          # Uses the kubelet /pods API to map PID→cgroup→container→pod.
+          # skip_kubelet_verification bypasses the kubelet's serving cert check
+          # (self-signed on k3s nodes). The cgroup path format is Pelagos-dependent —
+          # if workload attestation fails, check /proc/<pid>/cgroup inside a pod
+          # and compare against SPIRE's container_id_cgroup_matchers patterns.
           node_name_env = "MY_NODE_NAME"
           skip_kubelet_verification = true
         }

@@ -44,7 +44,7 @@ ipc1 (control-plane)          ipc2, ipc3 (workers)
                               └──────────────────────────┘
 ```
 
-**Pelagos note**: the k8s workload attestor needs to talk to the CRI socket to resolve PIDs to pods. This cluster uses Pelagos at `/run/pelagos/cri.sock` instead of containerd. The agent DaemonSet mounts that socket and the attestor is configured to use it.
+**Pelagos note**: the k8s workload attestor resolves PIDs to pods by reading `/proc/<pid>/cgroup` to extract a container ID, then querying the kubelet `/pods` API. It does not use the CRI socket. The cgroup path format is runtime-dependent — Pelagos may produce paths that differ from what SPIRE's built-in parser expects. If workload attestation fails, inspect the cgroup path inside a running pod and configure `container_id_cgroup_matchers` with a matching regex.
 
 ## Phases
 
@@ -93,7 +93,7 @@ Check agent health on a node: `kubectl exec -n spire daemonset/spire-agent -- /o
 |----------|--------|--------|
 | Node attestor | `k8s_psat` | No TPM, no cloud — PSAT is the standard for bare-metal k3s |
 | Workload attestor | `k8s` | Maps PID → pod via CRI socket |
-| CRI socket | `/run/pelagos/cri.sock` | This cluster runs Pelagos, not containerd |
+| Cgroup parsing | verify at runtime | Pelagos cgroup path format may need `container_id_cgroup_matchers` |
 | Trust domain | `ipc.local` | Matches cluster naming convention |
 | CA storage | NFS PVC | Persistent across server restarts; only storage class available |
 | Server port | 8081 | SPIRE default |
