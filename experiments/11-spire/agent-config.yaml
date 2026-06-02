@@ -36,6 +36,10 @@ data:
           verbose_container_locator_logs = true
         }
       }
+
+      WorkloadAttestor "unix" {
+        plugin_data {}
+      }
     }
 
     health_checks {

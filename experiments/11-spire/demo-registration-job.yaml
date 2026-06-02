@@ -33,15 +33,28 @@ spec:
               && echo "Node alias created." || echo "Node alias may already exist, continuing."
 
               echo ""
-              echo "=== Creating workload entry for spire-demo/demo-sa ==="
-              # Any pod in namespace spire-demo running under service account demo-sa
-              # will receive the SVID spiffe://ipc.local/demo-app.
+              echo "=== Creating workload entry for spire-demo/demo-sa (k8s selectors) ==="
+              # Ideal entry: matched by k8s WorkloadAttestor (ns + serviceaccount).
+              # NOTE: Pelagos uses 32-char container IDs; SPIRE's containerinfo regex
+              # requires 64-char IDs, so this entry never matches on this cluster.
+              # Kept for reference — see README Phase 2 for details.
               kubectl exec $NS $SERVER -- $BIN \
                 -spiffeID spiffe://ipc.local/demo-app \
                 -parentID spiffe://ipc.local/k8s-node \
                 -selector k8s:ns:spire-demo \
                 -selector k8s:sa:demo-sa \
-              && echo "Workload entry created." || echo "Workload entry may already exist."
+              && echo "Workload entry (k8s) created." || echo "Workload entry (k8s) may already exist."
+
+              echo ""
+              echo "=== Creating workload entry for spire-demo/demo-sa (unix selectors) ==="
+              # Workaround entry: matched by unix WorkloadAttestor (uid=0).
+              # Used because Pelagos 32-char container IDs are incompatible with
+              # SPIRE 1.9.6's hardcoded 64-char container ID regex in extract.go.
+              kubectl exec $NS $SERVER -- $BIN \
+                -spiffeID spiffe://ipc.local/demo-app \
+                -parentID spiffe://ipc.local/k8s-node \
+                -selector unix:uid:0 \
+              && echo "Workload entry (unix) created." || echo "Workload entry (unix) may already exist."
 
               echo ""
               echo "=== Current registration entries ==="
