@@ -28,6 +28,20 @@ SPIRE Agent   — runs on every node; attests the node to the server; issues SVI
 
 **Trust domain**: this cluster uses `ipc.local`.
 
+## Trust posture and the server's position in the chain
+
+The SPIRE Server is a **Trusted Computing Base (TCB)** component — it is the root of trust, not a participant in the attestation chain it operates. It does not attest itself to anything; it is trusted implicitly because it runs under a Kubernetes service account (`spire-server`) with tightly scoped RBAC.
+
+This means the server's trust is entirely derived from Kubernetes: if the `spire` namespace or the `spire-server` service account is compromised, the CA is compromised. This is the standard SPIRE deployment model and an accepted posture when the Kubernetes control plane itself is the security boundary.
+
+**What we attest:** agents (via `k8s_psat`) and workloads (via the `k8s` workload attestor). The server is unattested.
+
+**How to harden this if needed:**
+- **Upstream CA**: configure SPIRE with an external CA (e.g. HashiCorp Vault, AWS PCA). The server's signing key material comes from outside the cluster — compromising the server pod doesn't yield a usable CA key.
+- **Nested SPIRE**: a root SPIRE deployment attests the cluster SPIRE server itself, issuing it an SVID. Used in multi-cluster or multi-cloud federations.
+
+For this cluster, the control plane is the trust anchor and that is a deliberate, reasonable position.
+
 ## Architecture on this cluster
 
 ```
