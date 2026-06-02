@@ -5,9 +5,8 @@ metadata:
   namespace: spire-demo
 spec:
   serviceAccountName: demo-sa
-  # Wait for the agent socket to exist before starting — the agent DaemonSet
-  # creates /run/spire/sockets/agent.sock on each host.
   initContainers:
+    # Wait for the agent socket to exist on this node.
     - name: init-socket
       image: busybox:1.36
       command: ["sh", "-c"]
@@ -22,16 +21,35 @@ spec:
         - name: spire-agent-socket
           mountPath: /run/spire/sockets
           readOnly: true
+
+    # Fetch the X.509 SVID from the Workload API and write it to a shared volume.
+    # The spire-agent image is distroless (no shell), so we invoke the binary directly.
+    - name: fetch-svid
+      image: ghcr.io/spiffe/spire-agent:1.9.6
+      command:
+        - /opt/spire/bin/spire-agent
+        - api
+        - fetch
+        - x509
+        - -socketPath
+        - /run/spire/sockets/agent.sock
+        - -write
+        - /tmp/svids
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+        - name: svids
+          mountPath: /tmp/svids
+
   containers:
     - name: demo
-      image: ghcr.io/spiffe/spire-agent:1.9.6
-      command: ["/bin/sh", "-c"]
+      image: ubuntu:22.04
+      command: ["bash", "-c"]
       args:
         - |
           echo "=== Fetching X.509 SVID from Workload API ==="
-          /opt/spire/bin/spire-agent api fetch x509 \
-            -socketPath /run/spire/sockets/agent.sock \
-            -write /tmp/svids
+          ls /tmp/svids/
 
           echo ""
           echo "=== SPIFFE ID from SVID ==="
@@ -48,12 +66,16 @@ spec:
           openssl x509 -in /tmp/svids/bundle.0.pem -noout \
             -subject -dates
       volumeMounts:
-        - name: spire-agent-socket
-          mountPath: /run/spire/sockets
+        - name: svids
+          mountPath: /tmp/svids
           readOnly: true
+
   volumes:
     - name: spire-agent-socket
       hostPath:
         path: /run/spire/sockets
         type: Directory
+    - name: svids
+      emptyDir: {}
+
   restartPolicy: Never
