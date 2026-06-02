@@ -12,11 +12,11 @@ NAZGUL_AUTOINSTALL="root@nazgul:/mnt/primary_storage/pxe_assets/autoinstall"
 echo "Deploying pxe-control.sh to nazgul..."
 scp "$REPO/scripts/pxe-control.sh" "root@nazgul:~/pxe-control.sh"
 
-echo "Deploying MAC iPXE boot scripts..."
+echo "Deploying MAC iPXE boot scripts (as disabled)..."
 for f in "$REPO"/pxe/MAC-*.ipxe; do
     name="$(basename "$f")"
     echo "  $name"
-    scp "$f" "${NAZGUL_MENUS}/${name}"
+    scp "$f" "${NAZGUL_MENUS}/${name}.disabled"
 done
 
 echo "Deploying autoinstall configs..."
