@@ -46,9 +46,18 @@ spec:
           echo ""
           echo "=== Fetching X.509 SVID from Workload API ==="
           mkdir -p /tmp/svids
-          spire-agent api fetch x509 \
-            -socketPath /run/spire/sockets/agent.sock \
-            -write /tmp/svids
+          # Retry loop: the kubelet may not have registered this container's ID in
+          # pod status before the entrypoint runs; SPIRE can't attest us until it has.
+          for i in $(seq 1 15); do
+            if spire-agent api fetch x509 \
+                -socketPath /run/spire/sockets/agent.sock \
+                -write /tmp/svids 2>/tmp/spire-err; then
+              break
+            fi
+            echo "Attempt $i failed: $(cat /tmp/spire-err) — retrying in 2s..."
+            sleep 2
+          done
+          cat /tmp/spire-err 2>/dev/null | grep -v 'no identity' || true
 
           echo ""
           echo "=== SPIFFE ID from SVID ==="
