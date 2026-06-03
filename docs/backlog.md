@@ -58,3 +58,17 @@ and post-install steps to rejoin the ipc node to k3s as a worker.
 - **Cert-manager**: automatic TLS for ingress resources
 - **Longhorn**: alternative distributed block storage (compare to NFS)
 - **GitOps**: ArgoCD or Flux for deploying experiments from this repo automatically
+
+### Natural progressions from experiment 11 (SPIRE)
+
+- **mTLS with SPIRE SVIDs** — use the workload identity we now have to actually encrypt
+  service-to-service traffic. Options: Envoy sidecar proxies, or a minimal Go demo that
+  calls `spiffe-helper` / the SPIFFE Workload API directly. Closes the loop on SPIRE:
+  identity → encryption.
+- **OPA / Gatekeeper** — admission policy enforcement. Fits after RBAC (05) and pairs
+  well with SPIRE (policy can reference SPIFFE IDs).
+- **Horizontal Pod Autoscaler** — builds on resource limits (06). Requires metrics-server
+  (not currently installed). Scale a deployment under synthetic load.
+- **Flux image automation** — Flux is already running for cluster bootstrap; a proper
+  experiment could cover ImageRepository + ImagePolicy + ImageUpdateAutomation to show
+  automated rollout when a new container image is pushed.
