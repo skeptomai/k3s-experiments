@@ -18,10 +18,9 @@ Kubernetes learning cluster on three ipc machines. Scripts and docs for cluster 
 - kubectl requires sudo on the nodes: `sudo kubectl ...`
 - k3s token lives at `/var/lib/rancher/k3s/server/node-token` on ipc1
 
-## Repo Locations on Nodes
+## Applying Manifests
 
-- ipc1: `~/Projects/k3s-experiments` (cloned 2026-05-24)
-- ipc2/ipc3: not cloned — apply via ipc1
+Run `kubectl apply` from omen against the local repo (always current). Do NOT use a clone on ipc1 — it goes stale. Flux manages `manifests/` from GitHub directly; experiments are applied manually from omen via SSH.
 
 ## What Claude Can Do Directly
 
