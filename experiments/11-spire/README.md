@@ -121,19 +121,11 @@ Filed as [Pelagos #301](https://github.com/pelagos-containers/pelagos/issues/301
 - Envoy or spiffe-helper sidecar handles cert rotation and presents the SVID for mTLS
 - No secrets, no cert management — identity is purely attestation-derived
 
-## Apply
+## Deployment
 
-```
-kubectl apply -f experiments/11-spire/namespace.yaml
-kubectl apply -f experiments/11-spire/server-config.yaml
-kubectl apply -f experiments/11-spire/server-rbac.yaml
-kubectl apply -f experiments/11-spire/server-statefulset.yaml
-kubectl apply -f experiments/11-spire/agent-config.yaml
-kubectl apply -f experiments/11-spire/agent-rbac.yaml
-kubectl apply -f experiments/11-spire/agent-daemonset.yaml
-```
+This experiment is deployed and kept in sync by **Flux**. Committing manifests to `master` is sufficient — Flux reconciles the cluster within minutes. There is no need to `kubectl apply` manually.
 
-Or as one line: `kubectl apply -f experiments/11-spire/`
+The one exception is `demo-registration-job.yaml`: this is imperative — it runs `spire-server entry create` to write registration entries into SPIRE's internal store. Flux deploys the Job, but the resulting entries live in SPIRE's database, not in Git. Re-run the job if entries are lost (e.g. after a SPIRE server restart with a wiped PVC).
 
 ## Verify
 
