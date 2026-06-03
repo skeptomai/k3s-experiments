@@ -72,3 +72,11 @@ and post-install steps to rejoin the ipc node to k3s as a worker.
 - **Flux image automation** — Flux is already running for cluster bootstrap; a proper
   experiment could cover ImageRepository + ImagePolicy + ImageUpdateAutomation to show
   automated rollout when a new container image is pushed.
+  **Prerequisite**: requires a workload image we actually build and own. Needs a companion
+  app (trivial Go/Python HTTP server) with a GitHub Actions workflow that builds and pushes
+  to ghcr.io on each commit. Flux watches the registry, not the source repo.
+  **Access model**: Flux needs write access to *this repo* (`k3s-experiments`) to commit
+  image tag bumps to deployment manifests — not to the application source repo. Scope that
+  access carefully (branch or path restriction). The full experiment is really
+  "CI/CD end-to-end": source push → image build → registry → Flux detects → manifest
+  commit → reconcile → deploy.
