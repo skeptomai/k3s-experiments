@@ -38,7 +38,8 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | Script | Purpose |
 |--------|---------|
 | `scripts/upgrade-server.sh [channel]` | Upgrades ipc1 control plane |
-| `scripts/upgrade-agents.sh [channel]` | Upgrades ipc2/ipc3 workers (fetches token automatically) |
+| `scripts/upgrade-agents.sh [channel] [node...]` | Upgrades ipc2/ipc3 workers (fetches token automatically; specify node to target one) |
+| `scripts/reinstall-nodes.sh <node> [node...]` | Full PXE reinstall of worker node(s): enables PXE → reboots → waits → rejoins k3s |
 | `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order |
 | `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (default: all three) |
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
@@ -46,23 +47,28 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 
 ## PXE Reinstall Workflow
 
-All PXE scripts run from omen directly — no manual SSH to nazgul required.
+**Automated (worker nodes only):** `bash scripts/reinstall-nodes.sh ipc2` or `ipc3` — handles the full cycle end-to-end. Claude can run this directly.
 
-1. `bash scripts/deploy-pxe-configs.sh` — sync repo configs to nazgul (deploys iPXE files as **disabled**)
-2. `bash scripts/pxe-control.sh enable <node>` — enable PXE for the node to reinstall
-3. Reboot the node into PXE
-4. `bash scripts/pxe-control.sh disable <node>` — disable PXE after install completes
-5. Clear MikroTik static DHCP lease (stale client-id after reinstall — see below)
+**Manual steps** (only needed for ipc1 or if automated script fails):
+
+1. `bash scripts/deploy-pxe-configs.sh` — sync repo configs to nazgul
+2. `bash scripts/pxe-control.sh enable <node>` — enable PXE for the node
+3. Reboot the node
+4. Wait for autoinstall (~10 min), then `bash scripts/pxe-control.sh disable <node>`
+5. Check DHCP address (see MikroTik note below if wrong)
 6. Clear stale SSH known_hosts on omen
 7. Remove stale Tailscale device; rename new one if it registered as `<node>-1`
+8. `bash scripts/upgrade-agents.sh <node>` — rejoin k3s + install Pelagos
 
 **After ipc1 reinstall** (wipes etcd — full cluster rebuild):
 - Install k3s, Pelagos, rejoin agents, bootstrap Flux (GitHub token in 1Password)
 - Scripts use tailnet hostnames — if Tailscale not yet up, use 192.168.88.53 directly
 
-## MikroTik DHCP Lease Reset (required after every reinstall)
+## MikroTik DHCP Lease Reset
 
-Ubuntu's new machine-id after reinstall doesn't match the cached client-id in the MikroTik static lease, so the node camps on a dynamic address. Fix via MikroTik SSH:
+The autoinstall configs use `dhcp-identifier: mac` in netplan so the DHCP client identifies by MAC address. Static leases should bind correctly without manual intervention.
+
+**If a node gets the wrong IP after reinstall**, the MikroTik static lease needs resetting via MikroTik SSH:
 
 ```
 /ip dhcp-server lease remove [find where address=192.168.88.XX]

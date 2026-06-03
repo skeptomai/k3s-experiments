@@ -7,14 +7,24 @@
 # upgrading agents. Without them the install script has no way to know
 # the node is an agent and will incorrectly install it as a server.
 #
-# Usage: ./upgrade-agents.sh [channel]
+# Usage: ./upgrade-agents.sh [channel] [node...]
 #   channel: k3s release channel, e.g. v1.32, v1.33, stable (default: stable)
+#   node:    ipc2 | ipc3 (default: both; specify to target one node only)
 set -euo pipefail
 
-CHANNEL="${1:-stable}"
+CHANNEL="stable"
+AGENTS=()
+for arg in "$@"; do
+    if [[ "$arg" == ipc* ]]; then
+        AGENTS+=("$arg")
+    else
+        CHANNEL="$arg"
+    fi
+done
+[[ ${#AGENTS[@]} -eq 0 ]] && AGENTS=(ipc2 ipc3)
+
 SERVER="ipc1.taildd208.ts.net"
 SERVER_URL="https://192.168.88.53:6443"
-AGENTS=(ipc2 ipc3)
 
 echo "=== Fetching cluster token from $SERVER ==="
 TOKEN=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
