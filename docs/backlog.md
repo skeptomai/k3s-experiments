@@ -59,6 +59,17 @@ and post-install steps to rejoin the ipc node to k3s as a worker.
 - **Longhorn**: alternative distributed block storage (compare to NFS)
 - **GitOps**: ArgoCD or Flux for deploying experiments from this repo automatically
 
+### SPIRE hardening
+
+- **SPIRE Controller Manager** — replace `demo-registration-job.yaml` with
+  `ClusterSPIFFEID` CRDs managed by the [SPIRE Controller Manager](https://github.com/spiffe/spire-controller-manager).
+  Currently, registration entries live in SPIRE's internal SQLite database — Git captures
+  the intent ("run this job") but not the outcome ("these entries exist"). If the server
+  loses its PVC the entries are gone and the job must be re-run manually. With the
+  controller manager, entries are declared as Kubernetes resources in Git and continuously
+  reconciled into SPIRE — fully GitOps-compatible. Low priority while the cluster has one
+  trust domain and a handful of workloads; becomes important as SPIRE expands.
+
 ### Natural progressions from experiment 11 (SPIRE)
 
 - **mTLS with SPIRE SVIDs** — use the workload identity we now have to actually encrypt
