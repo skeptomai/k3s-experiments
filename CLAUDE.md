@@ -11,7 +11,7 @@ Kubernetes learning cluster on three ipc machines. Scripts and docs for cluster 
 | ipc3 | worker | 192.168.88.54 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc3` | `a8:a1:59:43:2a:74` (enp2s0) |
 
 - k3s v1.35.5, Ubuntu 24.04, x86_64, 4 cores, 30GB RAM per node
-- Container runtime: Pelagos v0.65.13 on all three nodes (`pelagos://0.1.0`)
+- Container runtime: Pelagos v0.65.16 on all three nodes (`pelagos://0.1.0`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
 - SSH key: `~/.ssh/id_rsa` (cb@omen)

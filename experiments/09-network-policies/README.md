@@ -7,12 +7,19 @@
 - An allow rule opens a specific path: one pod label to another, on one port
 - That NetworkPolicy is a whitelist, not a blacklist — you enumerate what's allowed, everything else is denied
 
-## CNI note
+## CNI note — enforcement not active on this cluster
 
 NetworkPolicy requires a CNI plugin that enforces it. k3s ships with Flannel, which
-does not enforce NetworkPolicy natively. However, k3s includes a built-in network
-policy controller (based on kube-router) that implements enforcement via iptables.
-NetworkPolicy works on this cluster without any additional setup.
+does not enforce NetworkPolicy natively. Despite documentation suggesting k3s includes
+a kube-router-based policy controller, enforcement is **not functional** on this cluster
+with the `flannel-backend: wireguard-native` configuration — policies are accepted by
+the API server but have no effect on traffic.
+
+**The manifests in this experiment are correct.** They will enforce as-is when the
+cluster runs an enforcing CNI (Cilium, Calico). This experiment is a placeholder for
+that future state, and documents the correct NetworkPolicy patterns in the meantime.
+
+To get enforcement on this cluster: replace Flannel with Cilium or Calico (backlog item).
 
 ## Concepts
 

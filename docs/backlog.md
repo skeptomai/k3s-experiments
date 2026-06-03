@@ -52,6 +52,10 @@ and post-install steps to rejoin the ipc node to k3s as a worker.
 
 ## Ideas / Future Experiments
 
+- **Enforcing CNI (Cilium or Calico)** — flannel+wireguard-native does not enforce
+  NetworkPolicy. Experiment 09 manifests are correct and will work once the CNI is
+  swapped. Cilium is the natural choice — also enables Hubble observability and
+  eBPF-based dataplane.
 - **Upgrade existing experiments** to use NFS StorageClass now that it's the default
   (experiment 04 uses local-path PVs manually — could be simplified)
 - **Monitoring stack**: Prometheus + Grafana via Helm (repos already added on ipc1)
