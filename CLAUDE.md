@@ -77,6 +77,18 @@ The autoinstall configs use `dhcp-identifier: mac` in netplan so the DHCP client
 
 Then reboot the node. IPs: ipc1=192.168.88.53, ipc2=192.168.88.52, ipc3=192.168.88.54
 
+## EFI Boot Order
+
+All three nodes are configured PXE-first (set via `efibootmgr`, persists in NVRAM). Normal boots are safe — PXE falls through to disk when nazgul returns no boot response. Accidental reinstall is prevented nazgul-side by `pxe-control.sh`.
+
+| Node | Boot order |
+|------|-----------|
+| ipc1 | 0005 PXE IP4 Realtek (a8:a1:59:43:2a:67), 0002 Ubuntu, 0006 PXE IP6 Realtek, 0007/0008 Intel PXE |
+| ipc2 | 0005 PXE IP4 Realtek (a8:a1:59:43:2a:ed), 0002 Ubuntu, 0006 PXE IP6 Realtek, 0007/0008 Intel PXE |
+| ipc3 | 0003 PXE IP4 Realtek (a8:a1:59:43:2a:74), 0002 Ubuntu, 0004 PXE IP6 Realtek, 0005/0006 Intel PXE |
+
+To query: `sudo efibootmgr` on any node. To fix if a reinstall resets it: `sudo efibootmgr --bootorder <pxe-entry>,0002,...`
+
 ## Agent Upgrade Notes
 
 When upgrading agent nodes, `K3S_URL` and `K3S_TOKEN` **must always be passed explicitly**. The install script does not persist role information — without these vars it will incorrectly install the node as a server. See `scripts/upgrade-agents.sh` for the correct pattern.
