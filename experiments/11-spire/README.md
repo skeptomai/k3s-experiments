@@ -121,21 +121,25 @@ Filed as [Pelagos #301](https://github.com/pelagos-containers/pelagos/issues/301
 - Envoy or spiffe-helper sidecar handles cert rotation and presents the SVID for mTLS
 - No secrets, no cert management — identity is purely attestation-derived
 
-## Apply
+## Deployment
+
+SPIRE server and agents are **infrastructure**, managed by Flux from `manifests/spire/`. Committing changes to those manifests is sufficient — Flux reconciles the cluster within minutes.
+
+The demo workload and registration entries are separate:
 
 ```
-kubectl apply -f experiments/11-spire/namespace.yaml
-kubectl apply -f experiments/11-spire/server-config.yaml
-kubectl apply -f experiments/11-spire/server-rbac.yaml
-kubectl apply -f experiments/11-spire/server-statefulset.yaml
-kubectl apply -f experiments/11-spire/agent-config.yaml
-kubectl apply -f experiments/11-spire/agent-rbac.yaml
-kubectl apply -f experiments/11-spire/agent-daemonset.yaml
+kubectl apply -f experiments/11-spire/demo-namespace.yaml
+kubectl apply -f experiments/11-spire/demo-registration-rbac.yaml
+kubectl apply -f experiments/11-spire/demo-registration-job.yaml
 ```
 
-Or as one line: `kubectl apply -f experiments/11-spire/`
+Wait for the registration job to complete, then:
 
-Note: `demo-registration-job.yaml` is imperative — it runs `spire-server entry create` to write registration entries into SPIRE's internal store. Re-run it if entries are lost (e.g. after a SPIRE server restart with a wiped PVC).
+```
+kubectl apply -f experiments/11-spire/demo-workload.yaml
+```
+
+Note: `demo-registration-job.yaml` is imperative — it runs `spire-server entry create` to write registration entries into SPIRE's internal SQLite database. Re-run it if entries are lost (e.g. after a SPIRE server restart with a wiped PVC). See backlog for the GitOps-native alternative (SPIRE Controller Manager).
 
 ## Verify
 
