@@ -76,7 +76,9 @@ and post-install steps to rejoin the ipc node to k3s as a worker.
   app (trivial Go/Python HTTP server) with a GitHub Actions workflow that builds and pushes
   to ghcr.io on each commit. Flux watches the registry, not the source repo.
   **Access model**: Flux needs write access to *this repo* (`k3s-experiments`) to commit
-  image tag bumps to deployment manifests — not to the application source repo. Scope that
-  access carefully (branch or path restriction). The full experiment is really
+  image tag bumps to deployment manifests — not to the application source repo. Plan: Flux
+  writes to a `flux-updates` branch, `main` is branch-protected. Decide at build time
+  whether merges to `main` are manual (human gate) or automated via a passing CI check —
+  start manual, automate once the pipeline is trusted. The full experiment is really
   "CI/CD end-to-end": source push → image build → registry → Flux detects → manifest
   commit → reconcile → deploy.
