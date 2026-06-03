@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: busybox
-          image: busybox:stable
+          image: docker.io/library/busybox:stable
           command: ["/bin/sh", "-c"]
           args:
             - touch /tmp/healthy; sleep 30; rm /tmp/healthy; sleep 600

@@ -16,5 +16,6 @@ spec:
       containers:
         - name: hello
           image: nginxdemos/hello:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

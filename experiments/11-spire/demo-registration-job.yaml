@@ -12,6 +12,7 @@ spec:
       containers:
         - name: register
           image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
             - |

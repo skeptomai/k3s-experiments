@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: nginx:stable
+          image: docker.io/library/nginx:stable
           readinessProbe:
             httpGet:
               path: /

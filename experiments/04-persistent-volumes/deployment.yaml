@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: writer
-          image: busybox:stable
+          image: docker.io/library/busybox:stable
           command: ["/bin/sh", "-c"]
           args:
             - echo "$(date) — started as $POD_NAME" >> /data/log.txt && sleep infinity
