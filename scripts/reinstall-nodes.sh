@@ -47,11 +47,11 @@ node_ssh_up() {
 
 wait_node_offline() {
     local node=$1
-    echo "--- Waiting for $node to go offline (up to 3 min) ---"
+    echo "--- Waiting for $node to go offline (up to 5 min) ---"
     local i=0
     while ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; do
         sleep 15; ((i++))
-        [[ $i -gt 12 ]] && { echo "WARN: $node still Ready after 3 min — may not have rebooted"; return 1; }
+        [[ $i -gt 20 ]] && { echo "WARN: $node still Ready after 5 min — may not have rebooted"; return 1; }
     done
     echo "  $node is offline"
 }
@@ -80,16 +80,36 @@ wait_node_ready() {
     echo "  $node is Ready"
 }
 
+run_privileged_pod() {
+    local node=$1 pod=$2 cmd=$3
+    ssh_ipc1 "sudo kubectl run $pod \
+        --image=alpine \
+        --overrides='{\"spec\":{\"nodeName\":\"$node\",\"hostPID\":true,\"containers\":[{\"name\":\"r\",\"image\":\"alpine\",\"command\":[\"nsenter\",\"--mount=/proc/1/ns/mnt\",\"--\",\"sh\",\"-c\",\"$cmd\"],\"securityContext\":{\"privileged\":true}}]}}' \
+        --restart=Never -n default" 2>/dev/null || true
+    sleep 3
+    ssh_ipc1 "sudo kubectl delete pod $pod -n default --ignore-not-found 2>/dev/null" || true
+}
+
+set_pxe_bootnext_via_kubectl() {
+    local node=$1
+    local pod="pxe-bootnext-${node}-$$"
+    echo "--- Setting PXE as next boot entry on $node via kubectl ---"
+    # Find the first network/PXE boot entry and set it as bootnext so disk-first BIOS still PXE boots
+    run_privileged_pod "$node" "$pod" \
+        'entry=\$(efibootmgr | grep -iE "^Boot[0-9A-F]{4}\*.*([Nn]et[Bb]oot|iPXE|[Pp][Xx][Ee]|[Nn]etwork|[Ii][Pp][Vv]4)" | head -1 | grep -oE "[0-9A-F]{4}"); [ -n "\$entry" ] && efibootmgr --bootnext "\$entry" && echo "bootnext set to \$entry" || echo "no PXE entry found"'
+}
+
+set_pxe_bootnext_via_ssh() {
+    local node=$1
+    echo "--- Setting PXE as next boot entry on $node via SSH ---"
+    ssh_node "$node" 'entry=$(sudo efibootmgr | grep -iE "^Boot[0-9A-F]{4}\*.*([Nn]et[Bb]oot|iPXE|[Pp][Xx][Ee]|[Nn]etwork|[Ii][Pp][Vv]4)" | head -1 | grep -oE "[0-9A-F]{4}"); [ -n "$entry" ] && sudo efibootmgr --bootnext "$entry" && echo "bootnext set to $entry" || echo "no PXE entry found, relying on boot order"'
+}
+
 reboot_via_kubectl() {
     local node=$1
     local pod="reboot-${node}-$$"
     echo "--- Rebooting $node via kubectl privileged pod (no SSH available) ---"
-    ssh_ipc1 "sudo kubectl run $pod \
-        --image=alpine \
-        --overrides='{\"spec\":{\"nodeName\":\"$node\",\"hostPID\":true,\"containers\":[{\"name\":\"r\",\"image\":\"alpine\",\"command\":[\"nsenter\",\"--mount=/proc/1/ns/mnt\",\"--\",\"reboot\"],\"securityContext\":{\"privileged\":true}}]}}' \
-        --restart=Never -n default" || true
-    sleep 5
-    ssh_ipc1 "sudo kubectl delete pod $pod -n default --ignore-not-found 2>/dev/null" || true
+    run_privileged_pod "$node" "$pod" "reboot"
 }
 
 echo "=== PXE Reinstall: ${NODES[*]} ==="
@@ -105,12 +125,14 @@ for node in "${NODES[@]}"; do
     echo "--- Enabling PXE for $node ---"
     bash "$REPO_ROOT/scripts/pxe-control.sh" enable "$node"
 
-    echo "--- Rebooting $node ---"
+    echo "--- Rebooting $node into PXE ---"
     if node_ssh_up "$node"; then
-        echo "  SSH available — rebooting via SSH"
+        echo "  SSH available"
+        set_pxe_bootnext_via_ssh "$node"
         ssh_node "$node" sudo reboot || true
     else
-        echo "  SSH not available — rebooting via kubectl"
+        echo "  SSH not available — using kubectl"
+        set_pxe_bootnext_via_kubectl "$node"
         reboot_via_kubectl "$node"
     fi
 

@@ -32,14 +32,14 @@ TOKEN=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
 
 for agent in "${AGENTS[@]}"; do
     echo ""
+    echo "=== Clearing stale node password secret for $agent ==="
+    ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
+        "sudo kubectl delete secret ${agent}.node-password.k3s -n kube-system 2>/dev/null && echo Deleted || echo 'Not present, skipping'"
+
     echo "=== Upgrading k3s agent on $agent to channel $CHANNEL ==="
     ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"$agent" \
         "curl -sfL https://get.k3s.io | sudo K3S_URL=$SERVER_URL K3S_TOKEN=$TOKEN INSTALL_K3S_CHANNEL=$CHANNEL sh -"
     echo "Done: $agent"
-
-    echo "=== Clearing stale node password secret for $agent ==="
-    ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
-        "sudo kubectl delete secret ${agent}.node-password.k3s -n kube-system 2>/dev/null && echo Deleted || echo Not present, skipping"
 done
 
 echo ""
