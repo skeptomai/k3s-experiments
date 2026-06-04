@@ -259,6 +259,41 @@ verify_09() {
 }
 
 # ---------------------------------------------------------------------------
+# 13 — load balancing
+# ---------------------------------------------------------------------------
+verify_13() {
+  local rc=0
+  echo "=== 13: load-balancing ==="
+
+  if ! kapply \
+    "$REPO/experiments/13-load-balancing/namespace.yaml" \
+    "$REPO/experiments/13-load-balancing/configmap.yaml" \
+    "$REPO/experiments/13-load-balancing/deployment.yaml" \
+    "$REPO/experiments/13-load-balancing/service.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status deployment/lb-demo -n lb-demo --timeout=120s"; then
+    echo "FAIL: rollout timeout"; rc=1
+  elif ! kapply "$REPO/experiments/13-load-balancing/job-verify.yaml"; then
+    echo "FAIL: apply verify job"; rc=1
+  elif ! kube "wait job/lb-verify -n lb-demo --for=condition=complete --timeout=60s"; then
+    echo "FAIL: verify job did not complete"; rc=1
+  else
+    # 30 requests across 3 pods — expect at least 2 distinct pod names.
+    local unique
+    unique=$(kube "logs -n lb-demo job/lb-verify" 2>/dev/null | sort -u | wc -l | tr -d '[:space:]')
+    if [[ "$unique" -lt 2 ]]; then
+      echo "FAIL: only $unique distinct pod(s) responded out of 30 requests (expected >= 2)"; rc=1
+    else
+      echo "OK: $unique distinct pods responded"
+    fi
+  fi
+
+  del_ns lb-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # 10 — NFS storage (sequential: touches default namespace)
 # ---------------------------------------------------------------------------
 verify_10() {
@@ -387,9 +422,10 @@ verify_06    > "$LOGDIR/06.log"    2>&1 & pids[06]=$!
 verify_07    > "$LOGDIR/07.log"    2>&1 & pids[07]=$!
 verify_08    > "$LOGDIR/08.log"    2>&1 & pids[08]=$!
 verify_09    > "$LOGDIR/09.log"    2>&1 & pids[09]=$!
+verify_13    > "$LOGDIR/13.log"    2>&1 & pids[13]=$!
 
 declare -A results
-for key in 01_02 03 04 05 06 07 08 09; do
+for key in 01_02 03 04 05 06 07 08 09 13; do
   if wait "${pids[$key]}"; then results[$key]=PASS; else results[$key]=FAIL; fi
 done
 
@@ -403,6 +439,7 @@ printf "  %-35s %s\n" "06    resource-limits"      "${results[06]}"
 printf "  %-35s %s\n" "07    rolling-deployments"  "${results[07]}"
 printf "  %-35s %s\n" "08    probes"               "${results[08]}"
 printf "  %-35s %s\n" "09    network-policies"     "${results[09]}"
+printf "  %-35s %s\n" "13    load-balancing"       "${results[13]}"
 
 echo ""
 echo "Starting sequential experiments..."
@@ -419,10 +456,10 @@ printf "  %-35s %s\n" "12    user-resolution"       "${results[12]}"
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=11
+total=12
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then

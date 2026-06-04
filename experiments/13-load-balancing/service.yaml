@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lb-demo-svc
+  namespace: lb-demo
+spec:
+  selector:
+    app: lb-demo
+  ports:
+    - port: 80
+      targetPort: 80

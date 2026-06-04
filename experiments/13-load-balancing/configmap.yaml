@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-hostname-config
+  namespace: lb-demo
+data:
+  default.conf: |
+    server {
+        listen 80;
+        location / {
+            return 200 "$hostname\n";
+            add_header Content-Type text/plain;
+        }
+    }
