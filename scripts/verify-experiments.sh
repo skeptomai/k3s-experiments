@@ -342,6 +342,33 @@ verify_11() {
 }
 
 # ---------------------------------------------------------------------------
+# 12 — user resolution from image /etc/passwd (sequential)
+# ---------------------------------------------------------------------------
+verify_12() {
+  local rc=0
+  echo "=== 12: user-resolution ==="
+
+  if ! kapply "$REPO"/experiments/12-user-resolution/*.yaml; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "wait job/user-resolution-test -n user-demo --for=condition=complete --timeout=120s"; then
+    echo "FAIL: job did not complete"; rc=1
+  else
+    # redis image OCI User is "redis" (string). Pelagos must resolve it via the
+    # image's /etc/passwd (UID 999). If it reads the host's /etc/passwd instead,
+    # "redis" won't exist and the job will fail rather than completing.
+    local uid_line
+    uid_line=$(kube "logs -n user-demo job/user-resolution-test" 2>/dev/null)
+    if ! echo "$uid_line" | grep -q "uid=999"; then
+      echo "FAIL: expected uid=999(redis), got: $uid_line"; rc=1
+    fi
+  fi
+
+  del_ns user-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 echo "Logs: $LOGDIR"
@@ -383,17 +410,19 @@ echo ""
 
 verify_10 > "$LOGDIR/10.log" 2>&1; results[10]=$?; [[ ${results[10]} -eq 0 ]] && results[10]=PASS || results[10]=FAIL
 verify_11 > "$LOGDIR/11.log" 2>&1; results[11]=$?; [[ ${results[11]} -eq 0 ]] && results[11]=PASS || results[11]=FAIL
+verify_12 > "$LOGDIR/12.log" 2>&1; results[12]=$?; [[ ${results[12]} -eq 0 ]] && results[12]=PASS || results[12]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
+printf "  %-35s %s\n" "12    user-resolution"       "${results[12]}"
 
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=10
+total=11
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then

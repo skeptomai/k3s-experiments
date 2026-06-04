@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: user-resolution-test
+  namespace: user-demo
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: id-check
+          image: docker.io/library/redis:latest
+          imagePullPolicy: IfNotPresent
+          # redis image OCI config has User: "redis" (string, not numeric).
+          # Pelagos must resolve "redis" -> UID 999 via the IMAGE's /etc/passwd,
+          # not the host's. The redis user does not exist on Ubuntu 24.04 hosts.
+          command: ["id"]
