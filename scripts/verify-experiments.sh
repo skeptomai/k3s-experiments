@@ -353,13 +353,13 @@ verify_12() {
   elif ! kube "wait job/user-resolution-test -n user-demo --for=condition=complete --timeout=120s"; then
     echo "FAIL: job did not complete"; rc=1
   else
-    # redis image OCI User is "redis" (string). Pelagos must resolve it via the
-    # image's /etc/passwd (UID 999). If it reads the host's /etc/passwd instead,
-    # "redis" won't exist and the job will fail rather than completing.
+    # curlimages/curl OCI User is "curl_user" (string). Pelagos must resolve it
+    # via the image's /etc/passwd (UID 100). If it reads the host's /etc/passwd
+    # instead, "curl_user" won't exist and the job fails rather than completing.
     local uid_line
     uid_line=$(kube "logs -n user-demo job/user-resolution-test" 2>/dev/null)
-    if ! echo "$uid_line" | grep -q "uid=999"; then
-      echo "FAIL: expected uid=999(redis), got: $uid_line"; rc=1
+    if ! echo "$uid_line" | grep -q "uid=100"; then
+      echo "FAIL: expected uid=100(curl_user), got: $uid_line"; rc=1
     fi
   fi
 

@@ -10,9 +10,9 @@ spec:
       restartPolicy: Never
       containers:
         - name: id-check
-          image: docker.io/library/redis:latest
+          image: curlimages/curl:latest
           imagePullPolicy: IfNotPresent
-          # redis image OCI config has User: "redis" (string, not numeric).
-          # Pelagos must resolve "redis" -> UID 999 via the IMAGE's /etc/passwd,
-          # not the host's. The redis user does not exist on Ubuntu 24.04 hosts.
-          command: ["id"]
+          # curlimages/curl OCI config has User: "curl_user" (string, not numeric).
+          # Pelagos must resolve "curl_user" -> UID 100 via the IMAGE's /etc/passwd,
+          # not the host's. curl_user does not exist on Ubuntu 24.04 hosts.
+          command: ["sh", "-c", "id"]
