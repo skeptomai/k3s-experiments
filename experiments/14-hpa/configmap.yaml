@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-script
+  namespace: hpa-demo
+data:
+  server.py: |
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import math
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            # Deliberately CPU-intensive per request
+            x = sum(math.sqrt(i) for i in range(50000))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(f'{x:.2f}\n'.encode())
+        def log_message(self, *args):
+            pass
+
+    HTTPServer(('', 80), Handler).serve_forever()

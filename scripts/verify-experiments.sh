@@ -32,6 +32,9 @@ prefetch_images() {
   echo "Pre-fetching :latest images on ipc1 (best-effort)..."
   ssh $SSH_OPTS "$IPC1" "sudo crictl pull docker.io/bitnami/kubectl:latest 2>&1" || \
     echo "  WARNING: bitnami/kubectl:latest pull failed (rate limit?). Exp 05 and 11 will fail if pod schedules on ipc1."
+  # exp 14 (HPA) is blocked on Pelagos #238/#269 (CRI stats not implemented —
+  # kubectl top pod returns no data, HPA cannot compute replica count) and #325
+  # (v0.65.25 mirror naming regression). Skip prefetch until those are fixed.
   echo "Prefetch done."
 }
 
@@ -448,6 +451,7 @@ echo ""
 verify_10 > "$LOGDIR/10.log" 2>&1; results[10]=$?; [[ ${results[10]} -eq 0 ]] && results[10]=PASS || results[10]=FAIL
 verify_11 > "$LOGDIR/11.log" 2>&1; results[11]=$?; [[ ${results[11]} -eq 0 ]] && results[11]=PASS || results[11]=FAIL
 verify_12 > "$LOGDIR/12.log" 2>&1; results[12]=$?; [[ ${results[12]} -eq 0 ]] && results[12]=PASS || results[12]=FAIL
+# exp 14 (HPA) skipped: blocked on Pelagos #238/#269 (CRI stats) and #325 (mirror naming)
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
@@ -467,5 +471,6 @@ if [[ $fail -eq 0 ]]; then
 else
   echo "  $fail experiment(s) FAILED — check logs in $LOGDIR"
 fi
+
 
 [[ $fail -eq 0 ]]
