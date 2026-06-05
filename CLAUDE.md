@@ -41,6 +41,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/reinstall-nodes.sh <node> [node...]` | Full PXE reinstall of worker node(s): enables PXE → reboots → waits → rejoins k3s |
 | `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order |
 | `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (default: all three) |
+| `scripts/install-nut-clients.sh [node...]` | Installs/configures NUT client (upsmon) on ipc nodes — run after reinstall |
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
 | `scripts/pxe-control.sh <status\|enable\|disable> [node]` | Enables/disables PXE boot per node (run from omen) |
 
@@ -58,6 +59,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 6. Clear stale SSH known_hosts on omen
 7. Remove stale Tailscale device; rename new one if it registered as `<node>-1`
 8. `bash scripts/upgrade-agents.sh <node>` — rejoin k3s + install Pelagos
+9. `bash scripts/install-nut-clients.sh <node>` — restore NUT UPS monitoring
 
 **After ipc1 reinstall** (wipes etcd — full cluster rebuild):
 - Install k3s, Pelagos, rejoin agents, bootstrap Flux (GitHub token in 1Password)
