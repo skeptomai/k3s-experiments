@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
-# Experiments 01-09 run in parallel (independent namespaces).
-# Experiments 10 and 11 run sequentially after.
+# Experiments 01-09, 13, 15 run in parallel (independent namespaces).
+# Experiments 10, 11, 12 run sequentially after.
 set -uo pipefail
 
 REPO="/home/cb/Projects/k3s-experiments"
@@ -262,6 +262,46 @@ verify_09() {
 }
 
 # ---------------------------------------------------------------------------
+# 15 — StatefulSets
+# ---------------------------------------------------------------------------
+verify_15() {
+  local rc=0
+  echo "=== 15: statefulsets ==="
+
+  # NFS PVC finalizers make namespace deletion slow; wait for any prior run to clear.
+  local waited=0
+  while kube "get namespace stateful-demo -o jsonpath={.status.phase}" 2>/dev/null | grep -q Terminating; do
+    sleep 5; waited=$((waited + 5))
+    if [[ $waited -ge 60 ]]; then echo "FAIL: stateful-demo namespace stuck Terminating"; return 1; fi
+  done
+
+  if ! kapply \
+    "$REPO/experiments/15-statefulsets/namespace.yaml" \
+    "$REPO/experiments/15-statefulsets/service.yaml" \
+    "$REPO/experiments/15-statefulsets/statefulset.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status statefulset/web -n stateful-demo --timeout=240s"; then
+    echo "FAIL: rollout timeout"; rc=1
+  elif ! kapply "$REPO/experiments/15-statefulsets/job-verify.yaml"; then
+    echo "FAIL: apply verify job"; rc=1
+  elif ! kube "wait job/verify -n stateful-demo --for=condition=complete --timeout=60s"; then
+    echo "FAIL: verify job did not complete"; rc=1
+  else
+    local output
+    output=$(kube "logs job/verify -n stateful-demo" 2>/dev/null)
+    if ! echo "$output" | grep -q "All 3 pods have distinct stable identities"; then
+      echo "FAIL: unexpected output: $output"; rc=1
+    else
+      echo "OK: $(echo "$output" | tail -1)"
+    fi
+  fi
+
+  del_ns stateful-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # 13 — load balancing
 # ---------------------------------------------------------------------------
 verify_13() {
@@ -426,9 +466,10 @@ verify_07    > "$LOGDIR/07.log"    2>&1 & pids[07]=$!
 verify_08    > "$LOGDIR/08.log"    2>&1 & pids[08]=$!
 verify_09    > "$LOGDIR/09.log"    2>&1 & pids[09]=$!
 verify_13    > "$LOGDIR/13.log"    2>&1 & pids[13]=$!
+verify_15    > "$LOGDIR/15.log"    2>&1 & pids[15]=$!
 
 declare -A results
-for key in 01_02 03 04 05 06 07 08 09 13; do
+for key in 01_02 03 04 05 06 07 08 09 13 15; do
   if wait "${pids[$key]}"; then results[$key]=PASS; else results[$key]=FAIL; fi
 done
 
@@ -443,6 +484,7 @@ printf "  %-35s %s\n" "07    rolling-deployments"  "${results[07]}"
 printf "  %-35s %s\n" "08    probes"               "${results[08]}"
 printf "  %-35s %s\n" "09    network-policies"     "${results[09]}"
 printf "  %-35s %s\n" "13    load-balancing"       "${results[13]}"
+printf "  %-35s %s\n" "15    statefulsets"         "${results[15]}"
 
 echo ""
 echo "Starting sequential experiments..."
@@ -460,10 +502,10 @@ printf "  %-35s %s\n" "12    user-resolution"       "${results[12]}"
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12 13; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 15; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=12
+total=13
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then

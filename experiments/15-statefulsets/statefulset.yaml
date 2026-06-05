@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+  namespace: stateful-demo
+spec:
+  serviceName: web
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      initContainers:
+        - name: init-data
+          image: docker.io/library/busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "echo $POD_NAME > /data/index.html"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:stable
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: nfs
+        resources:
+          requests:
+            storage: 10Mi
