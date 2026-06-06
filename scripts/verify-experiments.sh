@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
 # Experiments 01-09, 13, 15 run in parallel (independent namespaces).
-# Experiments 10, 11, 12 run sequentially after.
+# Experiments 10, 11, 12, 14 run sequentially after.
 set -uo pipefail
 
 REPO="/home/cb/Projects/k3s-experiments"
@@ -32,9 +32,16 @@ prefetch_images() {
   echo "Pre-fetching :latest images on ipc1 (best-effort)..."
   ssh $SSH_OPTS "$IPC1" "sudo crictl pull docker.io/bitnami/kubectl:latest 2>&1" || \
     echo "  WARNING: bitnami/kubectl:latest pull failed (rate limit?). Exp 05 and 11 will fail if pod schedules on ipc1."
-  # exp 14 (HPA) is blocked on Pelagos #238/#269 (CRI stats not implemented —
-  # kubectl top pod returns no data, HPA cannot compute replica count) and #325
-  # (v0.65.25 mirror naming regression). Skip prefetch until those are fixed.
+  # python:3.12-alpine (exp 14) can schedule on any node; pre-fetch on all three.
+  for node in ipc1 ipc2 ipc3; do
+    if [ "$node" = "ipc1" ]; then
+      ssh $SSH_OPTS "$IPC1" "sudo crictl pull docker.io/library/python:3.12-alpine 2>&1" || \
+        echo "  WARNING: python:3.12-alpine pull failed on $node"
+    else
+      ssh $SSH_OPTS -J "$IPC1" "cb@$node" "sudo crictl pull docker.io/library/python:3.12-alpine 2>&1" || \
+        echo "  WARNING: python:3.12-alpine pull failed on $node"
+    fi
+  done
   echo "Prefetch done."
 }
 
@@ -337,6 +344,47 @@ verify_13() {
 }
 
 # ---------------------------------------------------------------------------
+# 14 — HPA (sequential: internal polling loop ~3 min)
+# ---------------------------------------------------------------------------
+verify_14() {
+  local rc=0
+  echo "=== 14: hpa ==="
+
+  if ! kapply \
+    "$REPO/experiments/14-hpa/namespace.yaml" \
+    "$REPO/experiments/14-hpa/configmap.yaml" \
+    "$REPO/experiments/14-hpa/deployment.yaml" \
+    "$REPO/experiments/14-hpa/service.yaml" \
+    "$REPO/experiments/14-hpa/hpa.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status deployment/hpa-demo -n hpa-demo --timeout=300s"; then
+    echo "FAIL: rollout timeout"; rc=1
+  elif ! kapply "$REPO/experiments/14-hpa/job-load.yaml"; then
+    echo "FAIL: apply load job"; rc=1
+  else
+    local scaled=false
+    for i in $(seq 18); do
+      sleep 10
+      replicas=$(kube "get hpa hpa-demo -n hpa-demo -o jsonpath='{.status.currentReplicas}'" 2>/dev/null | tr -d "'" | tr -d '[:space:]')
+      if [[ -n "$replicas" && "$replicas" -gt 1 ]]; then
+        scaled=true
+        echo "OK: HPA scaled to $replicas replicas"
+        break
+      fi
+    done
+    if ! $scaled; then
+      echo "FAIL: HPA did not scale above 1 replica within 3 minutes"
+      kube "describe hpa hpa-demo -n hpa-demo" 2>/dev/null | tail -20
+      rc=1
+    fi
+  fi
+
+  del_ns hpa-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # 10 — NFS storage (sequential: touches default namespace)
 # ---------------------------------------------------------------------------
 verify_10() {
@@ -493,19 +541,20 @@ echo ""
 verify_10 > "$LOGDIR/10.log" 2>&1; results[10]=$?; [[ ${results[10]} -eq 0 ]] && results[10]=PASS || results[10]=FAIL
 verify_11 > "$LOGDIR/11.log" 2>&1; results[11]=$?; [[ ${results[11]} -eq 0 ]] && results[11]=PASS || results[11]=FAIL
 verify_12 > "$LOGDIR/12.log" 2>&1; results[12]=$?; [[ ${results[12]} -eq 0 ]] && results[12]=PASS || results[12]=FAIL
-# exp 14 (HPA) skipped: blocked on Pelagos #238/#269 (CRI stats) and #325 (mirror naming)
+verify_14 > "$LOGDIR/14.log" 2>&1; results[14]=$?; [[ ${results[14]} -eq 0 ]] && results[14]=PASS || results[14]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
 printf "  %-35s %s\n" "12    user-resolution"       "${results[12]}"
+printf "  %-35s %s\n" "14    hpa"                   "${results[14]}"
 
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 15; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=13
+total=14
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then
