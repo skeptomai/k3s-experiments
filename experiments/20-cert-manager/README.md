@@ -53,12 +53,11 @@ Pods and Ingress resources reference this Secret directly.
 
 ### Relationship to SPIRE (experiment 11)
 
-SPIRE and cert-manager both issue TLS credentials, but at different layers:
+They are independent — cert-manager has no knowledge of SPIRE and vice versa in this cluster.
 
-- **SPIRE**: workload identity via SVID/SPIFFE — certificate is tied to the workload's identity, not a DNS name; rotated by the SPIRE agent automatically
-- **cert-manager**: Kubernetes-native PKI — certificate is a Kubernetes Secret; referenced by pods/ingress via volume mounts or TLS termination
+SPIRE runs its own internal PKI and delivers SVIDs in-memory via a Unix socket (the SPIFFE Workload API). Its attestation process uses the Kubernetes API to verify pod identity, not certificates. cert-manager never touches SPIRE's trust chain, and SPIRE never reads cert-manager Secrets.
 
-They are complementary: cert-manager is the right tool for Ingress TLS and service-to-service TLS where you want Kubernetes Secrets; SPIRE is the right tool for zero-trust workload attestation.
+The practical split: use cert-manager for Ingress TLS and workloads that need a mountable TLS Secret; use SPIRE when you want attestation-based identity without distributing secrets at all.
 
 ## Files
 
