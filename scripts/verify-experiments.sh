@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
 # Experiments 01-09, 13, 15 run in parallel (independent namespaces).
-# Experiments 10, 11, 12, 14, 16, 17, 18 run sequentially after.
+# Experiments 10, 11, 12, 14, 16, 17, 18, 19 run sequentially after.
 set -uo pipefail
 
 REPO="/home/cb/Projects/k3s-experiments"
@@ -391,6 +391,45 @@ verify_14() {
 }
 
 # ---------------------------------------------------------------------------
+# 19 — Memory-based HPA (sequential: waits for metrics then for scale-up)
+# ---------------------------------------------------------------------------
+verify_19() {
+  local rc=0
+  echo "=== 19: hpa-memory ==="
+
+  if ! kapply \
+    "$REPO/experiments/19-hpa-memory/namespace.yaml" \
+    "$REPO/experiments/19-hpa-memory/deployment.yaml" \
+    "$REPO/experiments/19-hpa-memory/hpa.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status deployment/hpa-mem-demo -n hpa-mem-demo --timeout=120s"; then
+    echo "FAIL: rollout timeout"; rc=1
+  else
+    # Poll up to 3 minutes for HPA to scale above 1 replica.
+    # Each pod holds ~30Mi vs 20Mi target, so scaling is immediate once metrics arrive.
+    local scaled=false
+    for i in $(seq 18); do
+      sleep 10
+      replicas=$(kube "get hpa hpa-mem-demo -n hpa-mem-demo -o jsonpath='{.status.currentReplicas}'" 2>/dev/null | tr -d "'" | tr -d '[:space:]')
+      if [[ -n "$replicas" && "$replicas" -gt 1 ]]; then
+        scaled=true
+        echo "OK: memory HPA scaled to $replicas replicas"
+        break
+      fi
+    done
+    if ! $scaled; then
+      echo "FAIL: memory HPA did not scale above 1 replica within 3 minutes"
+      kube "describe hpa hpa-mem-demo -n hpa-mem-demo" 2>/dev/null | tail -15
+      rc=1
+    fi
+  fi
+
+  del_ns hpa-mem-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # 17 — Container memory stats (sequential: needs metrics-server accumulation)
 # ---------------------------------------------------------------------------
 verify_17() {
@@ -741,6 +780,7 @@ verify_14 > "$LOGDIR/14.log" 2>&1; results[14]=$?; [[ ${results[14]} -eq 0 ]] &&
 verify_16 > "$LOGDIR/16.log" 2>&1; results[16]=$?; [[ ${results[16]} -eq 0 ]] && results[16]=PASS || results[16]=FAIL
 verify_17 > "$LOGDIR/17.log" 2>&1; results[17]=$?; [[ ${results[17]} -eq 0 ]] && results[17]=PASS || results[17]=FAIL
 verify_18 > "$LOGDIR/18.log" 2>&1; results[18]=$?; [[ ${results[18]} -eq 0 ]] && results[18]=PASS || results[18]=FAIL
+verify_19 > "$LOGDIR/19.log" 2>&1; results[19]=$?; [[ ${results[19]} -eq 0 ]] && results[19]=PASS || results[19]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
@@ -749,14 +789,15 @@ printf "  %-35s %s\n" "14    hpa"                   "${results[14]}"
 printf "  %-35s %s\n" "16    cgroup-plumbing"       "${results[16]}"
 printf "  %-35s %s\n" "17    memory-stats"          "${results[17]}"
 printf "  %-35s %s\n" "18    lifecycle-hooks"       "${results[18]}"
+printf "  %-35s %s\n" "19    hpa-memory"            "${results[19]}"
 
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=17
+total=18
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then
