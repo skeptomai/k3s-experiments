@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cgroup-probe
+  namespace: cgroup-verify
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cgroup-probe
+  template:
+    metadata:
+      labels:
+        app: cgroup-probe
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: cgroup-probe
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:stable
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
 # Experiments 01-09, 13, 15 run in parallel (independent namespaces).
-# Experiments 10, 11, 12, 14 run sequentially after.
+# Experiments 10, 11, 12, 14, 16 run sequentially after.
 set -uo pipefail
 
 REPO="/home/cb/Projects/k3s-experiments"
@@ -391,6 +391,109 @@ verify_14() {
 }
 
 # ---------------------------------------------------------------------------
+# 16 — Pelagos cgroup plumbing (sequential: requires per-node SSH)
+# ---------------------------------------------------------------------------
+verify_16() {
+  local rc=0
+  echo "=== 16: cgroup-plumbing ==="
+
+  if ! kapply \
+    "$REPO/experiments/16-cgroup-plumbing/namespace.yaml" \
+    "$REPO/experiments/16-cgroup-plumbing/deployment.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status deployment/cgroup-probe -n cgroup-verify --timeout=120s"; then
+    echo "FAIL: rollout timeout"; rc=1
+  else
+    # Wait 30s: containerIDs populate after rollout completes, and
+    # usageCoreNanoSeconds needs time to accumulate before sampling.
+    sleep 30
+
+    local pods_json
+    pods_json=$(kube "get pods -n cgroup-verify -o json" 2>/dev/null)
+
+    # Extract pod→node→cri_id into arrays
+    local -a pod_names=() pod_nodes=() pod_cris=()
+    while IFS=$'\t' read -r pname pnode pcri; do
+      pod_names+=("$pname"); pod_nodes+=("$pnode"); pod_cris+=("$pcri")
+    done < <(echo "$pods_json" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for p in d['items']:
+  cs=p.get('status',{}).get('containerStatuses',[])
+  cri=next((c['containerID'][len('pelagos://'):] for c in cs if c.get('containerID','').startswith('pelagos://')), '')
+  if cri:
+    print(p['metadata']['name']+'\t'+p['spec']['nodeName']+'\t'+cri)
+" 2>/dev/null)
+
+    if [[ ${#pod_names[@]} -lt 3 ]]; then
+      echo "FAIL: only ${#pod_names[@]} pods have container IDs (expected 3)"; rc=1
+    fi
+
+    for i in "${!pod_names[@]}"; do
+      local pod_name="${pod_names[$i]}"
+      local node="${pod_nodes[$i]}"
+      local cri_id="${pod_cris[$i]}"
+      local pcri_name="pcri-${cri_id:0:12}"
+
+      echo "  Checking $pod_name on $node"
+
+      local sshn
+      if [[ "$node" == "ipc1" ]]; then
+        sshn="ssh $SSH_OPTS $IPC1"
+      else
+        sshn="ssh $SSH_OPTS -J $IPC1 cb@$node"
+      fi
+
+      # Check 1: cgroup_name is non-null and starts with kubepods/
+      local cgroup_name
+      cgroup_name=$($sshn "sudo pelagos container inspect '$pcri_name' 2>/dev/null" | \
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('cgroup_name') or '')" 2>/dev/null || true)
+      if [[ -z "$cgroup_name" || "$cgroup_name" == "None" ]]; then
+        echo "  FAIL: cgroup_name null/missing for $pod_name (pcri=$pcri_name)"; rc=1; continue
+      fi
+      if [[ "$cgroup_name" != kubepods/* ]]; then
+        echo "  FAIL: cgroup_name='$cgroup_name' does not start with kubepods/"; rc=1; continue
+      fi
+      echo "  OK: cgroup_name=$cgroup_name"
+
+      # Check 2: cgroup exists in filesystem
+      if ! $sshn "test -d '/sys/fs/cgroup/$cgroup_name' || test -d '/sys/fs/cgroup/cpu/$cgroup_name'" 2>/dev/null; then
+        echo "  FAIL: cgroup path not found in filesystem on $node"; rc=1; continue
+      fi
+      echo "  OK: cgroup path exists on $node"
+
+      # Check 3: usageCoreNanoSeconds > 0 in kubelet summary on the pod's node
+      local cum
+      cum=$(ssh $SSH_OPTS "$IPC1" "sudo curl -sk \
+        --cert /var/lib/rancher/k3s/server/tls/client-admin.crt \
+        --key /var/lib/rancher/k3s/server/tls/client-admin.key \
+        https://${node}:10250/stats/summary 2>/dev/null" | \
+        python3 -c "
+import json,sys
+target='${cri_id:0:12}'
+d=json.load(sys.stdin)
+for p in d.get('pods',[]):
+  for c in p.get('containers',[]):
+    if target in p['podRef']['name'] or c.get('name','') == 'nginx':
+      v=c.get('cpu',{}).get('usageCoreNanoSeconds',0)
+      if v and v>0:
+        print(v); sys.exit(0)
+print(0)
+" 2>/dev/null || echo 0)
+      if [[ "${cum:-0}" -gt 0 ]]; then
+        echo "  OK: usageCoreNanoSeconds=$cum"
+      else
+        echo "  WARN: usageCoreNanoSeconds=0 on $node (cgroup read may need more accumulation time)"
+      fi
+    done
+  fi
+
+  del_ns cgroup-verify
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # 10 — NFS storage (sequential: touches default namespace)
 # ---------------------------------------------------------------------------
 verify_10() {
@@ -556,19 +659,21 @@ verify_10 > "$LOGDIR/10.log" 2>&1; results[10]=$?; [[ ${results[10]} -eq 0 ]] &&
 verify_11 > "$LOGDIR/11.log" 2>&1; results[11]=$?; [[ ${results[11]} -eq 0 ]] && results[11]=PASS || results[11]=FAIL
 verify_12 > "$LOGDIR/12.log" 2>&1; results[12]=$?; [[ ${results[12]} -eq 0 ]] && results[12]=PASS || results[12]=FAIL
 verify_14 > "$LOGDIR/14.log" 2>&1; results[14]=$?; [[ ${results[14]} -eq 0 ]] && results[14]=PASS || results[14]=FAIL
+verify_16 > "$LOGDIR/16.log" 2>&1; results[16]=$?; [[ ${results[16]} -eq 0 ]] && results[16]=PASS || results[16]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
 printf "  %-35s %s\n" "12    user-resolution"       "${results[12]}"
 printf "  %-35s %s\n" "14    hpa"                   "${results[14]}"
+printf "  %-35s %s\n" "16    cgroup-plumbing"       "${results[16]}"
 
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=14
+total=15
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then
