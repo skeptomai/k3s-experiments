@@ -59,6 +59,8 @@ SPIRE runs its own internal PKI and delivers SVIDs in-memory via a Unix socket (
 
 The practical split: use cert-manager for Ingress TLS and workloads that need a mountable TLS Secret; use SPIRE when you want attestation-based identity without distributing secrets at all.
 
+They *can* be integrated: SPIRE's `UpstreamAuthority` plugin can delegate its root CA to cert-manager, making cert-manager the root of trust for SPIRE-issued SVIDs. This gives a single CA chain across both systems, but adds complexity. This cluster does not use that integration.
+
 ## Files
 
 | File | Purpose |
