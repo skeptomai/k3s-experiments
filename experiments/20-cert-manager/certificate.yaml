@@ -1,0 +1,17 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: demo-tls
+  namespace: cert-demo
+spec:
+  secretName: demo-tls-secret
+  issuerRef:
+    name: selfsigned
+    kind: ClusterIssuer
+  commonName: demo.cert-demo.svc.cluster.local
+  dnsNames:
+    - demo.cert-demo.svc.cluster.local
+    - demo.cert-demo.svc
+    - demo.cert-demo
+  duration: 2160h   # 90 days
+  renewBefore: 360h # 15 days
