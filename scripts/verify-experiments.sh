@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
 # Experiments 01-09, 13, 15 run in parallel (independent namespaces).
-# Experiments 10, 11, 12, 14, 16 run sequentially after.
+# Experiments 10, 11, 12, 14, 16, 18 run sequentially after.
 set -uo pipefail
 
 REPO="/home/cb/Projects/k3s-experiments"
@@ -391,6 +391,54 @@ verify_14() {
 }
 
 # ---------------------------------------------------------------------------
+# 18 — Container lifecycle hooks (sequential: preStop uses hostPath on ipc1)
+# ---------------------------------------------------------------------------
+verify_18() {
+  local rc=0
+  echo "=== 18: lifecycle-hooks ==="
+
+  # Clean any leftover evidence from a prior run
+  ssh $SSH_OPTS "$IPC1" "sudo rm -rf /tmp/hooks-demo-prestop" 2>/dev/null || true
+
+  if ! kapply \
+    "$REPO/experiments/18-lifecycle-hooks/namespace.yaml" \
+    "$REPO/experiments/18-lifecycle-hooks/pod-poststart.yaml" \
+    "$REPO/experiments/18-lifecycle-hooks/pod-prestop.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "wait pod/poststart-demo -n hooks-demo --for=condition=ready --timeout=60s"; then
+    echo "FAIL: poststart-demo not ready"; rc=1
+  elif ! kube "wait pod/prestop-demo -n hooks-demo --for=condition=ready --timeout=60s"; then
+    echo "FAIL: prestop-demo not ready"; rc=1
+  else
+    # Check 1: postStart wrote the file
+    local proof
+    proof=$(kube "exec -n hooks-demo poststart-demo -- cat /tmp/hook-proof" 2>/dev/null | tr -d '[:space:]')
+    if [[ "$proof" != "poststart-ran" ]]; then
+      echo "FAIL: postStart did not write proof file (got: '$proof')"; rc=1
+    else
+      echo "OK: postStart hook ran"
+    fi
+
+    # Check 2: preStop runs before termination — delete pod and check hostPath file
+    kube "delete pod prestop-demo -n hooks-demo --grace-period=10" 2>/dev/null || true
+    # Give preStop a moment to complete
+    sleep 5
+    local prestop_proof
+    prestop_proof=$(ssh $SSH_OPTS "$IPC1" "cat /tmp/hooks-demo-prestop/prestop-proof 2>/dev/null | tr -d '[:space:]'")
+    if [[ "$prestop_proof" != "prestop-ran" ]]; then
+      echo "FAIL: preStop did not write proof file (got: '$prestop_proof')"; rc=1
+    else
+      echo "OK: preStop hook ran before termination"
+    fi
+  fi
+
+  del_ns hooks-demo
+  ssh $SSH_OPTS "$IPC1" "sudo rm -rf /tmp/hooks-demo-prestop" 2>/dev/null || true
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # 16 — Pelagos cgroup plumbing (sequential: requires per-node SSH)
 # ---------------------------------------------------------------------------
 verify_16() {
@@ -660,20 +708,22 @@ verify_11 > "$LOGDIR/11.log" 2>&1; results[11]=$?; [[ ${results[11]} -eq 0 ]] &&
 verify_12 > "$LOGDIR/12.log" 2>&1; results[12]=$?; [[ ${results[12]} -eq 0 ]] && results[12]=PASS || results[12]=FAIL
 verify_14 > "$LOGDIR/14.log" 2>&1; results[14]=$?; [[ ${results[14]} -eq 0 ]] && results[14]=PASS || results[14]=FAIL
 verify_16 > "$LOGDIR/16.log" 2>&1; results[16]=$?; [[ ${results[16]} -eq 0 ]] && results[16]=PASS || results[16]=FAIL
+verify_18 > "$LOGDIR/18.log" 2>&1; results[18]=$?; [[ ${results[18]} -eq 0 ]] && results[18]=PASS || results[18]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
 printf "  %-35s %s\n" "12    user-resolution"       "${results[12]}"
 printf "  %-35s %s\n" "14    hpa"                   "${results[14]}"
 printf "  %-35s %s\n" "16    cgroup-plumbing"       "${results[16]}"
+printf "  %-35s %s\n" "18    lifecycle-hooks"       "${results[18]}"
 
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 18; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=15
+total=16
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then
