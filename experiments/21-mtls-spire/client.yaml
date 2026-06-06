@@ -52,7 +52,7 @@ spec:
           HANDSHAKE=$(echo "GET / HTTP/1.0" | openssl s_client \
             -connect mtls-server-svc:8443 \
             -cert /certs/svid.0.pem \
-            -key /certs/svid.0.key.0.pem \
+            -key /certs/svid.0.key \
             -CAfile /certs/bundle.0.pem \
             -showcerts \
             2>&1)

@@ -61,7 +61,7 @@ spec:
               openssl s_server \
                 -accept 8443 \
                 -cert /certs/svid.0.pem \
-                -key /certs/svid.0.key.0.pem \
+                -key /certs/svid.0.key \
                 -CAfile /certs/bundle.0.pem \
                 -Verify 1 \
                 -www
