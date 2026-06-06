@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mtls-demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mtls-server-sa
+  namespace: mtls-demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mtls-client-sa
+  namespace: mtls-demo

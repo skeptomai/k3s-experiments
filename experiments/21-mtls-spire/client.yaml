@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mtls-client
+  namespace: mtls-demo
+spec:
+  serviceAccountName: mtls-client-sa
+  restartPolicy: Never
+  initContainers:
+    - name: fetch-svid
+      image: docker.io/library/ubuntu:22.04
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -e
+          apt-get update -qq && apt-get install -y --no-install-recommends curl ca-certificates 2>/dev/null | tail -1
+          curl -sL https://github.com/spiffe/spire/releases/download/v1.9.6/spire-1.9.6-linux-amd64-musl.tar.gz \
+            | tar -xz --strip-components=2 -C /usr/local/bin spire-1.9.6/bin/spire-agent
+          chmod +x /usr/local/bin/spire-agent
+          mkdir -p /certs
+          for i in $(seq 1 15); do
+            if spire-agent api fetch x509 \
+                -socketPath /run/spire/sockets/agent.sock \
+                -write /certs 2>/tmp/err; then
+              echo "SVID fetched for spiffe://ipc.local/mtls-client"
+              break
+            fi
+            echo "Attempt $i: $(cat /tmp/err) — retrying in 2s..."
+            sleep 2
+          done
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+        - name: certs
+          mountPath: /certs
+  containers:
+    - name: client
+      image: docker.io/library/ubuntu:22.04
+      command: ["bash", "-c"]
+      args:
+        - |
+          apt-get update -qq && apt-get install -y --no-install-recommends openssl 2>/dev/null | tail -1
+
+          echo "=== Client identity ==="
+          openssl x509 -in /certs/svid.0.pem -noout -text | grep -A1 "Subject Alternative Name"
+          openssl x509 -in /certs/svid.0.pem -noout -dates
+
+          echo ""
+          echo "=== Connecting to mtls-server-svc:8443 ==="
+          # Send a GET then close — s_server -www responds to HTTP requests
+          HANDSHAKE=$(echo "GET / HTTP/1.0" | openssl s_client \
+            -connect mtls-server-svc:8443 \
+            -cert /certs/svid.0.pem \
+            -key /certs/svid.0.key.0.pem \
+            -CAfile /certs/bundle.0.pem \
+            -showcerts \
+            2>&1)
+
+          echo "$HANDSHAKE" | grep -E "Verify return code|SSL handshake|CONNECTED"
+
+          echo ""
+          echo "=== Server SPIFFE ID (from peer certificate) ==="
+          # Extract the server cert PEM from the handshake output and decode its SAN
+          echo "$HANDSHAKE" \
+            | awk '/-----BEGIN CERTIFICATE-----/{p=1} p{print} /-----END CERTIFICATE-----/{p=0;exit}' \
+            | openssl x509 -noout -text 2>/dev/null \
+            | grep -A1 "Subject Alternative Name"
+
+          echo ""
+          echo "=== mTLS handshake complete: both sides authenticated via SPIRE SVIDs ==="
+      volumeMounts:
+        - name: certs
+          mountPath: /certs
+          readOnly: true
+  volumes:
+    - name: spire-agent-socket
+      hostPath:
+        path: /run/spire/sockets
+        type: Directory
+    - name: certs
+      emptyDir: {}

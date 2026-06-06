@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mtls-server
+  namespace: mtls-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mtls-server
+  template:
+    metadata:
+      labels:
+        app: mtls-server
+    spec:
+      serviceAccountName: mtls-server-sa
+      initContainers:
+        - name: fetch-svid
+          image: docker.io/library/ubuntu:22.04
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -e
+              apt-get update -qq && apt-get install -y --no-install-recommends curl ca-certificates 2>/dev/null | tail -1
+              curl -sL https://github.com/spiffe/spire/releases/download/v1.9.6/spire-1.9.6-linux-amd64-musl.tar.gz \
+                | tar -xz --strip-components=2 -C /usr/local/bin spire-1.9.6/bin/spire-agent
+              chmod +x /usr/local/bin/spire-agent
+              mkdir -p /certs
+              for i in $(seq 1 15); do
+                if spire-agent api fetch x509 \
+                    -socketPath /run/spire/sockets/agent.sock \
+                    -write /certs 2>/tmp/err; then
+                  echo "SVID fetched for spiffe://ipc.local/mtls-server"
+                  break
+                fi
+                echo "Attempt $i: $(cat /tmp/err) — retrying in 2s..."
+                sleep 2
+              done
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            - name: certs
+              mountPath: /certs
+      containers:
+        - name: server
+          image: docker.io/library/ubuntu:22.04
+          command: ["bash", "-c"]
+          args:
+            - |
+              apt-get update -qq && apt-get install -y --no-install-recommends openssl 2>/dev/null | tail -1
+
+              echo "=== Server identity ==="
+              openssl x509 -in /certs/svid.0.pem -noout -text | grep -A1 "Subject Alternative Name"
+              openssl x509 -in /certs/svid.0.pem -noout -dates
+
+              echo ""
+              echo "=== Listening on :8443 — mutual TLS required ==="
+              # -Verify 1: require and verify client certificate
+              # -www: respond to any request with a TLS status page
+              openssl s_server \
+                -accept 8443 \
+                -cert /certs/svid.0.pem \
+                -key /certs/svid.0.key.0.pem \
+                -CAfile /certs/bundle.0.pem \
+                -Verify 1 \
+                -www
+          ports:
+            - containerPort: 8443
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: spire-agent-socket
+          hostPath:
+            path: /run/spire/sockets
+            type: Directory
+        - name: certs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mtls-server-svc
+  namespace: mtls-demo
+spec:
+  selector:
+    app: mtls-server
+  ports:
+    - port: 8443
+      targetPort: 8443

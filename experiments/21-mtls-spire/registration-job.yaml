@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spire-register-mtls
+  namespace: spire
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      serviceAccountName: spire-registrar
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              SERVER="pod/spire-server-0"
+              NS="-n spire"
+              BIN="/opt/spire/bin/spire-server entry create"
+
+              echo "=== Registering mtls-server ==="
+              kubectl exec $NS $SERVER -- $BIN \
+                -spiffeID spiffe://ipc.local/mtls-server \
+                -parentID spiffe://ipc.local/k8s-node \
+                -selector k8s:ns:mtls-demo \
+                -selector k8s:sa:mtls-server-sa \
+              && echo "mtls-server entry created." || echo "Entry may already exist."
+
+              echo ""
+              echo "=== Registering mtls-client ==="
+              kubectl exec $NS $SERVER -- $BIN \
+                -spiffeID spiffe://ipc.local/mtls-client \
+                -parentID spiffe://ipc.local/k8s-node \
+                -selector k8s:ns:mtls-demo \
+                -selector k8s:sa:mtls-client-sa \
+              && echo "mtls-client entry created." || echo "Entry may already exist."
+
+              echo ""
+              echo "=== Current registration entries ==="
+              kubectl exec $NS pod/spire-server-0 -- /opt/spire/bin/spire-server entry show
