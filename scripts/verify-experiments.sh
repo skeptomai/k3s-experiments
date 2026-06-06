@@ -9,7 +9,13 @@ IPC1="cb@ipc1.taildd208.ts.net"
 LOGDIR="/tmp/verify-experiments-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$LOGDIR"
 
-SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+SSH_CTRL="/tmp/ssh-verify-ctl-%r@%h:%p"
+SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPath=$SSH_CTRL -o ControlPersist=120"
+
+# Pre-open a single master connection to ipc1 so all parallel subprocesses
+# reuse it instead of each racing to establish their own TCP+tailnet session.
+ssh $SSH_OPTS "$IPC1" true 2>/dev/null || true
+trap 'ssh -o ControlPath="$SSH_CTRL" -O exit "$IPC1" 2>/dev/null; true' EXIT
 
 kube() { ssh $SSH_OPTS "$IPC1" "sudo kubectl $*"; }
 
@@ -400,8 +406,16 @@ verify_10() {
   elif ! kube "wait pod/nfs-test -n default --for=condition=ready --timeout=120s"; then
     echo "FAIL: pod not ready"; rc=1
   else
-    if ! kube "logs pod/nfs-test -n default" | grep -q "NFS works"; then
-      echo "FAIL: pod log did not contain 'NFS works'"; rc=1
+    # Pelagos creates log files slightly after container start; retry up to 5×.
+    local log_ok=false
+    for i in 1 2 3 4 5; do
+      if kube "logs pod/nfs-test -n default" 2>/dev/null | grep -q "NFS works"; then
+        log_ok=true; break
+      fi
+      sleep 3
+    done
+    if ! $log_ok; then
+      echo "FAIL: pod log did not contain 'NFS works' after retries"; rc=1
     fi
   fi
 
