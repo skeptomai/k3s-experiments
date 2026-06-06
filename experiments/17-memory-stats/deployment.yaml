@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mem-consumer
+  namespace: memstats-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mem-consumer
+  template:
+    metadata:
+      labels:
+        app: mem-consumer
+    spec:
+      containers:
+        - name: consumer
+          image: docker.io/library/busybox:1.36
+          imagePullPolicy: IfNotPresent
+          # Allocate ~20MB and hold it — gives metrics-server a stable, measurable footprint
+          command: ["sh", "-c", "mem=$(dd if=/dev/urandom bs=1M count=20 2>/dev/null | cat); sleep 3600"]
+          resources:
+            requests:
+              memory: "32Mi"
+            limits:
+              memory: "64Mi"

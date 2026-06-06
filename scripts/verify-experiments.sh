@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
 # Experiments 01-09, 13, 15 run in parallel (independent namespaces).
-# Experiments 10, 11, 12, 14, 16, 18 run sequentially after.
+# Experiments 10, 11, 12, 14, 16, 17, 18 run sequentially after.
 set -uo pipefail
 
 REPO="/home/cb/Projects/k3s-experiments"
@@ -391,6 +391,37 @@ verify_14() {
 }
 
 # ---------------------------------------------------------------------------
+# 17 — Container memory stats (sequential: needs metrics-server accumulation)
+# ---------------------------------------------------------------------------
+verify_17() {
+  local rc=0
+  echo "=== 17: memory-stats ==="
+
+  if ! kapply \
+    "$REPO/experiments/17-memory-stats/namespace.yaml" \
+    "$REPO/experiments/17-memory-stats/deployment.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status deployment/mem-consumer -n memstats-demo --timeout=120s"; then
+    echo "FAIL: rollout timeout"; rc=1
+  else
+    # Wait for metrics-server to accumulate a reading (2 scrape cycles ~30s)
+    sleep 30
+    local mem_mi
+    mem_mi=$(kube "top pod -n memstats-demo --no-headers 2>/dev/null" | awk '{print $3}' | tr -d 'Mi' | head -1)
+    if [[ -z "$mem_mi" || "$mem_mi" -lt 5 ]]; then
+      echo "FAIL: kubectl top pod reports ${mem_mi}Mi (expected >5Mi — likely still reporting launcher RSS)"
+      rc=1
+    else
+      echo "OK: kubectl top pod reports ${mem_mi}Mi (realistic cgroup total)"
+    fi
+  fi
+
+  del_ns memstats-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # 18 — Container lifecycle hooks (sequential: preStop uses hostPath on ipc1)
 # ---------------------------------------------------------------------------
 verify_18() {
@@ -708,6 +739,7 @@ verify_11 > "$LOGDIR/11.log" 2>&1; results[11]=$?; [[ ${results[11]} -eq 0 ]] &&
 verify_12 > "$LOGDIR/12.log" 2>&1; results[12]=$?; [[ ${results[12]} -eq 0 ]] && results[12]=PASS || results[12]=FAIL
 verify_14 > "$LOGDIR/14.log" 2>&1; results[14]=$?; [[ ${results[14]} -eq 0 ]] && results[14]=PASS || results[14]=FAIL
 verify_16 > "$LOGDIR/16.log" 2>&1; results[16]=$?; [[ ${results[16]} -eq 0 ]] && results[16]=PASS || results[16]=FAIL
+verify_17 > "$LOGDIR/17.log" 2>&1; results[17]=$?; [[ ${results[17]} -eq 0 ]] && results[17]=PASS || results[17]=FAIL
 verify_18 > "$LOGDIR/18.log" 2>&1; results[18]=$?; [[ ${results[18]} -eq 0 ]] && results[18]=PASS || results[18]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
@@ -715,15 +747,16 @@ printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
 printf "  %-35s %s\n" "12    user-resolution"       "${results[12]}"
 printf "  %-35s %s\n" "14    hpa"                   "${results[14]}"
 printf "  %-35s %s\n" "16    cgroup-plumbing"       "${results[16]}"
+printf "  %-35s %s\n" "17    memory-stats"          "${results[17]}"
 printf "  %-35s %s\n" "18    lifecycle-hooks"       "${results[18]}"
 
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 18; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=16
+total=17
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then
