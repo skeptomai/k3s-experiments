@@ -50,6 +50,16 @@ wait_node_offline() {
     local node=$1
     echo "--- Waiting for $node to go offline (up to 5 min) ---"
     local i=0
+    # For nodes not yet in k3s, wait for SSH to drop instead
+    if ! ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; then
+        echo "  $node not in k3s — waiting for SSH to drop (reboot confirmation)"
+        until ! node_ssh_up "$node"; do
+            sleep 5; i=$((i+1))
+            [[ $i -gt 60 ]] && { echo "WARN: $node SSH never dropped — reboot may have failed"; return 1; }
+        done
+        echo "  $node is offline (SSH dropped)"
+        return 0
+    fi
     while ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; do
         sleep 15; i=$((i+1))
         [[ $i -gt 20 ]] && { echo "WARN: $node still Ready after 5 min — may not have rebooted"; return 1; }
@@ -60,11 +70,13 @@ wait_node_offline() {
 wait_ssh_up() {
     local node=$1
     echo "--- Waiting for $node SSH to come back (autoinstall takes ~10 min) ---"
+    echo "  Minimum 5 min wait to avoid false-positive on quick local-disk boot..."
+    sleep 300
     local i=0
     until node_ssh_up "$node"; do
-        printf "  waiting... (%d min elapsed)\r" $((i * 30 / 60))
+        printf "  waiting... (%d min elapsed)\r" $(( (i * 30 + 300) / 60 ))
         sleep 30; i=$((i+1))
-        [[ $i -gt 40 ]] && { echo ""; echo "ERROR: $node SSH never came back after 20 min"; exit 1; }
+        [[ $i -gt 30 ]] && { echo ""; echo "ERROR: $node SSH never came back after 20 min"; exit 1; }
     done
     echo ""
     echo "  $node SSH is up"
