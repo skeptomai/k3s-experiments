@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# PXE reinstall one or more ipc worker nodes (ipc2 and/or ipc3).
-# Drives the full cycle: deploy PXE configs → enable → reboot → wait for OS
-# install → disable PXE → clear known_hosts → rejoin k3s → verify.
+# PXE reinstall one or more ipc worker nodes.
+# Drives the full cycle: deploy PXE configs → clear dynamic DHCP leases →
+# enable PXE → reboot → wait for OS install → disable PXE → clear known_hosts
+# → rejoin k3s → verify.
 #
 # Run from omen (or any machine with SSH to ipc1 via tailnet).
 # ipc1 is NEVER safe to reinstall with this script — it requires a full manual
 # cluster rebuild (wipes etcd).
+#
+# Note: ipc4/ipc5 require "Network Boot" enabled in BIOS firmware settings
+# (separate from efibootmgr boot order) — one-time physical setup.
 #
 # Usage: ./reinstall-nodes.sh <node> [node...]
 #   node: ipc2 | ipc3 | ipc4 | ipc5
@@ -13,9 +17,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
+MIKROTIK="admin@192.168.88.1"
 
 declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56")
 declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1")
+declare -A NODE_MAC=([ipc2]="A8:A1:59:43:2A:ED" [ipc3]="A8:A1:59:43:2A:74" [ipc4]="D0:AD:08:9C:D2:CB" [ipc5]="D0:AD:08:9C:D1:45")
 
 NODES=("$@")
 [[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 <node> [node...]"; exit 1; }
@@ -126,6 +132,14 @@ reboot_via_kubectl() {
     run_privileged_pod "$node" "$pod" "reboot"
 }
 
+clear_dynamic_leases() {
+    local node=$1
+    local mac="${NODE_MAC[$node]}"
+    echo "--- Clearing dynamic MikroTik DHCP leases for $node ($mac) ---"
+    ssh "$MIKROTIK" "/ip dhcp-server lease remove [find where mac-address=\"$mac\" dynamic=yes]" 2>/dev/null \
+        && echo "  Dynamic leases cleared (or none existed)" || echo "  WARN: could not reach MikroTik"
+}
+
 echo "=== PXE Reinstall: ${NODES[*]} ==="
 echo ""
 
@@ -135,6 +149,8 @@ bash "$REPO_ROOT/scripts/deploy-pxe-configs.sh"
 for node in "${NODES[@]}"; do
     echo ""
     echo "====== $node ======"
+
+    clear_dynamic_leases "$node"
 
     echo "--- Enabling PXE for $node ---"
     bash "$REPO_ROOT/scripts/pxe-control.sh" enable "$node"

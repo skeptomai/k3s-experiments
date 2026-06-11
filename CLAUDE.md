@@ -71,26 +71,36 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 
 The autoinstall configs use `dhcp-identifier: mac` in netplan so the DHCP client identifies by MAC address. Static leases should bind correctly without manual intervention.
 
-**If a node gets the wrong IP after reinstall**, the MikroTik static lease needs resetting via MikroTik SSH:
+**Before reinstalling**, always ensure there are no dynamic leases for the node's MAC — MikroTik may create dynamic leases during PXE DHCP that conflict with the static lease, causing the node to get a wrong IP and fail the MAC-file lookup. `reinstall-nodes.sh` does this automatically, but when doing a manual reinstall run this first via MikroTik SSH:
+
+```
+/ip dhcp-server lease remove [find where mac-address="AA:BB:CC:DD:EE:FF" dynamic=yes]
+```
+
+**If a node gets the wrong IP after reinstall**, the static lease may need resetting:
 
 ```
 /ip dhcp-server lease remove [find where address=192.168.88.XX]
 /ip dhcp-server lease add address=192.168.88.XX mac-address=AA:BB:CC:DD:EE:FF server=defconf
 ```
 
-Then reboot the node. IPs: ipc1=192.168.88.53, ipc2=192.168.88.52, ipc3=192.168.88.54
+Then reboot the node. IPs: ipc1=192.168.88.53, ipc2=192.168.88.52, ipc3=192.168.88.54, ipc4=192.168.88.55, ipc5=192.168.88.56
 
 ## EFI Boot Order
 
-All three nodes are configured PXE-first (set via `efibootmgr`, persists in NVRAM). Normal boots are safe — PXE falls through to disk when nazgul returns no boot response. Accidental reinstall is prevented nazgul-side by `pxe-control.sh`.
+All nodes are configured PXE-first (set via `efibootmgr`, persists in NVRAM). Normal boots are safe — PXE falls through to disk when nazgul returns no boot response. Accidental reinstall is prevented nazgul-side by `pxe-control.sh`.
 
 | Node | Boot order |
 |------|-----------|
 | ipc1 | 0005 PXE IP4 Realtek (a8:a1:59:43:2a:67), 0002 Ubuntu, 0006 PXE IP6 Realtek, 0007/0008 Intel PXE |
 | ipc2 | 0005 PXE IP4 Realtek (a8:a1:59:43:2a:ed), 0002 Ubuntu, 0006 PXE IP6 Realtek, 0007/0008 Intel PXE |
 | ipc3 | 0003 PXE IP4 Realtek (a8:a1:59:43:2a:74), 0002 Ubuntu, 0004 PXE IP6 Realtek, 0005/0006 Intel PXE |
+| ipc4 | 0003 PXE IP4 Intel I219-LM (d0:ad:08:9c:d2:cb), 0006 Ubuntu, ... |
+| ipc5 | 0003 PXE IP4 Intel I219-LM (d0:ad:08:9c:d1:45), 0001 Ubuntu, ... |
 
 To query: `sudo efibootmgr` on any node. To fix if a reinstall resets it: `sudo efibootmgr --bootorder <pxe-entry>,0002,...`
+
+**ipc4/ipc5 only:** These machines also require "Network Boot" enabled in BIOS firmware settings (F2 at POST → Advanced → Network Boot or similar). This is a one-time physical setup — efibootmgr boot order alone is not sufficient for Intel NUC-style hardware.
 
 ## Agent Upgrade Notes
 
