@@ -1,6 +1,6 @@
 # k3s-experiments
 
-Kubernetes learning cluster on three ipc machines. Scripts and docs for cluster management and experiments.
+Kubernetes learning cluster on five ipc machines. Scripts and docs for cluster management and experiments.
 
 ## Cluster
 
@@ -9,11 +9,11 @@ Kubernetes learning cluster on three ipc machines. Scripts and docs for cluster 
 | ipc1 | control-plane | 192.168.88.53 | Direct via tailnet: `ipc1.taildd208.ts.net` | `a8:a1:59:43:2a:67` (enp2s0) |
 | ipc2 | worker | 192.168.88.52 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc2` | `a8:a1:59:43:2a:ed` (enp2s0) |
 | ipc3 | worker | 192.168.88.54 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc3` | `a8:a1:59:43:2a:74` (enp2s0) |
-| ipc4 | worker (pending reinstall) | 192.168.88.55 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc4` | `d0:ad:08:9c:d2:cb` (eno1) |
-| ipc5 | worker (pending reinstall) | 192.168.88.56 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc5` | `d0:ad:08:9c:d1:45` (eno1) |
+| ipc4 | worker | 192.168.88.55 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc4` | `d0:ad:08:9c:d2:cb` (eno1) |
+| ipc5 | worker | 192.168.88.56 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc5` | `d0:ad:08:9c:d1:45` (eno1) |
 
 - k3s v1.35.5, Ubuntu 24.04, x86_64, 4 cores, 30GB RAM per node
-- Container runtime: Pelagos v0.65.16 on all three nodes (`pelagos://0.1.0`)
+- Container runtime: Pelagos v0.65.30 on all five nodes (`pelagos://0.1.0`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
 - SSH key: `~/.ssh/id_rsa` (cb@omen)
