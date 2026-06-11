@@ -115,7 +115,8 @@ set_pxe_bootnext_via_kubectl() {
 set_pxe_bootnext_via_ssh() {
     local node=$1
     echo "--- Setting PXE as next boot entry on $node via SSH ---"
-    ssh_node "$node" 'entry=$(sudo efibootmgr | grep -iE "^Boot[0-9A-F]{4}\*.*([Nn]et[Bb]oot|iPXE|[Pp][Xx][Ee]|[Nn]etwork|[Ii][Pp][Vv]4)" | head -1 | grep -oE "[0-9A-F]{4}"); [ -n "$entry" ] && sudo efibootmgr --bootnext "$entry" && echo "bootnext set to $entry" || echo "no PXE entry found, relying on boot order"'
+    # Use SUDO_ASKPASS workaround: sudo -n first (passwordless), fall through gracefully
+    ssh_node "$node" 'entry=$(sudo -n efibootmgr 2>/dev/null | grep -iE "^Boot[0-9A-F]{4}\*.*([Nn]et[Bb]oot|iPXE|[Pp][Xx][Ee]|[Nn]etwork|[Ii][Pp][Vv]4)" | head -1 | grep -oE "[0-9A-F]{4}"); [ -n "$entry" ] && sudo -n efibootmgr --bootnext "$entry" && echo "bootnext set to $entry" || echo "no PXE entry found or sudo requires password, relying on boot order"'
 }
 
 reboot_via_kubectl() {
