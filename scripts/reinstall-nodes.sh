@@ -8,13 +8,14 @@
 # cluster rebuild (wipes etcd).
 #
 # Usage: ./reinstall-nodes.sh <node> [node...]
-#   node: ipc2 | ipc3
+#   node: ipc2 | ipc3 | ipc4 | ipc5
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54")
+declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56")
+declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1")
 
 NODES=("$@")
 [[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 <node> [node...]"; exit 1; }
@@ -25,7 +26,7 @@ for node in "${NODES[@]}"; do
         exit 1
     fi
     if [[ -z "${NODE_IP[$node]+x}" ]]; then
-        echo "ERROR: unknown node '$node'. Valid nodes: ipc2 ipc3" >&2
+        echo "ERROR: unknown node '$node'. Valid nodes: ipc2 ipc3 ipc4 ipc5" >&2
         exit 1
     fi
 done
@@ -148,7 +149,7 @@ for node in "${NODES[@]}"; do
     ssh-keygen -R "${NODE_IP[$node]}" 2>/dev/null || true
 
     echo "--- Verifying DHCP address ($node should have ${NODE_IP[$node]}) ---"
-    actual_ip=$(ssh_node "$node" "ip -4 -br addr show enp2s0 | awk '{print \$3}' | cut -d/ -f1")
+    actual_ip=$(ssh_node "$node" "ip -4 -br addr show ${NODE_NIC[$node]} | awk '{print \$3}' | cut -d/ -f1")
     if [[ "$actual_ip" != "${NODE_IP[$node]}" ]]; then
         echo "WARN: $node has IP $actual_ip, expected ${NODE_IP[$node]}."
         echo "WARN: MikroTik static lease may need manual reset — see CLAUDE.md."
