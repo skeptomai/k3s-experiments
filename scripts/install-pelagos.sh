@@ -10,12 +10,13 @@
 #
 # Usage: ./install-pelagos.sh [--version vX.Y.Z] [node...]
 #   --version: pin a specific release (default: latest)
-#   node: ipc1 | ipc2 | ipc3 (default: ipc1 ipc2 ipc3)
+#   node: ipc1 | ipc2 | ipc3 | ipc4 | ipc5 (default: ipc1 ipc2 ipc3)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 DEFAULT_NODES=(ipc1 ipc2 ipc3)
+declare -A NODE_IP=([ipc1]="" [ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56")
 
 VERSION_PIN=""
 NODES=()
@@ -46,7 +47,7 @@ install_node() {
         k3s_service="k3s"
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
     else
-        ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@$SERVER cb@$node"
+        ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@$SERVER cb@${NODE_IP[$node]}"
         k3s_service="k3s-agent"
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent.yaml")
     fi

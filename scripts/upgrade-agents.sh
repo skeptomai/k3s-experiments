@@ -9,8 +9,10 @@
 #
 # Usage: ./upgrade-agents.sh [channel] [node...]
 #   channel: k3s release channel, e.g. v1.32, v1.33, stable (default: stable)
-#   node:    ipc2 | ipc3 (default: both; specify to target one node only)
+#   node:    ipc2 | ipc3 | ipc4 | ipc5 (default: ipc2 ipc3; specify to target one node)
 set -euo pipefail
+
+declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56")
 
 CHANNEL="stable"
 AGENTS=()
@@ -37,7 +39,7 @@ for agent in "${AGENTS[@]}"; do
         "sudo kubectl delete secret ${agent}.node-password.k3s -n kube-system 2>/dev/null && echo Deleted || echo 'Not present, skipping'"
 
     echo "=== Upgrading k3s agent on $agent to channel $CHANNEL ==="
-    ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"$agent" \
+    ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$agent]}" \
         "curl -sfL https://get.k3s.io | sudo K3S_URL=$SERVER_URL K3S_TOKEN=$TOKEN INSTALL_K3S_CHANNEL=$CHANNEL sh -"
     echo "Done: $agent"
 done
