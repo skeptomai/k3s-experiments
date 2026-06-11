@@ -24,12 +24,14 @@ declare -A NODE_MAC=(
     [ipc1]="MAC-a8a159432a67.ipxe"
     [ipc2]="MAC-a8a159432aed.ipxe"
     [ipc3]="MAC-a8a159432a74.ipxe"
+    [ipc4]="MAC-d0ad089cd2cb.ipxe"
+    [ipc5]="MAC-d0ad089cd145.ipxe"
 )
 
 usage() {
     echo "Usage: $0 status"
-    echo "       $0 enable  <ipc1|ipc2|ipc3|all>"
-    echo "       $0 disable <ipc1|ipc2|ipc3|all>"
+    echo "       $0 enable  <ipc1|ipc2|ipc3|ipc4|ipc5|all>"
+    echo "       $0 disable <ipc1|ipc2|ipc3|ipc4|ipc5|all>"
     exit 1
 }
 
@@ -86,7 +88,7 @@ case "$CMD" in
         [ -z "$NODE" ] && usage
         NODES=()
         if [ "$NODE" = "all" ]; then
-            NODES=(ipc1 ipc2 ipc3)
+            NODES=(ipc1 ipc2 ipc3 ipc4 ipc5)
         elif [ -n "${NODE_MAC[$NODE]+x}" ]; then
             NODES=("$NODE")
         else
