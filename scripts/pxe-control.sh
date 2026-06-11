@@ -37,7 +37,7 @@ usage() {
 
 status() {
     echo "PXE autoinstall status:"
-    for node in ipc1 ipc2 ipc3; do
+    for node in ipc1 ipc2 ipc3 ipc4 ipc5; do
         file="${MENUS}/${NODE_MAC[$node]}"
         if [ -f "$file" ]; then
             echo "  $node: ENABLED"

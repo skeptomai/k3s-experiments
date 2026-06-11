@@ -37,13 +37,13 @@ ssh_ipc1() {
 
 ssh_node() {
     local node=$1; shift
-    ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"$node" "$@"
+    ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$node]}" "$@"
 }
 
 node_ssh_up() {
     local node=$1
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
-        -J cb@"$SERVER" cb@"$node" true 2>/dev/null
+        -J cb@"$SERVER" cb@"${NODE_IP[$node]}" true 2>/dev/null
 }
 
 wait_node_offline() {
@@ -51,7 +51,7 @@ wait_node_offline() {
     echo "--- Waiting for $node to go offline (up to 5 min) ---"
     local i=0
     while ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; do
-        sleep 15; ((i++))
+        sleep 15; i=$((i+1))
         [[ $i -gt 20 ]] && { echo "WARN: $node still Ready after 5 min — may not have rebooted"; return 1; }
     done
     echo "  $node is offline"
@@ -63,7 +63,7 @@ wait_ssh_up() {
     local i=0
     until node_ssh_up "$node"; do
         printf "  waiting... (%d min elapsed)\r" $((i * 30 / 60))
-        sleep 30; ((i++))
+        sleep 30; i=$((i+1))
         [[ $i -gt 40 ]] && { echo ""; echo "ERROR: $node SSH never came back after 20 min"; exit 1; }
     done
     echo ""
@@ -75,7 +75,7 @@ wait_node_ready() {
     echo "--- Waiting for $node to appear Ready in kubectl (up to 5 min) ---"
     local i=0
     until ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; do
-        sleep 15; ((i++))
+        sleep 15; i=$((i+1))
         [[ $i -gt 20 ]] && { echo "ERROR: $node not Ready in kubectl after 5 min"; exit 1; }
     done
     echo "  $node is Ready"
