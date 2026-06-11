@@ -20,7 +20,9 @@ The MikroTik firewall allows unrestricted bridge-nas → bridge-lan traffic, so 
 
 ### node-exporter
 
-Runs with `hostNetwork: true` and `hostPID: true` so it can read the host's `/proc`, `/sys`, and filesystem stats without being isolated in a pod network namespace. Each node exposes port 9100 directly on its node IP. The `tolerations: - operator: Exists` ensures it runs on the control plane node too.
+Runs without `hostNetwork` or `hostPID` (Pelagos exits cleanly with code 0 when those are set). Instead it uses a NodePort Service with `externalTrafficPolicy: Local` so each node's traffic routes to its own pod, preserving per-node identity.
+
+**Pelagos proc/sys quirk:** Pelagos mounts `/proc` and `/sys` inside the container's own namespace, which already reflects host-level CPU and memory stats (Linux doesn't virtualize `/proc/meminfo` or `/proc/stat` per-namespace). The `/host/proc` hostPath mount exists but is empty. The `/host/sys` hostPath mount is required explicitly to avoid a panic on some nodes where Pelagos doesn't expose `/sys` in the container namespace by default. The `--path.rootfs=/host` and `--path.sysfs=/host/sys` args are kept; `--path.procfs` is omitted so node-exporter reads from the container's own `/proc`.
 
 ### kube-state-metrics
 
