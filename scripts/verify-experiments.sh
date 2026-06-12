@@ -532,6 +532,14 @@ verify_16() {
     local pods_json
     pods_json=$(kube "get pods -n cgroup-verify -o json" 2>/dev/null)
 
+    # Map k8s node name -> InternalIP so per-node SSH/curl doesn't depend on
+    # tailnet hostname resolution. After a reinstall the old node's tailscale
+    # device can keep owning the name (new one registers as <node>-1), so
+    # cb@<node> resolves to the dead device and times out.
+    declare -A node_ip
+    while read -r _n _ip; do [[ -n "$_n" ]] && node_ip[$_n]=$_ip; done < <(
+      kube "get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.status.addresses[?(@.type==\"InternalIP\")].address}{\"\n\"}{end}'" 2>/dev/null)
+
     # Extract pod→node→cri_id into arrays
     local -a pod_names=() pod_nodes=() pod_cris=()
     while IFS=$'\t' read -r pname pnode pcri; do
@@ -558,11 +566,11 @@ for p in d['items']:
 
       echo "  Checking $pod_name on $node"
 
-      local sshn
+      local sshn nodeaddr="${node_ip[$node]:-$node}"
       if [[ "$node" == "ipc1" ]]; then
         sshn="ssh $SSH_OPTS $IPC1"
       else
-        sshn="ssh $SSH_OPTS -J $IPC1 cb@$node"
+        sshn="ssh $SSH_OPTS -J $IPC1 cb@$nodeaddr"
       fi
 
       # Check 1: cgroup_name is non-null and starts with kubepods/
@@ -588,7 +596,7 @@ for p in d['items']:
       cum=$(ssh $SSH_OPTS "$IPC1" "sudo curl -sk \
         --cert /var/lib/rancher/k3s/server/tls/client-admin.crt \
         --key /var/lib/rancher/k3s/server/tls/client-admin.key \
-        https://${node}:10250/stats/summary 2>/dev/null" | \
+        https://${nodeaddr}:10250/stats/summary 2>/dev/null" | \
         python3 -c "
 import json,sys
 target='${cri_id:0:12}'
