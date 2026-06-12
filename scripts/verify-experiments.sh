@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
-# Experiments 01-09, 13, 15 run in parallel (independent namespaces).
-# Experiments 10, 11, 12, 14, 16, 17, 18, 19 run sequentially after.
+# Experiments 01-09, 13, 15, 20, 22 run in parallel (independent namespaces).
+# Experiments 10, 11, 12, 14, 16, 17, 18, 19, 21, 23, 24 run sequentially after.
+# (21, 23, 24 share the SPIRE server/registrar, so they must not run concurrently.)
 set -uo pipefail
 
 REPO="/home/cb/Projects/k3s-experiments"
@@ -32,21 +33,23 @@ kapply() {
 
 del_ns() { kube "delete namespace $1 --ignore-not-found --wait=true --timeout=120s" 2>&1 || true; }
 
-# Best-effort prefetch of images that use :latest tags on ipc1 (the only node
-# that may be missing bitnami/kubectl after a fresh run).
+# Best-effort prefetch of images used by experiments that may schedule on any
+# node. Pulls go through the Zot mirror on nazgul, so the first node pull warms
+# the cache for the rest. Covers all six nodes since pods now land anywhere.
 prefetch_images() {
-  echo "Pre-fetching :latest images on ipc1 (best-effort)..."
-  ssh $SSH_OPTS "$IPC1" "sudo crictl pull docker.io/bitnami/kubectl:latest 2>&1" || \
-    echo "  WARNING: bitnami/kubectl:latest pull failed (rate limit?). Exp 05 and 11 will fail if pod schedules on ipc1."
-  # python:3.12-alpine (exp 14) can schedule on any node; pre-fetch on all three.
-  for node in ipc1 ipc2 ipc3; do
-    if [ "$node" = "ipc1" ]; then
-      ssh $SSH_OPTS "$IPC1" "sudo crictl pull docker.io/library/python:3.12-alpine 2>&1" || \
-        echo "  WARNING: python:3.12-alpine pull failed on $node"
-    else
-      ssh $SSH_OPTS -J "$IPC1" "cb@$node" "sudo crictl pull docker.io/library/python:3.12-alpine 2>&1" || \
-        echo "  WARNING: python:3.12-alpine pull failed on $node"
-    fi
+  echo "Pre-fetching images on all nodes (best-effort)..."
+  local nodes="ipc1 ipc2 ipc3 ipc4 ipc5 ipc6"
+  # bitnami/kubectl (exp 05/11/registration jobs), python (exp 14),
+  # envoy (exp 23/24 — the heavy one).
+  local images="docker.io/bitnami/kubectl:latest docker.io/library/python:3.12-alpine docker.io/envoyproxy/envoy:v1.32.0"
+  for node in $nodes; do
+    for img in $images; do
+      if [ "$node" = "ipc1" ]; then
+        ssh $SSH_OPTS "$IPC1" "sudo crictl pull $img" >/dev/null 2>&1 || echo "  WARNING: $img pull failed on $node"
+      else
+        ssh $SSH_OPTS -J "$IPC1" "cb@$node" "sudo crictl pull $img" >/dev/null 2>&1 || echo "  WARNING: $img pull failed on $node"
+      fi
+    done
   done
   echo "Prefetch done."
 }
@@ -730,6 +733,216 @@ verify_12() {
 }
 
 # ---------------------------------------------------------------------------
+# 20 — cert-manager (parallel: independent namespace + dedicated ClusterIssuer)
+# ---------------------------------------------------------------------------
+verify_20() {
+  local rc=0
+  echo "=== 20: cert-manager ==="
+
+  # cert-manager itself is Flux-managed infra; confirm the webhook is up first.
+  if ! kube "rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s"; then
+    echo "FAIL: cert-manager-webhook not ready (is cert-manager installed?)"; rc=1
+  elif ! kapply \
+      "$REPO/experiments/20-cert-manager/namespace.yaml" \
+      "$REPO/experiments/20-cert-manager/clusterissuer.yaml" \
+      "$REPO/experiments/20-cert-manager/certificate.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "wait certificate/demo-tls -n cert-demo --for=condition=Ready --timeout=120s"; then
+    echo "FAIL: Certificate did not become Ready"; rc=1
+  else
+    local stype
+    stype=$(kube "get secret demo-tls-secret -n cert-demo -o jsonpath='{.type}'" 2>/dev/null | tr -d "'" | tr -d '[:space:]')
+    if [[ "$stype" != "kubernetes.io/tls" ]]; then
+      echo "FAIL: demo-tls-secret type=$stype (expected kubernetes.io/tls)"; rc=1
+    else
+      echo "OK: Certificate Ready, demo-tls-secret is kubernetes.io/tls"
+    fi
+  fi
+
+  del_ns cert-demo
+  kube "delete clusterissuer selfsigned --ignore-not-found" 2>&1 || true
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
+# 22 — cluster monitoring (parallel: persistent infra; not torn down)
+# ---------------------------------------------------------------------------
+verify_22() {
+  local rc=0
+  echo "=== 22: cluster-monitoring ==="
+
+  # Persistent infrastructure feeding Prometheus on nazgul. Apply idempotently,
+  # verify health, and do NOT delete the namespace.
+  if ! kapply \
+      "$REPO/experiments/22-cluster-monitoring/namespace.yaml" \
+      "$REPO/experiments/22-cluster-monitoring/node-exporter.yaml" \
+      "$REPO/experiments/22-cluster-monitoring/kube-state-metrics.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status daemonset/node-exporter -n monitoring --timeout=120s"; then
+    echo "FAIL: node-exporter daemonset not ready"; rc=1
+  elif ! kube "rollout status deployment/kube-state-metrics -n monitoring --timeout=120s"; then
+    echo "FAIL: kube-state-metrics not ready"; rc=1
+  else
+    # Metric-endpoint curls go through the shared SSH ControlMaster, which can
+    # transiently refuse sessions under the parallel batch's load — so retry.
+    local ne_ok=false ksm_ok=false
+    for i in 1 2 3 4 5; do
+      $ne_ok  || { ssh $SSH_OPTS "$IPC1" "curl -sf --max-time 5 http://localhost:30900/metrics" 2>/dev/null | grep -q '^node_' && ne_ok=true; }
+      $ksm_ok || { ssh $SSH_OPTS "$IPC1" "curl -sf --max-time 5 http://localhost:30808/metrics" 2>/dev/null | grep -q '^kube_' && ksm_ok=true; }
+      $ne_ok && $ksm_ok && break
+      sleep 3
+    done
+    if ! $ne_ok; then
+      echo "FAIL: node-exporter metrics not served on :30900"; rc=1
+    elif ! $ksm_ok; then
+      echo "FAIL: kube-state-metrics not served on :30808"; rc=1
+    else
+      echo "OK: node-exporter + kube-state-metrics serving metrics"
+    fi
+  fi
+
+  # Intentionally no del_ns — live infrastructure.
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
+# 21 — mTLS with SPIRE SVIDs (sequential: shares SPIRE server/registrar)
+# ---------------------------------------------------------------------------
+verify_21() {
+  local rc=0
+  echo "=== 21: mtls-spire ==="
+
+  # Clean slate: openssl s_server/s_client fetch their SVID once at startup (no
+  # rotation), so a leftover server pod would present an expired cert and a
+  # completed client pod would not re-run. Force everything fresh.
+  del_ns mtls-demo
+  kube "delete job spire-register-mtls -n spire --ignore-not-found" 2>&1 || true
+
+  if ! kapply "$REPO/experiments/21-mtls-spire/namespace.yaml"; then
+    echo "FAIL: apply namespace"; rc=1
+  elif ! kapply "$REPO/experiments/21-mtls-spire/registration-job.yaml"; then
+    echo "FAIL: apply registration job"; rc=1
+  elif ! kube "wait job/spire-register-mtls -n spire --for=condition=complete --timeout=120s"; then
+    echo "FAIL: registration job did not complete"; rc=1
+  elif ! kapply "$REPO/experiments/21-mtls-spire/server.yaml"; then
+    echo "FAIL: apply server"; rc=1
+  elif ! kube "rollout status deployment/mtls-server -n mtls-demo --timeout=300s"; then
+    echo "FAIL: mtls-server rollout timeout"; rc=1
+  elif ! kapply "$REPO/experiments/21-mtls-spire/client.yaml"; then
+    echo "FAIL: apply client"; rc=1
+  elif ! kube "wait pod/mtls-client -n mtls-demo --for=jsonpath={.status.phase}=Succeeded --timeout=300s"; then
+    echo "FAIL: mtls-client did not succeed"; rc=1
+  else
+    local logs
+    logs=$(kube "logs mtls-client -n mtls-demo -c client" 2>/dev/null)
+    if ! echo "$logs" | grep -q "Verify return code: 0 (ok)"; then
+      echo "FAIL: client did not verify server (no 'Verify return code: 0')"; rc=1
+    elif ! echo "$logs" | grep -q "spiffe://ipc.local/mtls-server"; then
+      echo "FAIL: client did not see server SPIFFE ID in peer cert"; rc=1
+    else
+      echo "OK: mutual TLS established, both SPIFFE IDs verified"
+    fi
+  fi
+
+  del_ns mtls-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
+# 23 — Envoy mTLS, gateway form (sequential: shares SPIRE server/registrar)
+# ---------------------------------------------------------------------------
+verify_23() {
+  local rc=0
+  echo "=== 23: envoy-mtls (gateway form) ==="
+
+  kube "delete job spire-register-envoy -n spire --ignore-not-found" 2>&1 || true
+  kube "delete pod driver -n envoy-demo --ignore-not-found" 2>&1 || true
+
+  if ! kapply "$REPO/experiments/23-envoy-mtls/namespace.yaml"; then
+    echo "FAIL: apply namespace"; rc=1
+  elif ! kapply "$REPO/experiments/23-envoy-mtls/registration-job.yaml"; then
+    echo "FAIL: apply registration job"; rc=1
+  elif ! kube "wait job/spire-register-envoy -n spire --for=condition=complete --timeout=120s"; then
+    echo "FAIL: registration job did not complete"; rc=1
+  elif ! kapply \
+      "$REPO/experiments/23-envoy-mtls/envoy-configs.yaml" \
+      "$REPO/experiments/23-envoy-mtls/backend.yaml" \
+      "$REPO/experiments/23-envoy-mtls/server.yaml" \
+      "$REPO/experiments/23-envoy-mtls/client.yaml"; then
+    echo "FAIL: apply"; rc=1
+  elif ! kube "rollout status deployment/backend -n envoy-demo --timeout=180s"; then
+    echo "FAIL: backend rollout"; rc=1
+  elif ! kube "rollout status deployment/mtls-server -n envoy-demo --timeout=180s"; then
+    echo "FAIL: mtls-server rollout"; rc=1
+  elif ! kube "rollout status deployment/mtls-client -n envoy-demo --timeout=180s"; then
+    echo "FAIL: mtls-client rollout"; rc=1
+  elif ! kapply "$REPO/experiments/23-envoy-mtls/driver.yaml"; then
+    echo "FAIL: apply driver"; rc=1
+  elif ! kube "wait pod/driver -n envoy-demo --for=jsonpath={.status.phase}=Succeeded --timeout=120s"; then
+    echo "FAIL: driver did not succeed"; rc=1
+  else
+    if ! kube "logs driver -n envoy-demo" 2>/dev/null | grep -q "Hello from backend"; then
+      echo "FAIL: driver did not get backend response through mTLS"; rc=1
+    else
+      echo "OK: plain HTTP traversed the mTLS hop and reached the backend"
+    fi
+  fi
+
+  del_ns envoy-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
+# 24 — Envoy mTLS, sidecar form (sequential: shares SPIRE; needs Pelagos #331)
+# ---------------------------------------------------------------------------
+verify_24() {
+  local rc=0
+  echo "=== 24: envoy-sidecar ==="
+
+  kube "delete job spire-register-sidecar -n spire --ignore-not-found" 2>&1 || true
+  kube "delete pod sidecar-client -n sidecar-demo --ignore-not-found" 2>&1 || true
+
+  if ! kapply "$REPO/experiments/24-envoy-sidecar/namespace.yaml"; then
+    echo "FAIL: apply namespace"; rc=1
+  elif ! kapply "$REPO/experiments/24-envoy-sidecar/registration-job.yaml"; then
+    echo "FAIL: apply registration job"; rc=1
+  elif ! kube "wait job/spire-register-sidecar -n spire --for=condition=complete --timeout=120s"; then
+    echo "FAIL: registration job did not complete"; rc=1
+  elif ! kapply \
+      "$REPO/experiments/24-envoy-sidecar/envoy-configs.yaml" \
+      "$REPO/experiments/24-envoy-sidecar/server.yaml"; then
+    echo "FAIL: apply server"; rc=1
+  elif ! kube "rollout status deployment/sidecar-server -n sidecar-demo --timeout=180s"; then
+    echo "FAIL: sidecar-server rollout"; rc=1
+  elif ! kapply "$REPO/experiments/24-envoy-sidecar/client.yaml"; then
+    echo "FAIL: apply client"; rc=1
+  else
+    # The client pod stays Running (the Envoy sidecar never exits), so poll the
+    # app container's logs for the success marker instead of waiting for Succeeded.
+    local ok=false
+    for i in $(seq 24); do
+      sleep 5
+      if kube "logs sidecar-client -n sidecar-demo -c app" 2>/dev/null | grep -q "Hello from the app"; then
+        ok=true; break
+      fi
+    done
+    if ! $ok; then
+      echo "FAIL: app did not reach backend over localhost->mTLS->localhost in 2 min"; rc=1
+    else
+      echo "OK: sidecar localhost hop + cross-pod mTLS working (Pelagos #331 fix)"
+    fi
+  fi
+
+  del_ns sidecar-demo
+  [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 echo "Logs: $LOGDIR"
@@ -750,9 +963,11 @@ verify_08    > "$LOGDIR/08.log"    2>&1 & pids[08]=$!
 verify_09    > "$LOGDIR/09.log"    2>&1 & pids[09]=$!
 verify_13    > "$LOGDIR/13.log"    2>&1 & pids[13]=$!
 verify_15    > "$LOGDIR/15.log"    2>&1 & pids[15]=$!
+verify_20    > "$LOGDIR/20.log"    2>&1 & pids[20]=$!
+verify_22    > "$LOGDIR/22.log"    2>&1 & pids[22]=$!
 
 declare -A results
-for key in 01_02 03 04 05 06 07 08 09 13 15; do
+for key in 01_02 03 04 05 06 07 08 09 13 15 20 22; do
   if wait "${pids[$key]}"; then results[$key]=PASS; else results[$key]=FAIL; fi
 done
 
@@ -768,6 +983,8 @@ printf "  %-35s %s\n" "08    probes"               "${results[08]}"
 printf "  %-35s %s\n" "09    network-policies"     "${results[09]}"
 printf "  %-35s %s\n" "13    load-balancing"       "${results[13]}"
 printf "  %-35s %s\n" "15    statefulsets"         "${results[15]}"
+printf "  %-35s %s\n" "20    cert-manager"         "${results[20]}"
+printf "  %-35s %s\n" "22    cluster-monitoring"   "${results[22]}"
 
 echo ""
 echo "Starting sequential experiments..."
@@ -781,6 +998,9 @@ verify_16 > "$LOGDIR/16.log" 2>&1; results[16]=$?; [[ ${results[16]} -eq 0 ]] &&
 verify_17 > "$LOGDIR/17.log" 2>&1; results[17]=$?; [[ ${results[17]} -eq 0 ]] && results[17]=PASS || results[17]=FAIL
 verify_18 > "$LOGDIR/18.log" 2>&1; results[18]=$?; [[ ${results[18]} -eq 0 ]] && results[18]=PASS || results[18]=FAIL
 verify_19 > "$LOGDIR/19.log" 2>&1; results[19]=$?; [[ ${results[19]} -eq 0 ]] && results[19]=PASS || results[19]=FAIL
+verify_21 > "$LOGDIR/21.log" 2>&1; results[21]=$?; [[ ${results[21]} -eq 0 ]] && results[21]=PASS || results[21]=FAIL
+verify_23 > "$LOGDIR/23.log" 2>&1; results[23]=$?; [[ ${results[23]} -eq 0 ]] && results[23]=PASS || results[23]=FAIL
+verify_24 > "$LOGDIR/24.log" 2>&1; results[24]=$?; [[ ${results[24]} -eq 0 ]] && results[24]=PASS || results[24]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
@@ -790,14 +1010,17 @@ printf "  %-35s %s\n" "16    cgroup-plumbing"       "${results[16]}"
 printf "  %-35s %s\n" "17    memory-stats"          "${results[17]}"
 printf "  %-35s %s\n" "18    lifecycle-hooks"       "${results[18]}"
 printf "  %-35s %s\n" "19    hpa-memory"            "${results[19]}"
+printf "  %-35s %s\n" "21    mtls-spire"            "${results[21]}"
+printf "  %-35s %s\n" "23    envoy-mtls (gateway)" "${results[23]}"
+printf "  %-35s %s\n" "24    envoy-sidecar"        "${results[24]}"
 
 echo ""
 echo "=== Summary ==="
 fail=0
-for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19; do
+for key in 01_02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
   [[ "${results[$key]}" != "PASS" ]] && ((fail++)) || true
 done
-total=18
+total=23
 pass=$((total - fail))
 printf "  %d/%d passed\n" "$pass" "$total"
 if [[ $fail -eq 0 ]]; then
