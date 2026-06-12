@@ -1,5 +1,7 @@
 # Experiment 23: Transparent mTLS with Envoy and SPIRE
 
+> **Note:** This experiment uses a gateway form (each Envoy in its own pod) because it was built on Pelagos v0.65.30, where the pod loopback bug ([#331](https://github.com/pelagos-containers/pelagos/issues/331)) made the co-located sidecar pattern impossible. That bug was **fixed in Pelagos v0.65.31**, and the true sidecar form is shown in **[experiment 24](../24-envoy-sidecar/)**. This experiment is kept as-is: it's a valid Envoy-as-gateway deployment and it documents the bug hunt that led to the fix.
+
 ## What you'll observe
 
 - A `backend` pod running a plain HTTP app (`http-echo`) — completely TLS-unaware
@@ -16,7 +18,7 @@ This experiment shows *transparent* mTLS: the app (and the client) speak plain H
 
 ## Architecture — and why it's proxies in separate pods, not sidecars
 
-The textbook Envoy mTLS demo co-locates each Envoy with its app *in the same pod* as a sidecar, and the app talks to its sidecar over `127.0.0.1`. **That does not work on Pelagos** — see "Pelagos compatibility" below. Pelagos shares the pod network namespace correctly but leaves the loopback interface (`lo`) down, so an app cannot reach a sidecar over `127.0.0.1` (or even via the pod's own IP, which the kernel delivers through loopback).
+The textbook Envoy mTLS demo co-locates each Envoy with its app *in the same pod* as a sidecar, and the app talks to its sidecar over `127.0.0.1`. **That did not work on Pelagos v0.65.30** — see "Pelagos compatibility" below. Pelagos shared the pod network namespace correctly but left the loopback interface (`lo`) down, so an app could not reach a sidecar over `127.0.0.1` (or even via the pod's own IP, which the kernel delivers through loopback). Fixed in v0.65.31; the sidecar form is [experiment 24](../24-envoy-sidecar/).
 
 This experiment therefore runs each Envoy as its own pod (a gateway/proxy pattern) and connects everything with Kubernetes Services. Service traffic flows over `eth0` across the CNI bridge — never the loopback — so it is unaffected and works reliably on Pelagos. The "app is TLS-unaware" property is fully preserved — the proxies still terminate and originate TLS and forward plain HTTP to the apps.
 
@@ -56,11 +58,13 @@ Listens on `:8080` for plain HTTP. Forwards to `mtls-server-svc:9443` with upstr
 
 ## Pelagos compatibility
 
-### The pod loopback interface (`lo`) is left DOWN
+### The pod loopback interface (`lo`) was left DOWN (fixed in v0.65.31)
+
+> Fixed in Pelagos **v0.65.31** (PR #333). The description below documents the behavior on v0.65.30, which is why this experiment uses the gateway form. On v0.65.31+ the sidecar form works — see [experiment 24](../24-envoy-sidecar/).
 
 Standard Kubernetes/CRI places every container in a pod into one shared network namespace (created by the pause/sandbox container) **and brings up its loopback interface** (via the CNI `loopback` plugin). Sharing alone is not enough — `lo` must be UP for containers to talk over `127.0.0.1`.
 
-Pelagos (verified v0.65.30) shares the netns correctly but leaves `lo` administratively DOWN. Definitive single-variable reproduction inside a pod netns:
+Pelagos v0.65.30 shared the netns correctly but left `lo` administratively DOWN. Definitive single-variable reproduction inside a pod netns:
 
 ```
 # lo DOWN (as Pelagos leaves it):
@@ -72,13 +76,13 @@ probe 127.0.0.1:7777  → FAILS
 probe 127.0.0.1:7777  → HTTP/1.1 200 OK
 ```
 
-Nothing else changes — bringing `lo` up fixes it. With `lo` down, both `127.0.0.1` and connections to the pod's own IP fail (the kernel delivers traffic to a local address via loopback). This breaks any co-located sidecar (service mesh data planes, Vault agent injector, etc.).
+Nothing else changes — bringing `lo` up fixed it. With `lo` down, both `127.0.0.1` and connections to the pod's own IP failed (the kernel delivers traffic to a local address via loopback). This broke any co-located sidecar (service mesh data planes, Vault agent injector, etc.).
 
-Note: `kubectl exec` on Pelagos lands in the *host* network namespace, not the container's, so exec-based `ip addr`/netns checks are misleading — always inspect the container's main process. (The netns sharing was verified by reading `/proc/<workload-pid>/ns/net` from the host: pause + both containers share one inode.)
+Note: `kubectl exec` on Pelagos v0.65.30 also landed in the *host* network namespace, not the container's, so exec-based `ip addr`/netns checks were misleading — always inspect the container's main process. (The netns sharing was verified by reading `/proc/<workload-pid>/ns/net` from the host: pause + both containers share one inode.) That exec bug was filed as [#332](https://github.com/pelagos-containers/pelagos/issues/332) and fixed in the same v0.65.31 release.
 
-**Workaround used here:** give each component its own pod and connect via Services. Service traffic uses `eth0`, not loopback, so it is unaffected. Cross-pod networking (including cross-node) works correctly on Pelagos.
+**Workaround used here:** give each component its own pod and connect via Services. Service traffic uses `eth0`, not loopback, so it is unaffected. Cross-pod networking (including cross-node) works correctly on Pelagos regardless. (On v0.65.31+ the sidecar form is also available — experiment 24 — but this gateway form remains valid.)
 
-This is the same class of CRI gap as the two issues found in experiment 11 — `hostPID` not implemented (Pelagos #299, fixed v0.65.7) and 32-char container IDs (#301, fixed v0.65.8). Filed as [Pelagos #331](https://github.com/pelagos-containers/pelagos/issues/331).
+This was the same class of CRI gap as the two issues found in experiment 11 — `hostPID` not implemented (Pelagos #299, fixed v0.65.7) and 32-char container IDs (#301, fixed v0.65.8). Filed as [Pelagos #331](https://github.com/pelagos-containers/pelagos/issues/331) (loopback) and [#332](https://github.com/pelagos-containers/pelagos/issues/332) (exec netns); **both fixed in v0.65.31** (PR #333).
 
 ## Files
 
@@ -146,4 +150,4 @@ kubectl run noauth --image=curlimages/curl:8.6.0 -n envoy-demo --restart=Never -
 | Certificate rotation | Manual (init container, one-time fetch) | Automatic (Envoy subscribes to SPIRE SDS) |
 | Peer authorization | openssl verifies chain only | Envoy validates SPIFFE URI SAN exactly |
 | Topology | Two single-container pods | Two apps + two proxy pods, Services between |
-| Production model | Educational demo | Service-mesh data-plane pattern (gateway form; sidecar form blocked by Pelagos #331) |
+| Production model | Educational demo | Service-mesh data-plane pattern (gateway form; sidecar form was blocked by Pelagos #331, fixed v0.65.31 — see experiment 24) |
