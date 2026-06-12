@@ -13,8 +13,11 @@ Kubernetes learning cluster on six ipc machines (1 control plane, 5 workers). Sc
 | ipc5 | worker | 192.168.88.56 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc5` | `d0:ad:08:9c:d1:45` (eno1) |
 | ipc6 | worker | 192.168.88.57 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc6` | `e0:73:e7:c0:b0:08` (eno1) |
 
-- k3s v1.35.5, Ubuntu 24.04, x86_64, 4 cores, 30GB RAM per node
-- Container runtime: Pelagos v0.65.30 on all five nodes (`pelagos://0.1.0`)
+- k3s v1.35.5, Ubuntu 24.04, x86_64
+- ipc1-3: Intel Pentium Gold G5400T, 2 cores / 4 threads, 32GB RAM
+- ipc4-5: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM
+- ipc6: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, **16GB RAM**
+- Container runtime: Pelagos v0.65.30 on all six nodes (`pelagos://0.1.0`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
 - SSH key: `~/.ssh/id_rsa` (cb@omen)
