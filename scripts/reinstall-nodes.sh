@@ -155,6 +155,9 @@ for node in "${NODES[@]}"; do
 
     clear_dynamic_leases "$node"
 
+    echo "--- Removing stale Tailscale device(s) for $node (so it reclaims its name) ---"
+    bash "$REPO_ROOT/scripts/tailscale-cleanup.sh" "$node" || true
+
     echo "--- Enabling PXE for $node ---"
     bash "$REPO_ROOT/scripts/pxe-control.sh" enable "$node"
 
@@ -193,6 +196,9 @@ for node in "${NODES[@]}"; do
     bash "$REPO_ROOT/scripts/upgrade-agents.sh" "$node"
 
     wait_node_ready "$node"
+
+    echo "--- Verifying Tailscale name is clean (single device, no -1 suffix) ---"
+    bash "$REPO_ROOT/scripts/tailscale-cleanup.sh" --verify "$node" || true
 
     echo "--- Final check ---"
     ssh_ipc1 "sudo kubectl get node $node -o wide"
