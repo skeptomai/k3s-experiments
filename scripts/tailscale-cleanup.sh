@@ -23,20 +23,31 @@ set -uo pipefail
 API="https://api.tailscale.com/api/v2"
 TS_OP_ITEM="${TS_OP_ITEM:-op://Private/Tailscale OAuth k3s}"
 
-load_creds() {
-  [[ -n "${TS_OAUTH_CLIENT_ID:-}" && -n "${TS_OAUTH_CLIENT_SECRET:-}" ]] && return 0
-  if command -v op >/dev/null 2>&1; then
-    TS_OAUTH_CLIENT_ID=$(op read "${TS_OP_ITEM}/client_id" 2>/dev/null) || true
-    TS_OAUTH_CLIENT_SECRET=$(op read "${TS_OP_ITEM}/client_secret" 2>/dev/null) || true
-  fi
-  [[ -n "${TS_OAUTH_CLIENT_ID:-}" && -n "${TS_OAUTH_CLIENT_SECRET:-}" ]]
-}
-
+# Resolve a usable API bearer token from whatever credential is available.
+# Precedence: direct PAT (env, then 1Password) -> OAuth client (env, then 1P).
+# A raw access token (tskey-api-...) is used as-is; an OAuth client mints a
+# short-lived token via the client_credentials grant.
 get_token() {
-  curl -s -X POST "$API/oauth/token" \
-    -d "client_id=$TS_OAUTH_CLIENT_ID" \
-    -d "client_secret=$TS_OAUTH_CLIENT_SECRET" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null
+  # 1) Personal API access token (PAT), used directly as the bearer token.
+  if [[ -n "${TS_API_KEY:-}" ]]; then echo "$TS_API_KEY"; return 0; fi
+  if command -v op >/dev/null 2>&1; then
+    local k; k=$(op read "${TS_OP_ITEM}/api_key" 2>/dev/null) || true
+    [[ -n "$k" ]] && { echo "$k"; return 0; }
+  fi
+
+  # 2) OAuth client -> mint a short-lived token.
+  local id="${TS_OAUTH_CLIENT_ID:-}" secret="${TS_OAUTH_CLIENT_SECRET:-}"
+  if [[ ( -z "$id" || -z "$secret" ) ]] && command -v op >/dev/null 2>&1; then
+    [[ -z "$id" ]]     && id=$(op read "${TS_OP_ITEM}/client_id" 2>/dev/null) || true
+    [[ -z "$secret" ]] && secret=$(op read "${TS_OP_ITEM}/client_secret" 2>/dev/null) || true
+  fi
+  if [[ -n "$id" && -n "$secret" ]]; then
+    curl -s -X POST "$API/oauth/token" \
+      -d "client_id=$id" -d "client_secret=$secret" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null
+    return 0
+  fi
+  return 1   # no credential found
 }
 
 # Print "id<TAB>name<TAB>lastSeen" for every device whose OS hostname == $1.
@@ -56,14 +67,12 @@ VERIFY=0
 [[ "${1:-}" == "--verify" ]] && { VERIFY=1; shift; }
 [[ $# -ge 1 ]] || { echo "Usage: $0 [--verify] <node> [node...]"; exit 1; }
 
-if ! load_creds; then
-  echo "WARN: no Tailscale OAuth creds (env or $TS_OP_ITEM) — skipping device cleanup."
-  echo "      Remove stale <node>/<node>-1 devices manually in the admin console."
+TOKEN=$(get_token)
+if [[ -z "$TOKEN" ]]; then
+  echo "WARN: no Tailscale credential found (TS_API_KEY, TS_OAUTH_CLIENT_ID/_SECRET, or $TS_OP_ITEM)."
+  echo "      Skipping device cleanup — remove stale <node>/<node>-1 devices manually in the admin console."
   exit 0
 fi
-
-TOKEN=$(get_token)
-[[ -n "$TOKEN" ]] || { echo "WARN: could not obtain Tailscale API token — skipping."; exit 0; }
 
 DEVICES=$(curl -s -H "Authorization: Bearer $TOKEN" "$API/tailnet/-/devices")
 

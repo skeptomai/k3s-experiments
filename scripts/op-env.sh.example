@@ -13,15 +13,21 @@
 #
 # DO NOT commit scripts/op-env.sh — it is in .gitignore.
 
+# The script accepts EITHER credential type (precedence: PAT, then OAuth client):
+#   - TS_API_KEY                         : a personal API access token (tskey-api-...)
+#   - TS_OAUTH_CLIENT_ID/_SECRET         : an OAuth client (recommended)
+# Both need "devices" write scope and ownership of the tag your nodes use
+# (tagOwners in the tailnet ACL) or device deletes return HTTP 403.
+
 # ----------------------------------------------------------------------------
 # Option A — direct env vars (simplest; secret lives in this gitignored file)
 # ----------------------------------------------------------------------------
-# A Tailscale OAuth client with scope "devices:core" (write). Create it at
-# https://login.tailscale.com/admin/settings/oauth and grant it ownership of
-# the tag your nodes use (tagOwners in the tailnet ACL) or device deletes 403.
-#
+# A1. OAuth client (recommended) — https://login.tailscale.com/admin/settings/oauth
 # export TS_OAUTH_CLIENT_ID="tskey-client-xxxxxxxxxxxx"
 # export TS_OAUTH_CLIENT_SECRET="tskey-client-xxxxxxxxxxxx-yyyyyyyyyyyyyyyyyyyyyyyy"
+#
+# A2. Or a personal API access token — https://login.tailscale.com/admin/settings/keys
+# export TS_API_KEY="tskey-api-xxxxxxxxxxxx-yyyyyyyyyyyyyyyyyyyyyyyy"
 
 # ----------------------------------------------------------------------------
 # Option B — 1Password (recommended; secret stays in your vault, fetched at run
@@ -48,6 +54,7 @@
 # One-time: seed the 1Password item from an OAuth client you already created.
 # Run interactively (op signed in), replacing the placeholder values:
 # ----------------------------------------------------------------------------
+#   # OAuth client (script reads fields client_id + client_secret):
 #   op item create \
 #     --category "API Credential" \
 #     --title "Tailscale OAuth k3s" \
@@ -55,6 +62,9 @@
 #     "client_id=tskey-client-xxxxxxxxxxxx" \
 #     "client_secret=tskey-client-xxxxxxxxxxxx-yyyyyyyyyyyyyyyyyyyyyyyy"
 #
-# Verify the script can read it:
-#   op read "op://Private/Tailscale OAuth k3s/client_id"
+#   # Or a PAT (script reads field api_key):
+#   op item create --category "API Credential" --title "Tailscale OAuth k3s" \
+#     --vault "Private" "api_key=tskey-api-xxxxxxxxxxxx-yyyyyyyyyyyyyyyyyyyyyyyy"
+#
+# Verify the script can read it (no value is printed):
 #   bash scripts/tailscale-cleanup.sh --verify ipc6
