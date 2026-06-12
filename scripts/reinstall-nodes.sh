@@ -136,7 +136,10 @@ clear_dynamic_leases() {
     local node=$1
     local mac="${NODE_MAC[$node]}"
     echo "--- Clearing dynamic MikroTik DHCP leases for $node ($mac) ---"
-    ssh "$MIKROTIK" "/ip dhcp-server lease remove [find where mac-address=\"$mac\" dynamic=yes]" 2>/dev/null \
+    # MikroTik (192.168.88.1) is on the home LAN, not the tailnet, so jump
+    # through ipc1 which is on both.
+    ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" "$MIKROTIK" \
+        "/ip dhcp-server lease remove [find where mac-address=\"$mac\" dynamic=yes]" 2>/dev/null \
         && echo "  Dynamic leases cleared (or none existed)" || echo "  WARN: could not reach MikroTik"
 }
 
