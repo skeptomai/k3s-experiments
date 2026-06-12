@@ -2,6 +2,9 @@
 # ipc node autoinstall — matches by MAC and boots the right config automatically.
 # Falls through to the normal netboot.xyz menu for any non-ipc machine.
 # Paste into the custom.ipxe file in the netboot.xyz web UI Menus section.
+#
+# Default kernel/ISO is Ubuntu 24.04.4. ipc6 (e0:73:e7:c0:b0:08) overrides
+# kurl/iso to Ubuntu 26.04 as a trial — see its iseq line below.
 
 set nb   http://192.168.89.2:31011
 set kurl ${nb}/ubuntu-squash/releases/download/24.04.4-717d3a1a
@@ -12,7 +15,7 @@ iseq ${net0/mac} a8:a1:59:43:2a:ed && set ai ${nb}/autoinstall/a8-a1-59-43-2a-ed
 iseq ${net0/mac} a8:a1:59:43:2a:74 && set ai ${nb}/autoinstall/a8-a1-59-43-2a-74/ && goto install ||
 iseq ${net0/mac} d0:ad:08:9c:d2:cb && set ai ${nb}/autoinstall/d0-ad-08-9c-d2-cb/ && goto install ||
 iseq ${net0/mac} d0:ad:08:9c:d1:45 && set ai ${nb}/autoinstall/d0-ad-08-9c-d1-45/ && goto install ||
-iseq ${net0/mac} e0:73:e7:c0:b0:08 && set ai ${nb}/autoinstall/e0-73-e7-c0-b0-08/ && goto install ||
+iseq ${net0/mac} e0:73:e7:c0:b0:08 && set kurl ${nb}/ubuntu-squash/releases/download/26.04 && set iso ${nb}/ubuntu-26.04-live-server-amd64.iso && set ai ${nb}/autoinstall/e0-73-e7-c0-b0-08/ && goto install ||
 exit 0
 
 :install
