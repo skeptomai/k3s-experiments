@@ -537,8 +537,16 @@ verify_16() {
     # device can keep owning the name (new one registers as <node>-1), so
     # cb@<node> resolves to the dead device and times out.
     declare -A node_ip
-    while read -r _n _ip; do [[ -n "$_n" ]] && node_ip[$_n]=$_ip; done < <(
-      kube "get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.status.addresses[?(@.type==\"InternalIP\")].address}{\"\n\"}{end}'" 2>/dev/null)
+    while IFS=$'\t' read -r _n _ip; do
+      [[ -n "$_n" && -n "$_ip" ]] && node_ip[$_n]=$_ip
+    done < <(kube "get nodes -o json" 2>/dev/null | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for n in d['items']:
+  name=n['metadata']['name']
+  ip=next((a['address'] for a in n['status']['addresses'] if a['type']=='InternalIP'),'')
+  if ip: print(name+'\t'+ip)
+" 2>/dev/null)
 
     # Extract pod→node→cri_id into arrays
     local -a pod_names=() pod_nodes=() pod_cris=()
