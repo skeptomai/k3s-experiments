@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: driver
+  namespace: envoy-demo
+spec:
+  restartPolicy: Never
+  containers:
+    - name: driver
+      image: docker.io/curlimages/curl:8.6.0
+      command: ["sh", "-c"]
+      args:
+        - |
+          echo "Driver sends plain HTTP to the client proxy. It has no idea TLS is involved."
+          echo "Waiting for the client proxy to answer..."
+          until curl -sf http://mtls-client-svc:8080/ > /dev/null 2>&1; do sleep 2; done
+          echo ""
+          for i in $(seq 1 5); do
+            echo "--- Request $i ---"
+            curl -si http://mtls-client-svc:8080/ | head -1
+            curl -s http://mtls-client-svc:8080/
+            echo ""
+            sleep 1
+          done
+          echo "=== Done: 5 plain-HTTP requests traversed an mTLS hop between Envoy proxies ==="
+          echo "Neither the driver nor the backend used TLS. The two Envoys did, using SPIRE SVIDs."

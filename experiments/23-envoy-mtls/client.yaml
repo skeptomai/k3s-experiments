@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mtls-client
+  namespace: envoy-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mtls-client
+  template:
+    metadata:
+      labels:
+        app: mtls-client
+    spec:
+      serviceAccountName: envoy-client-sa
+      initContainers:
+        - name: wait-for-spire
+          image: docker.io/library/busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - until [ -S /run/spire/sockets/agent.sock ]; do echo "waiting for SPIRE socket..."; sleep 2; done; echo "SPIRE socket ready."
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+      containers:
+        - name: envoy
+          image: docker.io/envoyproxy/envoy:v1.32.0
+          args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info", "--service-node", "envoy-client", "--service-cluster", "envoy-demo"]
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: envoy-client-config
+        - name: spire-agent-socket
+          hostPath:
+            path: /run/spire/sockets
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mtls-client-svc
+  namespace: envoy-demo
+spec:
+  selector:
+    app: mtls-client
+  ports:
+    - port: 8080
+      targetPort: 8080
