@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Example: provisioning the Tailscale OAuth credentials that
+# scripts/tailscale-cleanup.sh (and therefore reinstall-nodes.sh) reads.
+#
+# Copy to scripts/op-env.sh (gitignored), fill in, and `source` it before a
+# reinstall — OR rely on the 1Password item below and skip the env vars entirely.
+#
+#   cp scripts/op-env.sh.example scripts/op-env.sh
+#   chmod 600 scripts/op-env.sh
+#   # edit, then:
+#   source scripts/op-env.sh
+#   bash scripts/reinstall-nodes.sh ipc6
+#
+# DO NOT commit scripts/op-env.sh — it is in .gitignore.
+
+# ----------------------------------------------------------------------------
+# Option A — direct env vars (simplest; secret lives in this gitignored file)
+# ----------------------------------------------------------------------------
+# A Tailscale OAuth client with scope "devices:core" (write). Create it at
+# https://login.tailscale.com/admin/settings/oauth and grant it ownership of
+# the tag your nodes use (tagOwners in the tailnet ACL) or device deletes 403.
+#
+# export TS_OAUTH_CLIENT_ID="tskey-client-xxxxxxxxxxxx"
+# export TS_OAUTH_CLIENT_SECRET="tskey-client-xxxxxxxxxxxx-yyyyyyyyyyyyyyyyyyyyyyyy"
+
+# ----------------------------------------------------------------------------
+# Option B — 1Password (recommended; secret stays in your vault, fetched at run
+# time via `op read`). tailscale-cleanup.sh falls back to this when the env
+# vars above are unset. Two sub-options for how `op` authenticates:
+# ----------------------------------------------------------------------------
+
+# B1. 1Password service account (best for unattended reinstalls — no biometric
+#     prompt). Create a service account scoped to read ONLY the item below:
+#       https://developer.1password.com/docs/service-accounts/
+#     then provide its token (keep this line out of git — put the token itself
+#     in your shell keychain or a root-only file, not here):
+#
+# export OP_SERVICE_ACCOUNT_TOKEN="ops_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# B2. Or sign the 1Password desktop app integration in (interactive runs only):
+#       op signin            # or enable the desktop app integration once
+
+# Override the default item path if you store it elsewhere
+# (default in tailscale-cleanup.sh is "op://Private/Tailscale OAuth k3s"):
+# export TS_OP_ITEM="op://Private/Tailscale OAuth k3s"
+
+# ----------------------------------------------------------------------------
+# One-time: seed the 1Password item from an OAuth client you already created.
+# Run interactively (op signed in), replacing the placeholder values:
+# ----------------------------------------------------------------------------
+#   op item create \
+#     --category "API Credential" \
+#     --title "Tailscale OAuth k3s" \
+#     --vault "Private" \
+#     "client_id=tskey-client-xxxxxxxxxxxx" \
+#     "client_secret=tskey-client-xxxxxxxxxxxx-yyyyyyyyyyyyyyyyyyyyyyyy"
+#
+# Verify the script can read it:
+#   op read "op://Private/Tailscale OAuth k3s/client_id"
+#   bash scripts/tailscale-cleanup.sh --verify ipc6
