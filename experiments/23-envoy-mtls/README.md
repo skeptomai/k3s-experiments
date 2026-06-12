@@ -16,9 +16,9 @@ This experiment shows *transparent* mTLS: the app (and the client) speak plain H
 
 ## Architecture — and why it's proxies in separate pods, not sidecars
 
-The textbook Envoy mTLS demo co-locates each Envoy with its app *in the same pod* as a sidecar, and the app talks to its sidecar over `127.0.0.1`. **That does not work on Pelagos** — see "Pelagos compatibility" below. Pelagos does not share a network namespace between containers in a pod, so an app cannot reach a sidecar over localhost (or even the pod IP).
+The textbook Envoy mTLS demo co-locates each Envoy with its app *in the same pod* as a sidecar, and the app talks to its sidecar over `127.0.0.1`. **That does not work on Pelagos** — see "Pelagos compatibility" below. Pelagos shares the pod network namespace correctly but leaves the loopback interface (`lo`) down, so an app cannot reach a sidecar over `127.0.0.1` (or even via the pod's own IP, which the kernel delivers through loopback).
 
-This experiment therefore runs each Envoy as its own pod (a gateway/proxy pattern) and connects everything with Kubernetes Services, which work reliably on Pelagos. The "app is TLS-unaware" property is fully preserved — the proxies still terminate and originate TLS and forward plain HTTP to the apps.
+This experiment therefore runs each Envoy as its own pod (a gateway/proxy pattern) and connects everything with Kubernetes Services. Service traffic flows over `eth0` across the CNI bridge — never the loopback — so it is unaffected and works reliably on Pelagos. The "app is TLS-unaware" property is fully preserved — the proxies still terminate and originate TLS and forward plain HTTP to the apps.
 
 ```
  driver (curl)                                                         backend (http-echo)
@@ -56,22 +56,29 @@ Listens on `:8080` for plain HTTP. Forwards to `mtls-server-svc:9443` with upstr
 
 ## Pelagos compatibility
 
-### Containers in a pod do NOT share a network namespace
+### The pod loopback interface (`lo`) is left DOWN
 
-Standard Kubernetes/CRI places every container in a pod into one network namespace (created by the pause/sandbox container), so containers reach each other over `127.0.0.1`. This is the foundation of the sidecar pattern.
+Standard Kubernetes/CRI places every container in a pod into one shared network namespace (created by the pause/sandbox container) **and brings up its loopback interface** (via the CNI `loopback` plugin). Sharing alone is not enough — `lo` must be UP for containers to talk over `127.0.0.1`.
 
-Pelagos (verified v0.65.30) isolates each container in its own network namespace. Clean reproduction with a two-container pod (`httpd` listener + `wget` prober):
+Pelagos (verified v0.65.30) shares the netns correctly but leaves `lo` administratively DOWN. Definitive single-variable reproduction inside a pod netns:
 
 ```
-prober -> 127.0.0.1:7777   → immediate failure (separate loopback)
-prober -> <pod-IP>:7777     → connection timeout (separate netns; same pod IP shown on both eth0s)
+# lo DOWN (as Pelagos leaves it):
+1: lo: <LOOPBACK> ... qdisc noop state DOWN
+probe 127.0.0.1:7777  → FAILS
+
+# after `ip link set lo up`:
+1: lo: <LOOPBACK,UP,LOWER_UP> ... qdisc noqueue state UNKNOWN
+probe 127.0.0.1:7777  → HTTP/1.1 200 OK
 ```
 
-Both containers' `ip addr` report the *same* pod IP, yet they cannot reach each other on localhost or that IP. This breaks any co-located sidecar (service mesh data planes, Vault agent injector, etc.).
+Nothing else changes — bringing `lo` up fixes it. With `lo` down, both `127.0.0.1` and connections to the pod's own IP fail (the kernel delivers traffic to a local address via loopback). This breaks any co-located sidecar (service mesh data planes, Vault agent injector, etc.).
 
-**Workaround used here:** give each component its own pod and connect via Services. Cross-pod networking (including cross-node) works correctly on Pelagos.
+Note: `kubectl exec` on Pelagos lands in the *host* network namespace, not the container's, so exec-based `ip addr`/netns checks are misleading — always inspect the container's main process. (The netns sharing was verified by reading `/proc/<workload-pid>/ns/net` from the host: pause + both containers share one inode.)
 
-This is the same class of CRI gap as the two issues found in experiment 11 — `hostPID` not implemented (Pelagos #299, fixed v0.65.7) and 32-char container IDs (#301, fixed v0.65.8). Worth filing as a new issue, since shared pod network namespace is a core CRI expectation.
+**Workaround used here:** give each component its own pod and connect via Services. Service traffic uses `eth0`, not loopback, so it is unaffected. Cross-pod networking (including cross-node) works correctly on Pelagos.
+
+This is the same class of CRI gap as the two issues found in experiment 11 — `hostPID` not implemented (Pelagos #299, fixed v0.65.7) and 32-char container IDs (#301, fixed v0.65.8). Filed as [Pelagos #331](https://github.com/pelagos-containers/pelagos/issues/331).
 
 ## Files
 
@@ -139,4 +146,4 @@ kubectl run noauth --image=curlimages/curl:8.6.0 -n envoy-demo --restart=Never -
 | Certificate rotation | Manual (init container, one-time fetch) | Automatic (Envoy subscribes to SPIRE SDS) |
 | Peer authorization | openssl verifies chain only | Envoy validates SPIFFE URI SAN exactly |
 | Topology | Two single-container pods | Two apps + two proxy pods, Services between |
-| Production model | Educational demo | Service-mesh data-plane pattern (gateway form, due to Pelagos netns) |
+| Production model | Educational demo | Service-mesh data-plane pattern (gateway form; sidecar form blocked by Pelagos #331) |
