@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spire-register-sidecar
+  namespace: spire
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      serviceAccountName: spire-registrar
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              SERVER="pod/spire-server-0"
+              NS="-n spire"
+              BIN="/opt/spire/bin/spire-server entry create"
+
+              echo "=== Registering sidecar-server ==="
+              kubectl exec $NS $SERVER -- $BIN \
+                -spiffeID spiffe://ipc.local/sidecar-server \
+                -parentID spiffe://ipc.local/k8s-node \
+                -selector k8s:ns:sidecar-demo \
+                -selector k8s:sa:sidecar-server-sa \
+              && echo "sidecar-server entry created." || echo "Entry may already exist."
+
+              echo ""
+              echo "=== Registering sidecar-client ==="
+              kubectl exec $NS $SERVER -- $BIN \
+                -spiffeID spiffe://ipc.local/sidecar-client \
+                -parentID spiffe://ipc.local/k8s-node \
+                -selector k8s:ns:sidecar-demo \
+                -selector k8s:sa:sidecar-client-sa \
+              && echo "sidecar-client entry created." || echo "Entry may already exist."
+
+              echo ""
+              echo "=== Current entries ==="
+              kubectl exec $NS pod/spire-server-0 -- /opt/spire/bin/spire-server entry show

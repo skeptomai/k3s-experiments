@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sidecar-demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sidecar-server-sa
+  namespace: sidecar-demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sidecar-client-sa
+  namespace: sidecar-demo

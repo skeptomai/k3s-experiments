@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-client
+  namespace: sidecar-demo
+spec:
+  serviceAccountName: sidecar-client-sa
+  restartPolicy: Never
+  initContainers:
+    - name: wait-for-spire
+      image: docker.io/library/busybox:1.36
+      command: ["sh", "-c"]
+      args:
+        - until [ -S /run/spire/sockets/agent.sock ]; do echo "waiting for SPIRE socket..."; sleep 2; done; echo "SPIRE socket ready."
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+  containers:
+    # The Envoy sidecar — accepts plain HTTP on 127.0.0.1:15001, originates mTLS.
+    - name: envoy
+      image: docker.io/envoyproxy/envoy:v1.32.0
+      args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info", "--service-node", "sidecar-client", "--service-cluster", "sidecar-demo"]
+      volumeMounts:
+        - name: envoy-config
+          mountPath: /etc/envoy
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {memory: 128Mi}
+    # The application — talks to its sidecar over the pod loopback. Unaware of TLS.
+    - name: app
+      image: docker.io/curlimages/curl:8.6.0
+      command: ["sh", "-c"]
+      args:
+        - |
+          echo "App talks plain HTTP to its sidecar at 127.0.0.1:15001 — over the pod loopback."
+          echo "Waiting for the sidecar to be ready..."
+          until curl -sf http://127.0.0.1:15001/ > /dev/null 2>&1; do sleep 2; done
+          echo ""
+          for i in $(seq 1 5); do
+            echo "--- Request $i ---"
+            curl -si http://127.0.0.1:15001/ | head -1
+            curl -s  http://127.0.0.1:15001/
+            echo ""
+            sleep 1
+          done
+          echo "=== Done: app reached the backend over a localhost->mTLS->localhost path ==="
+          echo "Both apps used 127.0.0.1. The sidecars did mTLS between pods, using SPIRE SVIDs."
+      volumeMounts: []
+  volumes:
+    - name: envoy-config
+      configMap:
+        name: sidecar-client-config
+    - name: spire-agent-socket
+      hostPath:
+        path: /run/spire/sockets
+        type: Directory
