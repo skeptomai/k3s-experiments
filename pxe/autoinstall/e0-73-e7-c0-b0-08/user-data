@@ -1,0 +1,39 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: America/Los_Angeles
+  identity:
+    hostname: ipc6
+    username: cb
+    password: "$6$QimoX1zBxWmBnE2H$mkU./oEWT/bvdPfpYmiCgfNtC9Nh1.hIlsi67kJhMBeDwRh/RIQcsHE7rX7hilprk7FQK7Kd8Rrnl4FHDMM3u."
+  ssh:
+    install-server: true
+    authorized-keys:
+      - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC/jbfap70ek09uy4a+wk8peK3dZ99UMkk3BGKLGupDOfV8sBfEbB5cjjoemYL8s/4r9O7oJtkI+WQbfOwzK38gH0CU5Y3NHr4qEZ7ESkVYbBuXiMXhcjwysTBHwjV0MFYzLdpEdMB5s5SmMSXT3eTfVtRvWH6VQl2fWujCxxn4Rhj2pHUOuisFg/pwCxerertbNd8ryK6dqqXFZ9P++hyMz46uVxxHhE6HIqL5PCSeny9ZiIJSqjitzq3Z2jHQsOgw7E52SQMLCzhw8qRriGFrCdOZhpyOR49UEVi5nrGSwRlA6Xrlvj4kd1VxiduFy4beYiaL4IaDJ7PoOkoeqdMFWUKmQLYxGaq2+HIxe3Whv0R27o4et1gSbxhukAzHrF1ITqK6KgulJUG1tgCAcGDc/lhLMS/L0m5raOaZ/d9xXAHSEm/WFctciOvjZNIpWS5dthpT3gYGV2O4AJWZmGDPjQdWU18xnZyKWEq2CQXkF0+WHZD3hFrO8CjpErDOa7k= cb@omen"
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDYRRU9qIqsrdGmRWNBnYZM1viJH2zotTCV1Pvwtn+eG chbrown@7172345-lcelt"
+    allow-pw: false
+  network:
+    version: 2
+    ethernets:
+      id0:
+        match:
+          macaddress: "e0:73:e7:c0:b0:08"
+        dhcp4: true
+  storage:
+    layout:
+      name: direct
+  packages:
+    - nfs-common
+    - curl
+  updates: security
+  late-commands:
+    - echo 'cb ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/cb
+    - chmod 440 /target/etc/sudoers.d/cb
+    - mkdir -p /target/mnt/primary_storage/k8s-nfs
+    - "printf 'network:\\n  version: 2\\n  ethernets:\\n    id0:\\n      match:\\n        macaddress: \"e0:73:e7:c0:b0:08\"\\n      dhcp-identifier: mac\\n' > /target/etc/netplan/99-dhcp-mac.yaml"
+    - "curtin in-target -- sh -c 'curl -fsSL https://tailscale.com/install.sh | sh'"
+    - "printf '[Unit]\\nDescription=Tailscale auto-connect\\nAfter=tailscaled.service network-online.target\\nWants=network-online.target\\nConditionPathExists=!/var/lib/tailscale/tailscaled.state\\n\\n[Service]\\nType=oneshot\\nExecStart=/usr/bin/tailscale up --authkey=tskey-auth-krerCq6KgE11CNTRL-B14XnPSw2NaXmYAeeDeBNawMyftZ5yoN\\nRemainAfterExit=yes\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /target/etc/systemd/system/tailscale-autoconnect.service"
+    - "curtin in-target -- systemctl enable tailscale-autoconnect.service"

@@ -19,9 +19,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 MIKROTIK="admin@192.168.88.1"
 
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56")
-declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1")
-declare -A NODE_MAC=([ipc2]="A8:A1:59:43:2A:ED" [ipc3]="A8:A1:59:43:2A:74" [ipc4]="D0:AD:08:9C:D2:CB" [ipc5]="D0:AD:08:9C:D1:45")
+declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
+declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1" [ipc6]="eno1")
+declare -A NODE_MAC=([ipc2]="A8:A1:59:43:2A:ED" [ipc3]="A8:A1:59:43:2A:74" [ipc4]="D0:AD:08:9C:D2:CB" [ipc5]="D0:AD:08:9C:D1:45" [ipc6]="E0:73:E7:C0:B0:08")
 
 NODES=("$@")
 [[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 <node> [node...]"; exit 1; }
@@ -32,7 +32,7 @@ for node in "${NODES[@]}"; do
         exit 1
     fi
     if [[ -z "${NODE_IP[$node]+x}" ]]; then
-        echo "ERROR: unknown node '$node'. Valid nodes: ipc2 ipc3 ipc4 ipc5" >&2
+        echo "ERROR: unknown node '$node'. Valid nodes: ipc2 ipc3 ipc4 ipc5 ipc6" >&2
         exit 1
     fi
 done

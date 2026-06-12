@@ -12,7 +12,7 @@
 #   node:    ipc2 | ipc3 | ipc4 | ipc5 (default: ipc2 ipc3; specify to target one node)
 set -euo pipefail
 
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56")
+declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
 
 CHANNEL="stable"
 AGENTS=()

@@ -26,18 +26,19 @@ declare -A NODE_MAC=(
     [ipc3]="MAC-a8a159432a74.ipxe"
     [ipc4]="MAC-d0ad089cd2cb.ipxe"
     [ipc5]="MAC-d0ad089cd145.ipxe"
+    [ipc6]="MAC-e073e7c0b008.ipxe"
 )
 
 usage() {
     echo "Usage: $0 status"
-    echo "       $0 enable  <ipc1|ipc2|ipc3|ipc4|ipc5|all>"
-    echo "       $0 disable <ipc1|ipc2|ipc3|ipc4|ipc5|all>"
+    echo "       $0 enable  <ipc1|ipc2|ipc3|ipc4|ipc5|ipc6|all>"
+    echo "       $0 disable <ipc1|ipc2|ipc3|ipc4|ipc5|ipc6|all>"
     exit 1
 }
 
 status() {
     echo "PXE autoinstall status:"
-    for node in ipc1 ipc2 ipc3 ipc4 ipc5; do
+    for node in ipc1 ipc2 ipc3 ipc4 ipc5 ipc6; do
         file="${MENUS}/${NODE_MAC[$node]}"
         if [ -f "$file" ]; then
             echo "  $node: ENABLED"
@@ -88,7 +89,7 @@ case "$CMD" in
         [ -z "$NODE" ] && usage
         NODES=()
         if [ "$NODE" = "all" ]; then
-            NODES=(ipc1 ipc2 ipc3 ipc4 ipc5)
+            NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6)
         elif [ -n "${NODE_MAC[$NODE]+x}" ]; then
             NODES=("$NODE")
         else

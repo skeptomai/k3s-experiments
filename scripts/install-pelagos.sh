@@ -16,7 +16,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 DEFAULT_NODES=(ipc1 ipc2 ipc3)
-declare -A NODE_IP=([ipc1]="" [ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56")
+declare -A NODE_IP=([ipc1]="" [ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
 
 VERSION_PIN=""
 NODES=()
