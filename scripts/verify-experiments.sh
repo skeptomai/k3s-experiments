@@ -5,8 +5,11 @@
 # (21, 23, 24 share the SPIRE server/registrar, so they must not run concurrently.)
 set -uo pipefail
 
-REPO="/home/cb/Projects/k3s-experiments"
+REPO="${REPO:-/home/cb/Projects/k3s-experiments}"
 IPC1="cb@ipc1.taildd208.ts.net"
+# On-LAN mode (e.g. run from nazgul): reach ipc1 + nodes by LAN IP directly —
+# no tailnet, no ProxyJump through ipc1, removing the single-jump chokepoint.
+[[ -n "${VERIFY_ONLAN:-}" ]] && IPC1="cb@192.168.88.53"
 LOGDIR="/tmp/verify-experiments-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$LOGDIR"
 
@@ -591,7 +594,9 @@ for p in d['items']:
       echo "  Checking $pod_name on $node"
 
       local sshn nodeaddr="${node_ip[$node]:-$node}"
-      if [[ "$node" == "ipc1" ]]; then
+      if [[ -n "${VERIFY_ONLAN:-}" ]]; then
+        sshn="ssh $SSH_OPTS cb@$nodeaddr"            # direct, no jump (on-LAN)
+      elif [[ "$node" == "ipc1" ]]; then
         sshn="ssh $SSH_OPTS $IPC1"
       else
         sshn="ssh $SSH_OPTS -J $IPC1 cb@$nodeaddr"

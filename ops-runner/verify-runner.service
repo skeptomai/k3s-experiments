@@ -1,0 +1,11 @@
+[Unit]
+Description=k3s cluster verify-experiments via Pelagos ops runner (on nazgul)
+After=network-online.target pelagos-cri.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/mnt/primary_storage/ops-runner/k3s-experiments/ops-runner/run-verify.sh
+# Log the run; the suite also writes per-experiment logs to /tmp/verify-experiments-*
+StandardOutput=journal
+StandardError=journal
