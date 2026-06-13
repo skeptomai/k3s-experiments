@@ -44,8 +44,13 @@ FINALDELAY 5
 EOF
 
 systemctl enable nut-monitor
-systemctl restart nut-monitor
-systemctl is-active nut-monitor
+# NUT 2.8.4 (Ubuntu 26.04): upsmon can fail a few times during install before
+# /run/nut + the network are ready, tripping systemd's start-limit so the unit
+# latches "failed" and a plain restart won't recover it. Clear the latch and
+# retry so the install ends with nut-monitor actually active.
+systemctl reset-failed nut-monitor 2>/dev/null || true
+systemctl restart nut-monitor 2>/dev/null || (sleep 3; systemctl reset-failed nut-monitor; systemctl restart nut-monitor)
+systemctl is-active nut-monitor || echo "WARN: nut-monitor not active on this node"
 ENDSSH
   echo "  $node: done"
 }

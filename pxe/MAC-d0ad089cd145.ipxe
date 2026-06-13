@@ -1,12 +1,12 @@
 #!ipxe
-# ipc5 — d0:ad:08:9c:d1:45 — Ubuntu 24.04 (reverted: 26.04 flaps its I219 NIC)
+# ipc5 — d0:ad:08:9c:d1:45 — Ubuntu 26.04 (retry after disabling Intel AMT/ME)
 set nb      http://192.168.89.2:31011
-set kurl    ${nb}/ubuntu-squash/releases/download/24.04.4-717d3a1a
-set iso     ${nb}/ubuntu-24.04.4-live-server-amd64.iso
+set kurl    ${nb}/ubuntu-squash/releases/download/26.04
+set iso     ${nb}/ubuntu-26.04-live-server-amd64.iso
 set install_params autoinstall ds=nocloud-net;s=${nb}/autoinstall/d0-ad-08-9c-d1-45/
 
 imgfree
-echo Booting Ubuntu 24.04 autoinstall for ipc5
+echo Booting Ubuntu 26.04 autoinstall for ipc5
 kernel ${kurl}/vmlinuz root=/dev/ram0 ramdisk_size=3500000 cloud-config-url=/dev/null ip=dhcp url=${iso} ${install_params} initrd=initrd.magic
 initrd ${kurl}/initrd
 boot
