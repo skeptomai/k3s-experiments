@@ -1,4 +1,5 @@
-.claude/
 
+backups/
+.claude/
 # Local secret env for tailscale-cleanup (never commit)
 scripts/op-env.sh
