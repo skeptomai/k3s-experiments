@@ -1,12 +1,12 @@
 #!ipxe
 # ipc1 — a8:a1:59:43:2a:67
 set nb      http://192.168.89.2:31011
-set kurl    ${nb}/ubuntu-squash/releases/download/24.04.4-717d3a1a
-set iso     ${nb}/ubuntu-24.04.4-live-server-amd64.iso
+set kurl    ${nb}/ubuntu-squash/releases/download/26.04
+set iso     ${nb}/ubuntu-26.04-live-server-amd64.iso
 set install_params autoinstall ds=nocloud-net;s=${nb}/autoinstall/a8-a1-59-43-2a-67/
 
 imgfree
-echo Booting Ubuntu 24.04 autoinstall for ipc1
+echo Booting Ubuntu 26.04 autoinstall for ipc1
 kernel ${kurl}/vmlinuz root=/dev/ram0 ramdisk_size=3500000 cloud-config-url=/dev/null ip=dhcp url=${iso} ${install_params} initrd=initrd.magic
 initrd ${kurl}/initrd
 boot
