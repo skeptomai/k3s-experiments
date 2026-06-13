@@ -17,7 +17,10 @@ PELAGOS="${PELAGOS_BIN:-pelagos}"
 [[ -f "$SSH_DIR/id_rsa" ]] || { echo "ERROR: no key at $SSH_DIR/id_rsa — run setup-nazgul.sh first" >&2; exit 1; }
 
 echo "--- updating repo ($REPO_DIR) ---"
-git -C "$REPO_DIR" pull --ff-only
+# Deploy clone — match the remote exactly. `pull --ff-only` silently no-op'd on
+# a stale origin/master ref; fetch + hard reset is robust + unattended-safe.
+git -C "$REPO_DIR" fetch -q origin
+git -C "$REPO_DIR" reset --hard -q origin/master
 
 echo "--- ensuring image $IMAGE ---"
 if ! "$PELAGOS" image ls 2>/dev/null | grep -q 'k3s-ops-runner'; then
