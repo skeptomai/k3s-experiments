@@ -76,7 +76,7 @@ wait_node_offline() {
     local node=$1
     echo "--- Waiting for $node to go offline (up to 10 min) ---"
     local i=0
-    if ! ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; then
+    if ! ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -qw "Ready"; then
         echo "  $node not in k3s — waiting for SSH to drop (reboot confirmation)"
         until ! node_ssh_up "$node"; do
             sleep 5; i=$((i+1))
@@ -85,7 +85,7 @@ wait_node_offline() {
         echo "  $node is offline (SSH dropped)"
         return 0
     fi
-    while ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; do
+    while ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -qw "Ready"; do
         sleep 15; i=$((i+1))
         [[ $i -gt 40 ]] && { echo "  NOTE: $node still Ready after 10 min — k3s NotReady detection lags behind the actual reboot; proceeding (the SSH-up wait confirms the reinstall)"; return 0; }
     done
@@ -112,7 +112,7 @@ wait_node_ready() {
     local node=$1
     echo "--- Waiting for $node to appear Ready in kubectl (up to 5 min) ---"
     local i=0
-    until ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; do
+    until ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -qw "Ready"; do
         sleep 15; i=$((i+1))
         [[ $i -gt 20 ]] && { echo "ERROR: $node not Ready in kubectl after 5 min"; exit 1; }
     done
