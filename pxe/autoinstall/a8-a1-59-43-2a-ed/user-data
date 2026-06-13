@@ -13,6 +13,7 @@ autoinstall:
     install-server: true
     authorized-keys:
       - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC/jbfap70ek09uy4a+wk8peK3dZ99UMkk3BGKLGupDOfV8sBfEbB5cjjoemYL8s/4r9O7oJtkI+WQbfOwzK38gH0CU5Y3NHr4qEZ7ESkVYbBuXiMXhcjwysTBHwjV0MFYzLdpEdMB5s5SmMSXT3eTfVtRvWH6VQl2fWujCxxn4Rhj2pHUOuisFg/pwCxerertbNd8ryK6dqqXFZ9P++hyMz46uVxxHhE6HIqL5PCSeny9ZiIJSqjitzq3Z2jHQsOgw7E52SQMLCzhw8qRriGFrCdOZhpyOR49UEVi5nrGSwRlA6Xrlvj4kd1VxiduFy4beYiaL4IaDJ7PoOkoeqdMFWUKmQLYxGaq2+HIxe3Whv0R27o4et1gSbxhukAzHrF1ITqK6KgulJUG1tgCAcGDc/lhLMS/L0m5raOaZ/d9xXAHSEm/WFctciOvjZNIpWS5dthpT3gYGV2O4AJWZmGDPjQdWU18xnZyKWEq2CQXkF0+WHZD3hFrO8CjpErDOa7k= cb@omen"
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ36bkOEp5j+AlVIuFtQAndor9RlcYwgbXOJZCfAutPo nazgul-ops@verify-runner"
     allow-pw: false
   network:
     version: 2
