@@ -823,18 +823,17 @@ verify_22() {
   elif ! kube "rollout status deployment/kube-state-metrics -n monitoring --timeout=120s"; then
     echo "FAIL: kube-state-metrics not ready"; rc=1
   else
-    # Metric-endpoint curls go through the shared SSH ControlMaster, which can
-    # transiently refuse sessions under the parallel batch's load — so retry.
+    # These curls MUST bypass the shared SSH ControlMaster. The parallel batch
+    # multiplexes every `ssh ipc1` over one master and degrades it, and that
+    # degradation persists for the rest of the run — so the multiplexed curl
+    # fails here even though ksm is healthy (a fresh connection returns 2590
+    # metrics fine). ControlMaster=no + ControlPath=none, placed BEFORE $SSH_OPTS
+    # so they win precedence, force a dedicated connection per curl.
+    local fresh="-o ControlMaster=no -o ControlPath=none"
     local ne_ok=false ksm_ok=false
-    # node-exporter is a local DaemonSet pod (trivial). kube-state-metrics is a
-    # SINGLE pod reached cross-node (ipc1 -> kube-proxy -> pod over wireguard),
-    # and it builds ~2600 metrics by querying the API — so under the parallel
-    # batch's API load its /metrics RESPONSE goes slow (not just unreachable).
-    # So: fast-fail on unreachable (--connect-timeout) but allow a slow response
-    # (--max-time), over a window wide enough to outlast the batch's peak load.
-    for i in $(seq 18); do
-      $ne_ok  || { ssh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30900/metrics" 2>/dev/null | grep -q '^node_' && ne_ok=true; }
-      $ksm_ok || { ssh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30808/metrics" 2>/dev/null | grep -q '^kube_' && ksm_ok=true; }
+    for i in $(seq 8); do
+      $ne_ok  || { ssh $fresh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30900/metrics" 2>/dev/null | grep -q '^node_' && ne_ok=true; }
+      $ksm_ok || { ssh $fresh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30808/metrics" 2>/dev/null | grep -q '^kube_' && ksm_ok=true; }
       $ne_ok && $ksm_ok && break
       sleep 3
     done
