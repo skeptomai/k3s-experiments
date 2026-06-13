@@ -14,6 +14,11 @@ spec:
     spec:
       serviceAccountName: spire-agent
       hostPID: true  # required: workload attestor resolves PIDs to pods
+      # Run on EVERY node, including tainted ones (e.g. the control-plane taint on
+      # ipc1) — a per-node identity agent should be universal. Blanket `Exists`
+      # tolerates any taint, matching the node-exporter DaemonSet pattern.
+      tolerations:
+        - operator: Exists
       initContainers:
         # Wait until the server has written bundle.crt into the spire-bundle ConfigMap.
         # Kubernetes syncs ConfigMap volume mounts when the ConfigMap changes; the file
