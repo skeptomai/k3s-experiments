@@ -824,12 +824,15 @@ verify_22() {
     # Metric-endpoint curls go through the shared SSH ControlMaster, which can
     # transiently refuse sessions under the parallel batch's load — so retry.
     local ne_ok=false ksm_ok=false
-    # node-exporter is a local DaemonSet pod; kube-state-metrics is a single pod
-    # reached cross-node (ipc1 -> kube-proxy -> pod over wireguard), so it's more
-    # prone to a transient miss under the suite's load — give it a wide window.
-    for i in $(seq 12); do
-      $ne_ok  || { ssh $SSH_OPTS "$IPC1" "curl -sf --max-time 8 http://localhost:30900/metrics" 2>/dev/null | grep -q '^node_' && ne_ok=true; }
-      $ksm_ok || { ssh $SSH_OPTS "$IPC1" "curl -sf --max-time 8 http://localhost:30808/metrics" 2>/dev/null | grep -q '^kube_' && ksm_ok=true; }
+    # node-exporter is a local DaemonSet pod (trivial). kube-state-metrics is a
+    # SINGLE pod reached cross-node (ipc1 -> kube-proxy -> pod over wireguard),
+    # and it builds ~2600 metrics by querying the API — so under the parallel
+    # batch's API load its /metrics RESPONSE goes slow (not just unreachable).
+    # So: fast-fail on unreachable (--connect-timeout) but allow a slow response
+    # (--max-time), over a window wide enough to outlast the batch's peak load.
+    for i in $(seq 18); do
+      $ne_ok  || { ssh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30900/metrics" 2>/dev/null | grep -q '^node_' && ne_ok=true; }
+      $ksm_ok || { ssh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30808/metrics" 2>/dev/null | grep -q '^kube_' && ksm_ok=true; }
       $ne_ok && $ksm_ok && break
       sleep 3
     done
