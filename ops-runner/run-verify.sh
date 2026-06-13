@@ -25,8 +25,15 @@ if ! "$PELAGOS" image ls 2>/dev/null | grep -q 'k3s-ops-runner'; then
     "$PELAGOS" build -t "$IMAGE" -f "$REPO_DIR/ops-runner/Dockerfile" "$REPO_DIR/ops-runner"
 fi
 
-echo "--- running verify-experiments (on-LAN, direct to nodes) ---"
+# The default pelagos0 bridge has NO LAN egress; the observability stack's
+# bridge does (that's how prometheus reaches the ipc nodes). Reuse it — the
+# non-default pelagos network (the 10.90.1.0/24 monitoring bridge).
+NET="$("$PELAGOS" network ls 2>/dev/null | awk 'NR>1 && $1!="pelagos0" && $1!="" {print $1; exit}')"
+[[ -n "$NET" ]] || { echo "ERROR: no egress pelagos network found (need the monitoring bridge for LAN access)" >&2; exit 1; }
+
+echo "--- running verify-experiments (on-LAN via network $NET, direct to nodes) ---"
 exec "$PELAGOS" run --rm --name verify-runner \
+    --network "$NET" \
     -e VERIFY_ONLAN=1 \
     -e REPO=/repo \
     --bind-ro "$SSH_DIR:/root/.ssh" \
