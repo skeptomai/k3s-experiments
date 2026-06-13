@@ -10,7 +10,7 @@ IPC1="cb@ipc1.taildd208.ts.net"
 # On-LAN mode (e.g. run from nazgul): reach ipc1 + nodes by LAN IP directly —
 # no tailnet, no ProxyJump through ipc1, removing the single-jump chokepoint.
 [[ -n "${VERIFY_ONLAN:-}" ]] && IPC1="cb@192.168.88.53"
-LOGDIR="/tmp/verify-experiments-$(date +%Y%m%d-%H%M%S)"
+LOGDIR="${LOGDIR:-/tmp/verify-experiments-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$LOGDIR"
 
 SSH_CTRL="/tmp/ssh-verify-ctl-%r@%h:%p"
