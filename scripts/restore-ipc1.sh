@@ -35,7 +35,9 @@ echo "--- restore /etc/rancher/k3s (server config) BEFORE install ---"
 ssh1 "sudo tar -xzf /tmp/ipc1-restore.tar.gz -C / etc/rancher/k3s"
 
 echo "--- install Pelagos CRI (must run before k3s starts) ---"
-bash "$REPO_ROOT/scripts/install-pelagos.sh" ipc1
+# install-pelagos ends by restarting k3s, which doesn't exist yet on a fresh
+# node — that trailing failure is expected; pelagos-cri itself comes up fine.
+bash "$REPO_ROOT/scripts/install-pelagos.sh" ipc1 || echo "  (ignored: install-pelagos's trailing k3s restart fails pre-k3s — pelagos-cri is active)"
 
 echo "--- install k3s ${K3S_VERSION} server WITHOUT starting it ---"
 ssh1 "curl -sfL https://get.k3s.io | sudo INSTALL_K3S_VERSION='${K3S_VERSION}' INSTALL_K3S_SKIP_START=true sh -s - server"
