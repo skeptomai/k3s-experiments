@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Verify all k3s experiments.
-# Experiments 01-09, 13, 15, 20, 22 run in parallel (independent namespaces).
-# Experiments 10, 11, 12, 14, 16, 17, 18, 19, 21, 23, 24 run sequentially after.
+# Experiments 01-09, 13, 15, 20 run in parallel (independent namespaces).
+# Experiments 10, 11, 12, 14, 16, 17, 18, 19, 21, 23, 24, 22 run sequentially after.
+# (22 is sequential: its kube-state-metrics scrape — ~2600 metrics built from the
+#  API — is starved under the parallel batch's API load; no timeout fixes that.)
 # (21, 23, 24 share the SPIRE server/registrar, so they must not run concurrently.)
 set -uo pipefail
 
@@ -803,7 +805,7 @@ verify_20() {
 }
 
 # ---------------------------------------------------------------------------
-# 22 — cluster monitoring (parallel: persistent infra; not torn down)
+# 22 — cluster monitoring (sequential: kube-state-metrics scrape needs low API load)
 # ---------------------------------------------------------------------------
 verify_22() {
   local rc=0
@@ -1007,10 +1009,9 @@ verify_09    > "$LOGDIR/09.log"    2>&1 & pids[09]=$!
 verify_13    > "$LOGDIR/13.log"    2>&1 & pids[13]=$!
 verify_15    > "$LOGDIR/15.log"    2>&1 & pids[15]=$!
 verify_20    > "$LOGDIR/20.log"    2>&1 & pids[20]=$!
-verify_22    > "$LOGDIR/22.log"    2>&1 & pids[22]=$!
 
 declare -A results
-for key in 01_02 03 04 05 06 07 08 09 13 15 20 22; do
+for key in 01_02 03 04 05 06 07 08 09 13 15 20; do
   if wait "${pids[$key]}"; then results[$key]=PASS; else results[$key]=FAIL; fi
 done
 
@@ -1027,7 +1028,6 @@ printf "  %-35s %s\n" "09    network-policies"     "${results[09]}"
 printf "  %-35s %s\n" "13    load-balancing"       "${results[13]}"
 printf "  %-35s %s\n" "15    statefulsets"         "${results[15]}"
 printf "  %-35s %s\n" "20    cert-manager"         "${results[20]}"
-printf "  %-35s %s\n" "22    cluster-monitoring"   "${results[22]}"
 
 echo ""
 echo "Starting sequential experiments..."
@@ -1044,6 +1044,8 @@ verify_19 > "$LOGDIR/19.log" 2>&1; results[19]=$?; [[ ${results[19]} -eq 0 ]] &&
 verify_21 > "$LOGDIR/21.log" 2>&1; results[21]=$?; [[ ${results[21]} -eq 0 ]] && results[21]=PASS || results[21]=FAIL
 verify_23 > "$LOGDIR/23.log" 2>&1; results[23]=$?; [[ ${results[23]} -eq 0 ]] && results[23]=PASS || results[23]=FAIL
 verify_24 > "$LOGDIR/24.log" 2>&1; results[24]=$?; [[ ${results[24]} -eq 0 ]] && results[24]=PASS || results[24]=FAIL
+# 22 last — lowest API load, so kube-state-metrics can build its ~2600 metrics
+verify_22 > "$LOGDIR/22.log" 2>&1; results[22]=$?; [[ ${results[22]} -eq 0 ]] && results[22]=PASS || results[22]=FAIL
 
 printf "  %-35s %s\n" "10    nfs-storage"          "${results[10]}"
 printf "  %-35s %s\n" "11    spire"                 "${results[11]}"
@@ -1056,6 +1058,7 @@ printf "  %-35s %s\n" "19    hpa-memory"            "${results[19]}"
 printf "  %-35s %s\n" "21    mtls-spire"            "${results[21]}"
 printf "  %-35s %s\n" "23    envoy-mtls (gateway)" "${results[23]}"
 printf "  %-35s %s\n" "24    envoy-sidecar"        "${results[24]}"
+printf "  %-35s %s\n" "22    cluster-monitoring"   "${results[22]}"
 
 echo ""
 echo "=== Summary ==="
