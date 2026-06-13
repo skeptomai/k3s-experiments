@@ -5,7 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Update the deploy clone BEFORE exec'ing run-verify, so the run-verify.sh that
+# actually runs is always current — a script can't reliably self-update
+# mid-execution (the first run after each change would otherwise run stale code).
+ExecStartPre=/bin/sh -c 'cd /mnt/primary_storage/ops-runner/k3s-experiments && git fetch -q origin && git reset --hard -q origin/master'
 ExecStart=/mnt/primary_storage/ops-runner/k3s-experiments/ops-runner/run-verify.sh
-# Log the run; the suite also writes per-experiment logs to /tmp/verify-experiments-*
+# Persistent per-run logs live under /mnt/primary_storage/ops-runner/logs/<stamp>/.
 StandardOutput=journal
 StandardError=journal
