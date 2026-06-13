@@ -48,6 +48,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order |
 | `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (default: all three) |
 | `scripts/install-nut-clients.sh [node...]` | Installs/configures NUT client (upsmon) on ipc nodes — run after reinstall |
+| `scripts/label-nodes.sh` | Applies durable `node-class` labels (standard=Pentium ipc1-3, performance=i5 ipc4-6) for capability-based scheduling; idempotent, run after reinstall |
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
 | `scripts/pxe-control.sh <status\|enable\|disable> [node]` | Enables/disables PXE boot per node (run from omen) |
 | `scripts/tailscale-cleanup.sh [--verify] <node...>` | Deletes stale Tailscale device(s) for a node before reinstall so it reclaims its name; `--verify` checks post-install. Needs a Tailscale OAuth client (devices:core write) via `TS_OAUTH_CLIENT_ID`/`_SECRET` env or 1Password `op://Private/Tailscale OAuth k3s`. Called automatically by `reinstall-nodes.sh`; no-op with a WARN if creds absent. |
@@ -67,6 +68,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 7. Remove stale Tailscale device; rename new one if it registered as `<node>-1`
 8. `bash scripts/upgrade-agents.sh <node>` — rejoin k3s + install Pelagos
 9. `bash scripts/install-nut-clients.sh <node>` — restore NUT UPS monitoring
+10. `bash scripts/label-nodes.sh` — restore the node's `node-class` label (labels don't survive a fresh registration)
 
 **After ipc1 reinstall** (wipes etcd — full cluster rebuild):
 - Install k3s, Pelagos, rejoin agents, bootstrap Flux (GitHub token in 1Password)
