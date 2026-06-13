@@ -20,6 +20,22 @@ trap 'ssh -o ControlPath="$SSH_CTRL" -O exit "$IPC1" 2>/dev/null; true' EXIT
 
 kube() { ssh $SSH_OPTS "$IPC1" "sudo kubectl $*"; }
 
+# Run a per-node SSH command, retrying on TRANSIENT connection failures
+# (banner-exchange timeouts when the ipc1 jump is contended or the link is laggy).
+# $1 = ssh-prefix string (word-split), $2 = remote command. Echoes stdout; only
+# retries connection-setup errors, NOT a real non-zero exit from the remote cmd.
+sshn_retry() {
+  local prefix="$1" cmd="$2" out rc err
+  err="$(mktemp)"
+  for _ in 1 2 3; do
+    out=$($prefix "$cmd" 2>"$err"); rc=$?
+    if [ $rc -eq 0 ]; then printf '%s' "$out"; rm -f "$err"; return 0; fi
+    grep -qiE 'banner exchange|timed out|onnection (closed|refused|reset)|forwarding|kex_exchange' "$err" || break
+    sleep 2
+  done
+  printf '%s' "$out"; rm -f "$err"; return $rc
+}
+
 # Apply files via stdin. Puts namespace.yaml first to avoid ordering errors,
 # and adds --- between files to prevent kubectl from merging adjacent documents.
 kapply() {
@@ -583,7 +599,7 @@ for p in d['items']:
 
       # Check 1: cgroup_name is non-null and starts with kubepods/
       local cgroup_name
-      cgroup_name=$($sshn "sudo pelagos container inspect '$pcri_name' 2>/dev/null" | \
+      cgroup_name=$(sshn_retry "$sshn" "sudo pelagos container inspect '$pcri_name' 2>/dev/null" | \
         python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('cgroup_name') or '')" 2>/dev/null || true)
       if [[ -z "$cgroup_name" || "$cgroup_name" == "None" ]]; then
         echo "  FAIL: cgroup_name null/missing for $pod_name (pcri=$pcri_name)"; rc=1; continue
@@ -594,7 +610,7 @@ for p in d['items']:
       echo "  OK: cgroup_name=$cgroup_name"
 
       # Check 2: cgroup exists in filesystem
-      if ! $sshn "test -d '/sys/fs/cgroup/$cgroup_name' || test -d '/sys/fs/cgroup/cpu/$cgroup_name'" 2>/dev/null; then
+      if ! sshn_retry "$sshn" "test -d '/sys/fs/cgroup/$cgroup_name' || test -d '/sys/fs/cgroup/cpu/$cgroup_name'" >/dev/null 2>&1; then
         echo "  FAIL: cgroup path not found in filesystem on $node"; rc=1; continue
       fi
       echo "  OK: cgroup path exists on $node"
