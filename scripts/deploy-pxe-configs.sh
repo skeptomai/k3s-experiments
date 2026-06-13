@@ -28,7 +28,4 @@ for dir in "$REPO"/pxe/autoinstall/*/; do
     scp "$dir/user-data" "$dir/meta-data" "${NAZGUL_AUTOINSTALL}/${mac}/"
 done
 
-echo "Deploying set-pxe-first.sh to pxe_assets (served at :31011)..."
-scp "$REPO/pxe/set-pxe-first.sh" "root@nazgul:/mnt/primary_storage/pxe_assets/set-pxe-first.sh"
-
 echo "Done."

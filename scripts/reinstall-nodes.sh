@@ -1,23 +1,30 @@
 #!/usr/bin/env bash
 # PXE reinstall one or more ipc worker nodes.
 # Drives the full cycle: deploy PXE configs → clear dynamic DHCP leases →
-# enable PXE → reboot → wait for OS install → disable PXE → clear known_hosts
-# → rejoin k3s → verify.
+# enable PXE → set one-shot PXE BootNext → reboot → wait for OS install →
+# disable PXE → clear known_hosts → rejoin k3s → verify.
+#
+# Boot model: nodes are DISK-FIRST in EFI BootOrder. A reinstall sets a one-shot
+# `efibootmgr --bootnext <IPv4 PXE entry>` so the node PXE-boots exactly ONCE,
+# then reverts to booting the disk automatically. No persistent network-first,
+# so normal reboots never stick at the netboot.xyz menu.
 #
 # Run from omen (or any machine with SSH to ipc1 via tailnet).
-# ipc1 is NEVER safe to reinstall with this script — it requires a full manual
-# cluster rebuild (wipes etcd).
+# ipc1 is NEVER safe to reinstall with this script — it requires the manual
+# control-plane backup/restore. See docs/ipc1-upgrade-runbook.md.
 #
 # Note: ipc4/ipc5 require "Network Boot" enabled in BIOS firmware settings
 # (separate from efibootmgr boot order) — one-time physical setup.
 #
 # Usage: ./reinstall-nodes.sh <node> [node...]
-#   node: ipc2 | ipc3 | ipc4 | ipc5
+#   node: ipc2 | ipc3 | ipc4 | ipc5 | ipc6
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 MIKROTIK="admin@192.168.88.1"
+# Generous install timeout — the slow Pentium nodes (ipc2/ipc3) take ~30 min on 26.04.
+INSTALL_TIMEOUT_MIN=40
 
 declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
 declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1" [ipc6]="eno1")
@@ -28,7 +35,7 @@ NODES=("$@")
 
 for node in "${NODES[@]}"; do
     if [[ "$node" == "ipc1" ]]; then
-        echo "ERROR: ipc1 is the control plane. Reinstalling it wipes etcd — use the manual runbook." >&2
+        echo "ERROR: ipc1 is the control plane. Reinstalling it wipes the datastore — use docs/ipc1-upgrade-runbook.md." >&2
         exit 1
     fi
     if [[ -z "${NODE_IP[$node]+x}" ]]; then
@@ -52,37 +59,50 @@ node_ssh_up() {
         -J cb@"$SERVER" cb@"${NODE_IP[$node]}" true 2>/dev/null
 }
 
+mac_nocolon() {
+    echo "${NODE_MAC[$1]}" | tr -d ':' | tr 'A-Z' 'a-z'
+}
+
+# Emit a one-line shell script that finds the node's IPv4 PXE/network boot entry
+# (matched by its PXE MAC, so we never grab the IPv6 entry or the wrong NIC) and
+# sets it as a ONE-SHOT BootNext. Prints BOOTNEXT=<id> or BOOTNEXT=NONE.
+# It's base64'd before transport to dodge quoting across ssh/kubectl/nsenter.
+bootnext_detect_script() {
+    local macnc=$1
+    printf '%s' "entry=\$(efibootmgr | grep -i 'MAC($macnc' | grep -i IPv4 | grep -oE '^Boot[0-9A-F]{4}' | grep -oE '[0-9A-F]{4}' | head -1); [ -n \"\$entry\" ] && efibootmgr --bootnext \"\$entry\" >/dev/null && echo \"BOOTNEXT=\$entry\" || echo BOOTNEXT=NONE"
+}
+
 wait_node_offline() {
     local node=$1
-    echo "--- Waiting for $node to go offline (up to 5 min) ---"
+    echo "--- Waiting for $node to go offline (up to 10 min) ---"
     local i=0
-    # For nodes not yet in k3s, wait for SSH to drop instead
     if ! ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; then
         echo "  $node not in k3s — waiting for SSH to drop (reboot confirmation)"
         until ! node_ssh_up "$node"; do
             sleep 5; i=$((i+1))
-            [[ $i -gt 60 ]] && { echo "WARN: $node SSH never dropped — reboot may have failed"; return 1; }
+            [[ $i -gt 60 ]] && { echo "  WARN: $node SSH never dropped — reboot may have failed"; return 1; }
         done
         echo "  $node is offline (SSH dropped)"
         return 0
     fi
     while ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -q "Ready"; do
         sleep 15; i=$((i+1))
-        [[ $i -gt 20 ]] && { echo "WARN: $node still Ready after 5 min — may not have rebooted"; return 1; }
+        [[ $i -gt 40 ]] && { echo "  NOTE: $node still Ready after 10 min — k3s NotReady detection lags behind the actual reboot; proceeding (the SSH-up wait confirms the reinstall)"; return 0; }
     done
     echo "  $node is offline"
 }
 
 wait_ssh_up() {
     local node=$1
-    echo "--- Waiting for $node SSH to come back (autoinstall takes ~10 min) ---"
-    echo "  Minimum 5 min wait to avoid false-positive on quick local-disk boot..."
-    sleep 300
+    local max_polls=$(( (INSTALL_TIMEOUT_MIN * 60 - 240) / 30 ))
+    echo "--- Waiting for $node SSH to come back (autoinstall; up to ${INSTALL_TIMEOUT_MIN} min) ---"
+    echo "  Minimum 4 min wait to avoid a false-positive on a quick local-disk boot..."
+    sleep 240
     local i=0
     until node_ssh_up "$node"; do
-        printf "  waiting... (%d min elapsed)\r" $(( (i * 30 + 300) / 60 ))
+        printf "  waiting... (%d min elapsed)\r" $(( (i * 30 + 240) / 60 ))
         sleep 30; i=$((i+1))
-        [[ $i -gt 30 ]] && { echo ""; echo "ERROR: $node SSH never came back after 20 min"; exit 1; }
+        [[ $i -gt $max_polls ]] && { echo ""; echo "ERROR: $node SSH never came back after ${INSTALL_TIMEOUT_MIN} min"; exit 1; }
     done
     echo ""
     echo "  $node SSH is up"
@@ -109,20 +129,31 @@ run_privileged_pod() {
     ssh_ipc1 "sudo kubectl delete pod $pod -n default --ignore-not-found 2>/dev/null" || true
 }
 
-set_pxe_bootnext_via_kubectl() {
-    local node=$1
-    local pod="pxe-bootnext-${node}-$$"
-    echo "--- Setting PXE as next boot entry on $node via kubectl ---"
-    # Find the first network/PXE boot entry and set it as bootnext so disk-first BIOS still PXE boots
-    run_privileged_pod "$node" "$pod" \
-        'entry=\$(efibootmgr | grep -iE "^Boot[0-9A-F]{4}\*.*([Nn]et[Bb]oot|iPXE|[Pp][Xx][Ee]|[Nn]etwork|[Ii][Pp][Vv]4)" | head -1 | grep -oE "[0-9A-F]{4}"); [ -n "\$entry" ] && efibootmgr --bootnext "\$entry" && echo "bootnext set to \$entry" || echo "no PXE entry found"'
+# Preferred path: node is up, set BootNext over SSH and verify. Returns non-zero
+# if it can't — the caller MUST abort, because with disk-first BootOrder a plain
+# reboot won't reinstall.
+set_pxe_bootnext_via_ssh() {
+    local node=$1 macnc; macnc=$(mac_nocolon "$node")
+    echo "--- Setting one-shot PXE BootNext on $node (IPv4 entry for ${NODE_MAC[$node]}) via SSH ---"
+    local b64 out
+    b64=$(bootnext_detect_script "$macnc" | base64 -w0)
+    out=$(ssh_node "$node" "echo $b64 | base64 -d | sudo -n sh" 2>/dev/null)
+    echo "  $out"
+    case "$out" in
+        BOOTNEXT=NONE|"") echo "  ERROR: no IPv4 PXE entry for ${NODE_MAC[$node]} on $node" >&2; return 1 ;;
+        BOOTNEXT=*) return 0 ;;
+        *) echo "  ERROR: unexpected output setting BootNext on $node" >&2; return 1 ;;
+    esac
 }
 
-set_pxe_bootnext_via_ssh() {
-    local node=$1
-    echo "--- Setting PXE as next boot entry on $node via SSH ---"
-    # Use SUDO_ASKPASS workaround: sudo -n first (passwordless), fall through gracefully
-    ssh_node "$node" 'entry=$(sudo -n efibootmgr 2>/dev/null | grep -iE "^Boot[0-9A-F]{4}\*.*([Nn]et[Bb]oot|iPXE|[Pp][Xx][Ee]|[Nn]etwork|[Ii][Pp][Vv]4)" | head -1 | grep -oE "[0-9A-F]{4}"); [ -n "$entry" ] && sudo -n efibootmgr --bootnext "$entry" && echo "bootnext set to $entry" || echo "no PXE entry found or sudo requires password, relying on boot order"'
+# Fallback path: node Ready in k3s but sshd down. Best-effort (output not
+# captured through the pod); the SSH path above is preferred and verified.
+set_pxe_bootnext_via_kubectl() {
+    local node=$1 macnc; macnc=$(mac_nocolon "$node")
+    local pod="pxe-bootnext-${node}-$$"
+    echo "--- Setting one-shot PXE BootNext on $node (IPv4 entry for ${NODE_MAC[$node]}) via kubectl ---"
+    local b64; b64=$(bootnext_detect_script "$macnc" | base64 -w0)
+    run_privileged_pod "$node" "$pod" "echo $b64 | base64 -d | sh"
 }
 
 reboot_via_kubectl() {
@@ -161,13 +192,13 @@ for node in "${NODES[@]}"; do
     echo "--- Enabling PXE for $node ---"
     bash "$REPO_ROOT/scripts/pxe-control.sh" enable "$node"
 
-    echo "--- Rebooting $node into PXE ---"
+    echo "--- Rebooting $node into a one-shot PXE install ---"
     if node_ssh_up "$node"; then
         echo "  SSH available"
-        set_pxe_bootnext_via_ssh "$node"
+        set_pxe_bootnext_via_ssh "$node" || { echo "ERROR: aborting $node — disk-first boot order means no BootNext = no reinstall." >&2; exit 1; }
         ssh_node "$node" sudo reboot || true
     else
-        echo "  SSH not available — using kubectl"
+        echo "  SSH not available — using kubectl (best-effort BootNext)"
         set_pxe_bootnext_via_kubectl "$node"
         reboot_via_kubectl "$node"
     fi

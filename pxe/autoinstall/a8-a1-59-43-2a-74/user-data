@@ -35,4 +35,3 @@ autoinstall:
     - "curtin in-target -- sh -c 'curl -fsSL https://tailscale.com/install.sh | sh'"
     - "printf '[Unit]\\nDescription=Tailscale auto-connect\\nAfter=tailscaled.service network-online.target\\nWants=network-online.target\\nConditionPathExists=!/var/lib/tailscale/tailscaled.state\\n\\n[Service]\\nType=oneshot\\nExecStart=/usr/bin/tailscale up --authkey=tskey-auth-krerCq6KgE11CNTRL-B14XnPSw2NaXmYAeeDeBNawMyftZ5yoN\\nRemainAfterExit=yes\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /target/etc/systemd/system/tailscale-autoconnect.service"
     - "curtin in-target -- systemctl enable tailscale-autoconnect.service"
-    - "curtin in-target -- bash -c 'curl -fsSL http://192.168.89.2:31011/set-pxe-first.sh -o /tmp/spf.sh && bash /tmp/spf.sh'"
