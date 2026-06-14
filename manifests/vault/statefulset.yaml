@@ -36,8 +36,10 @@ spec:
       containers:
         - name: vault
           image: hashicorp/vault:1.18
-          command: ["vault", "server", "-config=/vault/config/vault.hcl"]
-          args: []   # prevent the image CMD (server -dev) from appending as junk args
+          # command + explicit args so the image CMD ("server -dev") can't append.
+          # (args: [] is a no-op — k8s treats an empty array as unset.)
+          command: ["vault"]
+          args: ["server", "-config=/vault/config/vault.hcl"]
           env:
             - name: POD_NAME
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
