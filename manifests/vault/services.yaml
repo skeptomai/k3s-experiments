@@ -1,0 +1,27 @@
+# Headless service for Raft peer DNS (vault-0.vault-internal, ...).
+# publishNotReadyAddresses so peers can find each other before they're unsealed.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-internal
+  namespace: vault
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: vault
+  ports:
+    - { name: https, port: 8200, targetPort: 8200 }
+    - { name: cluster, port: 8201, targetPort: 8201 }
+---
+# Client service for the Vault API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: vault
+spec:
+  selector:
+    app: vault
+  ports:
+    - { name: https, port: 8200, targetPort: 8200 }
