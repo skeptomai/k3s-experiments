@@ -17,7 +17,7 @@ Kubernetes learning cluster on six ipc machines (1 control plane, 5 workers). Sc
 - ipc1-3: Intel Pentium Gold G5400T, 2 cores / 4 threads, 32GB RAM
 - ipc4-5: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM
 - ipc6: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, **16GB RAM**
-- Container runtime: Pelagos v0.65.33 on all six nodes (`pelagos://0.1.0`)
+- Container runtime: Pelagos v0.65.34 on all six nodes (`pelagos://0.1.0`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
 - SSH key: `~/.ssh/id_rsa` (cb@omen)
