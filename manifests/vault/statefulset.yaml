@@ -37,6 +37,7 @@ spec:
         - name: vault
           image: hashicorp/vault:1.18
           command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+          args: []   # prevent the image CMD (server -dev) from appending as junk args
           env:
             - name: POD_NAME
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
