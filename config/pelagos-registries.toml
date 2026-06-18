@@ -1,0 +1,21 @@
+# Pelagos registry mirror config — deployed to /etc/pelagos/registries.toml on every node.
+# Routes pulls through the Zot pull-through cache on nazgul to avoid Docker Hub rate
+# limits and warm a shared cache across the cluster.
+#
+# ONE Zot instance per upstream, on its own port (nazgul docker-compose at
+# /mnt/primary_storage/zot/docker-compose.yml). Per-port is required because Pelagos
+# strips the registry host when rewriting to the mirror, so a single shared port can't
+# disambiguate which upstream a flattened repo (e.g. `pause`, `library/alpine`) belongs
+# to — it forces Zot to fan out across all upstreams (~20s/miss). Per-port routes each
+# repo to exactly one upstream and fails fast / fetches reliably.
+#   5000 -> docker.io   5001 -> registry.k8s.io   5002 -> ghcr.io   5003 -> public.ecr.aws
+#
+# Transparent fallback: Pelagos tries the mirror, then falls back to origin on failure,
+# so a missing/unreachable mirror is non-fatal. Deployed by scripts/install-pelagos.sh.
+# IP (not hostname) because nodes don't resolve `nazgul`. See memory project-registry-mirror.
+
+[mirrors]
+"docker.io"       = ["http://192.168.89.2:5000"]
+"registry.k8s.io" = ["http://192.168.89.2:5001"]
+"ghcr.io"         = ["http://192.168.89.2:5002"]
+"public.ecr.aws"  = ["http://192.168.89.2:5003"]

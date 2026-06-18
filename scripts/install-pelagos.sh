@@ -40,7 +40,7 @@ echo "Version: $LATEST  deb: $DEB_URL"
 
 install_node() {
     local node=$1
-    local ssh_cmd k3s_service k3s_config_b64
+    local ssh_cmd k3s_service k3s_config_b64 registries_b64
 
     if [ "$node" = "ipc1" ]; then
         ssh_cmd="ssh -o StrictHostKeyChecking=no cb@$SERVER"
@@ -51,15 +51,17 @@ install_node() {
         k3s_service="k3s-agent"
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent.yaml")
     fi
+    registries_b64=$(base64 -w0 < "$REPO_ROOT/config/pelagos-registries.toml")
 
     echo ""
     echo "=== Installing Pelagos $LATEST on $node ==="
 
-    $ssh_cmd bash -s "$DEB_URL" "$k3s_service" "$k3s_config_b64" <<'REMOTE'
+    $ssh_cmd bash -s "$DEB_URL" "$k3s_service" "$k3s_config_b64" "$registries_b64" <<'REMOTE'
 set -euo pipefail
 DEB_URL=$1
 K3S_SERVICE=$2
 K3S_CONFIG=$(echo "$3" | base64 -d)
+REGISTRIES_CONFIG=$(echo "$4" | base64 -d)
 
 echo "--- Installing deb ---"
 curl -sL "$DEB_URL" -o /tmp/pelagos.deb
@@ -95,6 +97,12 @@ sudo mkdir -p /etc/rancher/k3s
 echo "$K3S_CONFIG" | sudo tee /etc/rancher/k3s/config.yaml >/dev/null
 echo "Config written:"
 sudo cat /etc/rancher/k3s/config.yaml
+
+echo "--- Deploying Pelagos registry mirror config ---"
+sudo mkdir -p /etc/pelagos
+echo "$REGISTRIES_CONFIG" | sudo tee /etc/pelagos/registries.toml >/dev/null
+echo "Registries config written:"
+sudo cat /etc/pelagos/registries.toml
 
 echo "--- Enabling and starting pelagos-cri ---"
 sudo systemctl daemon-reload
