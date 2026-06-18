@@ -19,3 +19,11 @@
 "registry.k8s.io" = ["http://192.168.89.2:5001"]
 "ghcr.io"         = ["http://192.168.89.2:5002"]
 "public.ecr.aws"  = ["http://192.168.89.2:5003"]
+
+# Local writeable registry (zot-local, :5004) — NOT a cache, it hosts our own
+# built+pushed images. Self-referential entry so the cluster pulls them over HTTP:
+# Pelagos derives "insecure/HTTP" from the http:// endpoint scheme, and k8s pod specs
+# can't pass --insecure. Tag/push images as 192.168.89.2:5004/<repo>:<tag> (push from a
+# node with `pelagos image push --insecure ...`). Repo path — not host — is the storage
+# key, so push-host and pull-host addresses may differ as long as both hit this Zot.
+"192.168.89.2:5004" = ["http://192.168.89.2:5004"]
