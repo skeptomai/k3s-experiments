@@ -1,0 +1,42 @@
+name: zot-registry
+services:
+  zot-docker:
+    image: ghcr.io/project-zot/zot-linux-amd64:latest
+    ports: ["5000:5000"]
+    volumes:
+      - /mnt/primary_storage/zot/data:/var/lib/registry
+      - /mnt/primary_storage/zot/config/config-docker.json:/etc/zot/config.json:ro
+    restart: unless-stopped
+    healthcheck: { test: ["NONE"] }
+  zot-k8s:
+    image: ghcr.io/project-zot/zot-linux-amd64:latest
+    ports: ["5001:5000"]
+    volumes:
+      - /mnt/primary_storage/zot/data-k8s:/var/lib/registry
+      - /mnt/primary_storage/zot/config/config-k8s.json:/etc/zot/config.json:ro
+    restart: unless-stopped
+    healthcheck: { test: ["NONE"] }
+  zot-ghcr:
+    image: ghcr.io/project-zot/zot-linux-amd64:latest
+    ports: ["5002:5000"]
+    volumes:
+      - /mnt/primary_storage/zot/data-ghcr:/var/lib/registry
+      - /mnt/primary_storage/zot/config/config-ghcr.json:/etc/zot/config.json:ro
+    restart: unless-stopped
+    healthcheck: { test: ["NONE"] }
+  zot-ecr:
+    image: ghcr.io/project-zot/zot-linux-amd64:latest
+    ports: ["5003:5000"]
+    volumes:
+      - /mnt/primary_storage/zot/data-ecr:/var/lib/registry
+      - /mnt/primary_storage/zot/config/config-ecr.json:/etc/zot/config.json:ro
+    restart: unless-stopped
+    healthcheck: { test: ["NONE"] }
+  zot-local:
+    image: ghcr.io/project-zot/zot-linux-amd64:latest
+    ports: ["5004:5000"]
+    volumes:
+      - /mnt/primary_storage/zot/data-local:/var/lib/registry
+      - /mnt/primary_storage/zot/config/config-local.json:/etc/zot/config.json:ro
+    restart: unless-stopped
+    healthcheck: { test: ["NONE"] }
