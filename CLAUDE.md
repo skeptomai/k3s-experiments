@@ -20,7 +20,7 @@ Kubernetes learning cluster on six ipc machines (1 control plane, 5 workers). Sc
 - Container runtime: Pelagos v0.65.37 on all six nodes (`pelagos://0.1.0`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
-- SSH key: `~/.ssh/id_rsa` (cb@omen)
+- SSH key: `~/.ssh/Omen` (cb@omen)
 - kubectl requires sudo on the nodes: `sudo kubectl ...`
 - k3s token lives at `/var/lib/rancher/k3s/server/node-token` on ipc1
 
@@ -52,6 +52,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
 | `scripts/pxe-control.sh <status\|enable\|disable> [node]` | Enables/disables PXE boot per node (run from omen) |
 | `scripts/tailscale-cleanup.sh [--verify] <node...>` | Deletes stale Tailscale device(s) for a node before reinstall so it reclaims its name; `--verify` checks post-install. Needs a Tailscale OAuth client (devices:core write) via `TS_OAUTH_CLIENT_ID`/`_SECRET` env or 1Password `op://Private/Tailscale OAuth k3s`. Called automatically by `reinstall-nodes.sh`; no-op with a WARN if creds absent. |
+| `scripts/shutdown-cluster.sh` | Gracefully cordons all nodes, drains workers then control plane, shuts down workers first and ipc1 last |
 
 ## PXE Reinstall Workflow
 
