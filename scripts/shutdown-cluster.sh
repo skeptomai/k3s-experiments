@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-SSH="ssh -i $HOME/.ssh/Omen"
+SSH="ssh -i $HOME/.ssh/Omen -o StrictHostKeyChecking=accept-new"
 WORKERS="ipc2 ipc3 ipc4 ipc5 ipc6"
 CONTROL_PLANE="ipc1"
 
