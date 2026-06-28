@@ -12,7 +12,7 @@ hardware-class labels, and the taints/tolerations/affinity model behind them.
 | ipc3 | worker | Pentium G5400T, 2c/4t, 32G | `standard` | |
 | ipc4 | worker | i5-12500T, 6c/12t, 32G | `performance` | |
 | ipc5 | worker | i5-12500T, 6c/12t, 32G | `performance` | |
-| ipc6 | worker | i5-12500T, 6c/12t, **16G** | `performance` | less RAM than ipc4/5 |
+| ipc6 | worker | i5-12500T, 6c/12t, 32G | `performance` | RAM upgraded to 2×16 GiB (was 16G) |
 
 ## ipc1 is control-plane-only
 
