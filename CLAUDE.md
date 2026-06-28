@@ -1,22 +1,28 @@
 # k3s-experiments
 
-Kubernetes learning cluster on six ipc machines (1 control plane, 5 workers). Scripts and docs for cluster management and experiments.
+Kubernetes learning cluster on six ipc machines: **3 control-plane (HA embedded
+etcd, ipc1-3) + 3 workers (ipc4-6)**. Scripts and docs for cluster management and
+experiments. (Control plane went HA on 2026-06-28 — was previously a single
+ipc1 server on SQLite; see `docs/ipc1-3-control-plane-ha-runbook.md`.)
 
 ## Cluster
 
 | Node | Role | IP | SSH | MAC (primary NIC) |
 |------|------|----|-----|-------------------|
-| ipc1 | control-plane | 192.168.88.53 | Direct via tailnet: `ipc1.taildd208.ts.net` | `a8:a1:59:43:2a:67` (enp2s0) |
-| ipc2 | worker | 192.168.88.52 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc2` | `a8:a1:59:43:2a:ed` (enp2s0) |
-| ipc3 | worker | 192.168.88.54 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc3` | `a8:a1:59:43:2a:74` (enp2s0) |
+| ipc1 | control-plane,etcd (seed) | 192.168.88.53 | Direct via tailnet: `ipc1.taildd208.ts.net` | `a8:a1:59:43:2a:67` (enp2s0) |
+| ipc2 | control-plane,etcd | 192.168.88.52 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc2` | `a8:a1:59:43:2a:ed` (enp2s0) |
+| ipc3 | control-plane,etcd | 192.168.88.54 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc3` | `a8:a1:59:43:2a:74` (enp2s0) |
 | ipc4 | worker | 192.168.88.55 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc4` | `d0:ad:08:9c:d2:cb` (eno1) |
 | ipc5 | worker | 192.168.88.56 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc5` | `d0:ad:08:9c:d1:45` (eno1) |
 | ipc6 | worker | 192.168.88.57 | Jump through ipc1: `-J cb@ipc1.taildd208.ts.net cb@ipc6` | `e0:73:e7:c0:b0:08` (eno1) |
 
-- k3s v1.35.5, Ubuntu 24.04, x86_64
-- ipc1-3: Intel Pentium Gold G5400T, 2 cores / 4 threads, 32GB RAM
-- ipc4-5: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM
-- ipc6: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, **16GB RAM**
+- Roles are the single source of truth in `scripts/lib/node-roles.sh` (servers
+  ipc1-3, agents ipc4-6); scripts consult it rather than hard-coding node names.
+- ipc1-3 carry `slow:NoSchedule` + `control-plane:NoSchedule` taints → dedicated to
+  the control plane; all real workloads run on ipc4-6.
+- k3s v1.35.5, Ubuntu 26.04, x86_64
+- ipc1-3: Intel Pentium Gold G5400T, 2 cores / 4 threads, 32GB RAM (SATA SSD)
+- ipc4-6: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM (NVMe; ipc6 = 2×16 GiB)
 - Container runtime: Pelagos v0.65.37 on all six nodes (`pelagos://0.1.0`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
@@ -42,11 +48,13 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/upgrade-server.sh [channel]` | Upgrades ipc1 control plane |
-| `scripts/upgrade-agents.sh [channel] [node...]` | Upgrades ipc2/ipc3 workers (fetches token automatically; specify node to target one) |
-| `scripts/reinstall-nodes.sh <node> [node...]` | Full PXE reinstall of worker node(s): enables PXE → reboots → waits → rejoins k3s |
-| `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order |
-| `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (default: all three) |
+| `scripts/lib/node-roles.sh` | **Source of truth for node roles** (servers ipc1-3, agents ipc4-6); sourced by the scripts below |
+| `scripts/upgrade-server.sh [channel] [node...]` | Rolling in-place upgrade of the control-plane servers (ipc1-3), one at a time to preserve etcd quorum |
+| `scripts/upgrade-agents.sh [channel] [node...]` | Upgrades/joins the agent nodes (ipc4-6); refuses server nodes |
+| `scripts/join-server.sh <ipc2\|ipc3>` | Joins a freshly-reinstalled control-plane node to ipc1's etcd as a server (token injected, version pinned) |
+| `scripts/reinstall-nodes.sh <node> [node...]` | Full PXE reinstall of node(s): enables PXE → reboots → waits → rejoins k3s (role-dispatched: servers→join-server.sh, agents→upgrade-agents.sh) |
+| `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order (servers rolling, then agents) |
+| `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (role-aware config + unit; default: all six) |
 | `scripts/install-nut-clients.sh [node...]` | Installs/configures NUT client (upsmon) on ipc nodes — run after reinstall |
 | `scripts/label-nodes.sh` | Applies durable `node-class` labels (standard=Pentium ipc1-3, performance=i5 ipc4-6) for capability-based scheduling; idempotent, run after reinstall |
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
@@ -56,9 +64,16 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 
 ## PXE Reinstall Workflow
 
-**Automated (worker nodes only):** `bash scripts/reinstall-nodes.sh ipc2` or `ipc3` — handles the full cycle end-to-end. Claude can run this directly.
+**Automated:** `bash scripts/reinstall-nodes.sh ipc2` (or any of ipc2-ipc6) — handles
+the full cycle end-to-end and **role-dispatches the rejoin**: control-plane nodes
+(ipc2/ipc3) rejoin as servers via `join-server.sh`; workers (ipc4-6) via
+`upgrade-agents.sh`. Claude can run this directly. **ipc1 (the etcd seed) is never
+reinstalled by this script** — it requires the manual backup/restore in
+`docs/ipc1-upgrade-runbook.md`. Reinstalling a *server* node (ipc2/ipc3) is safe
+(etcd is replicated); k3s removes its old etcd member on `kubectl delete node` and it
+re-joins fresh — verify membership after with `kubectl get nodes -l node-role.kubernetes.io/etcd`.
 
-**Manual steps** (only needed for ipc1 or if automated script fails):
+**Manual steps** (only needed for ipc1 or if the automated script fails):
 
 1. `bash scripts/deploy-pxe-configs.sh` — sync repo configs to nazgul
 2. `bash scripts/pxe-control.sh enable <node>` — enable PXE for the node
@@ -67,7 +82,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 5. Check DHCP address (see MikroTik note below if wrong)
 6. Clear stale SSH known_hosts on omen
 7. Remove stale Tailscale device; rename new one if it registered as `<node>-1`
-8. `bash scripts/upgrade-agents.sh <node>` — rejoin k3s + install Pelagos
+8. Rejoin k3s + install Pelagos — **server (ipc2/ipc3):** `bash scripts/join-server.sh <node>`; **worker (ipc4-6):** `bash scripts/upgrade-agents.sh <node>`
 9. `bash scripts/install-nut-clients.sh <node>` — restore NUT UPS monitoring
 10. `bash scripts/label-nodes.sh` — restore the node's `node-class` label (labels don't survive a fresh registration)
 
@@ -110,6 +125,18 @@ To query: `sudo efibootmgr` on any node. To fix if a reinstall resets it: `sudo 
 
 **ipc4/ipc5 only:** These machines also require "Network Boot" enabled in BIOS firmware settings (F2 at POST → Advanced → Network Boot or similar). This is a one-time physical setup — efibootmgr boot order alone is not sufficient for Intel NUC-style hardware.
 
-## Agent Upgrade Notes
+## Node Role Notes (k3s install)
 
-When upgrading agent nodes, `K3S_URL` and `K3S_TOKEN` **must always be passed explicitly**. The install script does not persist role information — without these vars it will incorrectly install the node as a server. See `scripts/upgrade-agents.sh` for the correct pattern.
+The k3s install script does not persist role information, so role must be supplied
+correctly every time. The role map lives in `scripts/lib/node-roles.sh`; the scripts
+consult it. Two symmetric gotchas:
+
+- **Agents (ipc4-6):** `K3S_URL` and `K3S_TOKEN` must be passed explicitly, or the
+  installer wrongly comes up as a server. See `scripts/upgrade-agents.sh`.
+- **Servers (ipc2/ipc3):** must be installed with `INSTALL_K3S_EXEC=server` **and** a
+  `config.yaml` that already contains `server:` + `token:` (the SERVER token from
+  `/var/lib/rancher/k3s/server/token`, not the agent `node-token`) — otherwise the
+  installer cluster-inits a *new* etcd instead of joining ipc1's. The version is
+  pinned to the seed's running version to avoid etcd skew. See
+  `scripts/join-server.sh`. `install-pelagos.sh` deploys the matching role config
+  (and injects the token for joining servers) automatically.

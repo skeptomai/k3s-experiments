@@ -8,13 +8,19 @@
 # systemd unit, and deploys the canonical k3s config from config/k3s-server.yaml
 # or config/k3s-agent.yaml in the repo root. Safe to run multiple times (idempotent).
 #
+# Role-aware: deploys the server config (k3s-server.yaml on the etcd seed ipc1,
+# k3s-server-join.yaml with the token injected on ipc2/ipc3) + the `k3s` unit on
+# control-plane nodes, and the agent config + `k3s-agent` unit on workers ipc4-6.
+# Role map: scripts/lib/node-roles.sh.
+#
 # Usage: ./install-pelagos.sh [--version vX.Y.Z] [node...]
 #   --version: pin a specific release (default: latest)
-#   node: ipc1 | ipc2 | ipc3 | ipc4 | ipc5 (default: ipc1 ipc2 ipc3)
+#   node: ipc1 | ipc2 | ipc3 | ipc4 | ipc5 | ipc6 (default: all six)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
+source "$REPO_ROOT/scripts/lib/node-roles.sh"
 DEFAULT_NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6)
 declare -A NODE_IP=([ipc1]="" [ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
 
@@ -28,6 +34,19 @@ while [[ $# -gt 0 ]]; do
 done
 [[ ${#NODES[@]} -eq 0 ]] && NODES=("${DEFAULT_NODES[@]}")
 
+# If any JOINING control-plane server (a server node other than the etcd seed) is
+# targeted, fetch the live server token from the seed to inject into its join
+# config. The token is a secret and is never stored in the repo config file.
+SERVER_TOKEN=""
+for n in "${NODES[@]}"; do
+    if is_server_node "$n" && [[ "$n" != "$CLUSTER_INIT_NODE" ]]; then
+        echo "=== Fetching server token from $CLUSTER_INIT_NODE (for joining servers) ==="
+        SERVER_TOKEN=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
+            "sudo cat /var/lib/rancher/k3s/server/token")
+        break
+    fi
+done
+
 echo "=== Fetching Pelagos release ==="
 if [[ -n "$VERSION_PIN" ]]; then
     LATEST="$VERSION_PIN"
@@ -40,15 +59,26 @@ echo "Version: $LATEST  deb: $DEB_URL"
 
 install_node() {
     local node=$1
-    local ssh_cmd k3s_service k3s_config_b64 registries_b64
+    local ssh_cmd svc k3s_config_b64 registries_b64
 
     if [ "$node" = "ipc1" ]; then
         ssh_cmd="ssh -o StrictHostKeyChecking=no cb@$SERVER"
-        k3s_service="k3s"
-        k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
     else
         ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@$SERVER cb@${NODE_IP[$node]}"
-        k3s_service="k3s-agent"
+    fi
+    svc=$(k3s_service "$node")
+
+    # Role-aware k3s config:
+    #   - etcd seed (ipc1)        -> server config (cluster-init)
+    #   - joining server (ipc2/3) -> server-join config, token injected
+    #   - agent (ipc4-6)          -> agent config
+    if [ "$node" = "$CLUSTER_INIT_NODE" ]; then
+        k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
+    elif is_server_node "$node"; then
+        [[ -n "$SERVER_TOKEN" ]] || { echo "ERROR: server token not fetched for $node" >&2; return 1; }
+        k3s_config_b64=$(sed "s|<INJECTED_AT_INSTALL_FROM_IPC1_TOKEN>|${SERVER_TOKEN}|" \
+            "$REPO_ROOT/config/k3s-server-join.yaml" | base64 -w0)
+    else
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent.yaml")
     fi
     registries_b64=$(base64 -w0 < "$REPO_ROOT/config/pelagos-registries.toml")
@@ -56,7 +86,7 @@ install_node() {
     echo ""
     echo "=== Installing Pelagos $LATEST on $node ==="
 
-    $ssh_cmd bash -s "$DEB_URL" "$k3s_service" "$k3s_config_b64" "$registries_b64" <<'REMOTE'
+    $ssh_cmd bash -s "$DEB_URL" "$svc" "$k3s_config_b64" "$registries_b64" <<'REMOTE'
 set -euo pipefail
 DEB_URL=$1
 K3S_SERVICE=$2

@@ -14,11 +14,17 @@ for using this cluster as a robust Kamaji management cluster (see `kamaji-on-k3s
 > pelagos CRI intact, HA failover verified (stopped ipc1, API still served via
 > ipc2 on 2/3 quorum). Stale daemonset pods on ipc2 (left by the node
 > delete/recreate) were cleared so the DaemonSets recreated them fresh.
-> **Open follow-ups:** (1) **kube-vip** for an HA *external* API endpoint —
-> kubeconfigs still point at `https://ipc1:6443`, so external `kubectl` is not yet
-> HA (in-cluster worker→API already fails over via k3s's embedded LB);
-> (2) update PXE autoinstall so a future reinstall of ipc2/ipc3 re-registers them
-> as **servers** (the reinstall path still provisions agents).
+> **Follow-ups:**
+> - ✅ **Reinstall/PXE path made role-aware (2026-06-28).** A reinstall of ipc2/ipc3
+>   now re-registers them as **servers**, not agents. Roles are centralized in
+>   `scripts/lib/node-roles.sh`; `reinstall-nodes.sh` dispatches servers to the new
+>   `scripts/join-server.sh` and agents to `upgrade-agents.sh`; `install-pelagos.sh`
+>   is role-aware (server config + `k3s` unit on ipc1-3, injecting the join token for
+>   ipc2/ipc3; agent config + `k3s-agent` unit on ipc4-6); `upgrade-server.sh` does a
+>   rolling quorum-safe upgrade of all three servers. See "Reinstall path" below.
+> - ⏳ **kube-vip** for an HA *external* API endpoint — kubeconfigs still point at
+>   `https://ipc1:6443`, so external `kubectl` is not yet HA (in-cluster worker→API
+>   already fails over via k3s's embedded LB).
 
 ## Pre-flight facts (audited 2026-06-28)
 
@@ -176,12 +182,12 @@ ssh ipc1 'sudo systemctl start k3s'
 
 ## Step 6 — Persist the config in Git
 
-- Commit `config/k3s-server.yaml` (now with `cluster-init: true`) and the new
+- ✅ Commit `config/k3s-server.yaml` (now with `cluster-init: true`) and the new
   `config/k3s-server-join.yaml`.
-- Update `node-scheduling.md`: ipc2/ipc3 are now **control-plane** nodes; document
+- ✅ Update `node-scheduling.md`: ipc2/ipc3 are now **control-plane** nodes; document
   the now-persisted `slow:NoSchedule` taint (previously live-only).
-- Update PXE autoinstall for ipc2/ipc3 to install the **server** role so a future
-  reinstall re-registers them correctly.
+- ✅ Make the reinstall/PXE path re-register ipc2/ipc3 as **servers** — see
+  "Reinstall path (role-aware)" below.
 
 ---
 
@@ -203,3 +209,38 @@ member and re-initializing — so **get Step 1 verification right before proceed
 - **etcd defragmentation / snapshots:** k3s auto-snapshots etcd; confirm the schedule
   (`--etcd-snapshot-schedule-cron`) and that snapshots land somewhere durable (nazgul).
 - **pelagos CRI** is unchanged — all three keep `unix:///run/pelagos/cri.sock`.
+
+---
+
+## Reinstall path (role-aware, since 2026-06-28)
+
+The cluster-management scripts now encode the HA topology so a PXE reinstall of a
+control-plane node re-registers it as a **server**, not an agent.
+
+- **`scripts/lib/node-roles.sh`** — single source of truth: `SERVER_NODES=(ipc1 ipc2
+  ipc3)`, `AGENT_NODES=(ipc4 ipc5 ipc6)`, `CLUSTER_INIT_NODE=ipc1`, plus
+  `is_server_node` / `k3s_role` / `k3s_service` helpers. Other scripts source it.
+- **`scripts/join-server.sh <ipc2|ipc3>`** — joins a freshly-reinstalled node to
+  ipc1's etcd as a server: pins k3s to the seed's version, fetches the SERVER token,
+  clears the stale node object + node-password secret, writes a `server:`+`token:`
+  config, installs with `INSTALL_K3S_EXEC=server`, then runs `install-pelagos.sh`.
+- **`scripts/reinstall-nodes.sh`** — dispatches the rejoin by role
+  (`is_server_node` → `join-server.sh`, else `upgrade-agents.sh`).
+- **`scripts/install-pelagos.sh`** — role-aware: deploys `k3s-server.yaml` on the
+  seed, `k3s-server-join.yaml` (token injected) on ipc2/ipc3 with the `k3s` unit, and
+  `k3s-agent.yaml` with the `k3s-agent` unit on workers. (Previously it always wrote
+  the agent config + restarted `k3s-agent` for any non-ipc1 node — which would have
+  clobbered a server node.)
+- **`scripts/upgrade-agents.sh`** — defaults to `AGENT_NODES`; refuses server nodes.
+- **`scripts/upgrade-server.sh`** — rolling, one-at-a-time, quorum-safe upgrade of
+  ipc1-3.
+
+**Note — reinstalling a server node:** etcd is replicated, so ipc2/ipc3 *can* be
+reinstalled (unlike ipc1, the seed). `join-server.sh` deletes the node object first,
+which makes k3s remove the old etcd member; the node then re-joins as a fresh member.
+After a server reinstall, verify membership:
+`kubectl get nodes -l node-role.kubernetes.io/etcd` should list exactly ipc1/ipc2/ipc3.
+
+**Testing status:** scripts are `bash -n` syntax-clean and the role lib +
+config-rendering were dry-run verified. The destructive end-to-end reinstall was
+**not** live-run (it reboots/wipes a node); validate on the next real reinstall.

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Upgrades the entire k3s cluster: server first, then agents.
+# Upgrades the entire k3s cluster: control-plane servers (ipc1-3, rolling, one at
+# a time to preserve etcd quorum) first, then agents (ipc4-6).
 # Run from any machine with SSH access to ipc1 via the tailnet.
 #
 # Usage: ./upgrade-cluster.sh [channel]

@@ -21,6 +21,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$REPO_ROOT/scripts/lib/node-roles.sh"
 SERVER="ipc1.taildd208.ts.net"
 MIKROTIK="admin@192.168.88.1"
 # Generous install timeout — the slow Pentium nodes (ipc2/ipc3) take ~30 min on 26.04.
@@ -223,8 +224,12 @@ for node in "${NODES[@]}"; do
         echo "  IP correct: $actual_ip"
     fi
 
-    echo "--- Rejoining k3s and installing Pelagos ---"
-    bash "$REPO_ROOT/scripts/upgrade-agents.sh" "$node"
+    echo "--- Rejoining k3s and installing Pelagos (role: $(k3s_role "$node")) ---"
+    if is_server_node "$node"; then
+        bash "$REPO_ROOT/scripts/join-server.sh" "$node"
+    else
+        bash "$REPO_ROOT/scripts/upgrade-agents.sh" "$node"
+    fi
 
     wait_node_ready "$node"
 
