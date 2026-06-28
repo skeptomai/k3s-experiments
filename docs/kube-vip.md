@@ -63,21 +63,38 @@ CA (the VIP's cert is signed by it, with `.58` in the SAN).
   stays on a healthy node (verified).
 - **Real node-down** (node powers off → kube-vip pod dies): the lease (5s) expires and
   the VIP floats to a live node. This is the case kube-vip primarily protects against.
-- **⚠️ Caveat — apiserver-only failure on the leader.** kube-vip floats on
-  **leader-election**, not apiserver health. If a control-plane node's *apiserver* dies
-  while the node and the kube-vip pod keep running, kube-vip keeps the lease (it renews
-  via a live peer through the in-cluster API) and the VIP **sticks to that node** —
-  pointing at a dead apiserver. **This is more likely on pelagos** than on other
-  runtimes: pelagos re-adopts running pods across a `pelagos-cri`/`k3s` restart (#336),
-  so a routine `systemctl restart k3s` (e.g. during an upgrade) drops the apiserver
-  briefly while keeping kube-vip alive.
-  - **Mitigation:** enable kube-vip's apiserver health-check so the leader steps down
-    when its local API is unhealthy. *(Status: see "Health check" below.)*
+- **Apiserver-only failure on the leader — CLOSED 2026-06-28 (see "Local-apiserver
+  binding").** Previously, if a control-plane node's *apiserver* died while the node and
+  the kube-vip pod kept running, kube-vip kept the lease (renewing via a live peer
+  through the in-cluster API) and the VIP **stuck** to that node pointing at a dead
+  apiserver — especially likely on pelagos, which re-adopts running pods across a
+  `k3s`/`pelagos-cri` restart (#336), so a routine `systemctl restart k3s` (upgrade)
+  drops the apiserver while keeping kube-vip alive. Now fixed: the VIP floats to a live
+  node in **~5–10s** (verified: stopped k3s on the VIP holder → VIP moved to a peer,
+  API recovered automatically).
 
-## Health check
+## Local-apiserver binding (closes the failover gap)
 
-<!-- KUBEVIP-HEALTHCHECK-STATUS -->
-(To be filled in when the apiserver health-check is enabled — closes the caveat above.)
+ARP mode floats the VIP purely on **leader election** — and kube-vip's
+`control_plane_health_check_*` flags only apply to **BGP** mode, so they don't help
+here. The fix is to make each kube-vip's leader-election traffic go to its **own**
+apiserver, so a local API outage actually breaks *its* lease renewal:
+
+```yaml
+# manifests/kube-vip/daemonset.yaml — env
+- name: KUBERNETES_SERVICE_HOST
+  value: "127.0.0.1"
+- name: KUBERNETES_SERVICE_PORT
+  value: "6443"
+```
+
+client-go's in-cluster config honors these env vars, so the (hostNetwork) kube-vip pod
+talks to the local k3s apiserver on `127.0.0.1:6443` instead of the in-cluster service
+VIP (which would route to any live peer). The local serving cert carries `127.0.0.1` in
+its SAN and the ServiceAccount CA validates it. When a node's apiserver dies, that
+node's kube-vip can't renew the lease → it relinquishes leadership → a node with a live
+apiserver takes the lease and the VIP. Expect a brief (~5–10s) blip during the float
+(lease expiry + gratuitous ARP), then automatic recovery.
 
 ## Re-deploying / verifying
 

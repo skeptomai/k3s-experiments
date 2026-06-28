@@ -47,6 +47,19 @@ spec:
           args:
             - manager
           env:
+            # Talk to the LOCAL apiserver (127.0.0.1:6443) instead of the in-cluster
+            # service IP. In ARP mode kube-vip floats the VIP purely on leader-election
+            # (the BGP control_plane_health_check_* flags don't apply), so the leader
+            # must NOTICE when its own apiserver dies. Pointing client-go's in-cluster
+            # config at localhost means a local apiserver outage breaks lease renewal →
+            # the leader steps down → the VIP floats to a node whose apiserver is alive.
+            # (The local serving cert includes 127.0.0.1 in its SAN, so TLS validates
+            # against the SA CA.) Without this the VIP sticks to a dead apiserver — more
+            # likely on pelagos, which re-adopts kube-vip across a k3s restart (#410 era).
+            - name: KUBERNETES_SERVICE_HOST
+              value: "127.0.0.1"
+            - name: KUBERNETES_SERVICE_PORT
+              value: "6443"
             - name: vip_arp
               value: "true"
             - name: port

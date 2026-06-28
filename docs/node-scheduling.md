@@ -44,9 +44,10 @@ repelled from workloads:
   VIP `192.168.88.58` (`k8s-api.home.skeptomai.com`) is advertised across ipc1-3 by a
   kube-vip DaemonSet; the apiserver cert carries it in `tls-san`. omen has an additive
   `ipc-vip` kubeconfig context for it (the `default` context still uses the tailnet
-  `ipc1:6443` path, which is reachable anywhere but not HA). One caveat: kube-vip
-  floats on leader-election, so an apiserver-only failure on the leader doesn't fail
-  over — see **`kube-vip.md`**. Pairs with MetalLB (still pending) for the Kamaji work.
+  `ipc1:6443` path, which is reachable anywhere but not HA). kube-vip is bound to each
+  node's local apiserver so it fails over on an apiserver outage too (not just node
+  down) — full detail in **`kube-vip.md`**. Pairs with MetalLB (still pending) for the
+  Kamaji work.
 
 ## Scheduling by hardware class
 
