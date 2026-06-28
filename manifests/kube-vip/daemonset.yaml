@@ -1,0 +1,90 @@
+# kube-vip — floating VIP for the HA control-plane API endpoint (192.168.88.58).
+# ARP/L2 mode, control-plane only, leader-elected so exactly one of ipc1-3
+# advertises the VIP at a time. svc_enable=false: this handles ONLY the
+# control-plane VIP, not Service LoadBalancers (MetalLB will own those).
+#
+# The VIP must be in the apiserver serving-cert SAN (tls-san in the k3s server
+# configs) and excluded from the MikroTik DHCP pool — both done 2026-06-28.
+# Interface enp2s0 is the bridge-lan NIC on all three Pentium control-plane nodes.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-vip-ds
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kube-vip-ds
+    app.kubernetes.io/version: v1.2.1
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-vip-ds
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kube-vip-ds
+        app.kubernetes.io/version: v1.2.1
+    spec:
+      # Run only on the control-plane servers (ipc1-3), tolerating their taints.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+          operator: Exists
+        - key: slow
+          effect: NoSchedule
+          operator: Exists
+        - key: node.kubernetes.io/not-ready
+          effect: NoExecute
+          operator: Exists
+        - key: node.kubernetes.io/unreachable
+          effect: NoExecute
+          operator: Exists
+      containers:
+        - name: kube-vip
+          image: ghcr.io/kube-vip/kube-vip:v1.2.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - manager
+          env:
+            - name: vip_arp
+              value: "true"
+            - name: port
+              value: "6443"
+            - name: vip_nodename
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: vip_interface
+              value: enp2s0
+            - name: vip_cidr
+              value: "32"
+            - name: cp_enable
+              value: "true"
+            - name: cp_namespace
+              value: kube-system
+            - name: svc_enable
+              value: "false"
+            - name: vip_leaderelection
+              value: "true"
+            - name: vip_leasename
+              value: plndr-cp-lock
+            - name: vip_leaseduration
+              value: "5"
+            - name: vip_renewdeadline
+              value: "3"
+            - name: vip_retryperiod
+              value: "1"
+            - name: address
+              value: "192.168.88.58"
+            - name: prometheus_server
+              value: ":2112"
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+      hostNetwork: true
+      serviceAccountName: kube-vip
+  updateStrategy:
+    type: RollingUpdate

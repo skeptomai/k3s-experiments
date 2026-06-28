@@ -14,6 +14,10 @@ flannel-backend: wireguard-native
 disable: local-storage
 server: "https://192.168.88.53:6443"   # ipc1
 token: "<INJECTED_AT_INSTALL_FROM_IPC1_TOKEN>"
+# Include the kube-vip control-plane VIP in the apiserver serving cert SAN.
+tls-san:
+  - "192.168.88.58"
+  - "k8s-api.home.skeptomai.com"
 # Control-plane-only: repel workloads to the performance nodes (ipc4-6).
 node-taint:
   - "node-role.kubernetes.io/control-plane:NoSchedule"
