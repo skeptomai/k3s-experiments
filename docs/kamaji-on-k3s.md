@@ -147,8 +147,8 @@ tolerates 1 failure); workloads stay on ipc4/5/6.
 
 ## To make this cluster Kamaji-ready (checklist)
 
-- [ ] **Install MetalLB**, address pool routable from tenant worker nodes — *mandatory, currently missing*
-- [ ] **Disable k3s ServiceLB** (`--disable servicelb`) once Traefik is moved to MetalLB
+- [x] **Install MetalLB** ✅ done 2026-06-28 — pool `192.168.88.240-.250`, L2/ARP (see `metallb.md`)
+- [x] **Disable k3s ServiceLB** ✅ done — `disable: servicelb` on the servers; Traefik migrated to MetalLB `.240`
 - [ ] **Storage for tenant etcd** — `nfs` SC is reschedulable but etcd-on-NFS is discouraged; consider a local-SSD-backed CSI or accept the NFS perf caveat
 - [ ] **CNI** — flannel works; add Calico/Cilium only if tenant NetworkPolicy is needed
 - [x] **HA control plane** on ipc1-3 via `--cluster-init` ✅ done 2026-06-28 (see `ipc1-3-control-plane-ha-runbook.md`) — removes the management-cluster SPOF

@@ -46,8 +46,9 @@ repelled from workloads:
   `ipc-vip` kubeconfig context for it (the `default` context still uses the tailnet
   `ipc1:6443` path, which is reachable anywhere but not HA). kube-vip is bound to each
   node's local apiserver so it fails over on an apiserver outage too (not just node
-  down) — full detail in **`kube-vip.md`**. Pairs with MetalLB (still pending) for the
-  Kamaji work.
+  down) — full detail in **`kube-vip.md`**. Pairs with **MetalLB** (deployed 2026-06-28,
+  pool `192.168.88.240-.250`, `docs/metallb.md`) for LoadBalancer service IPs / the
+  Kamaji work — k3s ServiceLB is now disabled and Traefik runs on a MetalLB IP.
 
 ## Scheduling by hardware class
 

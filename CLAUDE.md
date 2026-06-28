@@ -24,6 +24,12 @@ ipc1 server on SQLite; see `docs/ipc1-3-control-plane-ha-runbook.md`.)
   (`k8s-api.home.skeptomai.com`) across ipc1-3. omen kubeconfig has two contexts —
   `default` (tailnet `ipc1:6443`, reachable anywhere, not HA) and `ipc-vip` (the VIP,
   HA, LAN-only). See `docs/kube-vip.md`.
+- **LoadBalancer:** MetalLB (L2/ARP), pool **`192.168.88.240-.250`**; k3s ServiceLB is
+  disabled (`disable: servicelb` in the server configs). Traefik runs on `.240`. See
+  `docs/metallb.md`. Both kube-vip and MetalLB are **Flux-managed** (`clusters/ipc/`), so
+  a cluster rebuild brings them back automatically once Flux is bootstrapped — but the
+  MikroTik DHCP/DNS reservations they depend on are **out-of-band** (see "Recreating
+  from scratch" below).
 - k3s v1.35.5, Ubuntu 26.04, x86_64
 - ipc1-3: Intel Pentium Gold G5400T, 2 cores / 4 threads, 32GB RAM (SATA SSD)
 - ipc4-6: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM (NVMe; ipc6 = 2×16 GiB)
@@ -93,6 +99,35 @@ re-joins fresh — verify membership after with `kubectl get nodes -l node-role.
 **After ipc1 reinstall** (wipes etcd — full cluster rebuild):
 - Install k3s, Pelagos, rejoin agents, bootstrap Flux (GitHub token in 1Password)
 - Scripts use tailnet hostnames — if Tailscale not yet up, use 192.168.88.53 directly
+
+## Recreating from scratch (what's automated vs out-of-band)
+
+A full rebuild restores most of the cluster from Git; a few pieces live on the MikroTik
+and must be re-applied by hand.
+
+**Automated (comes back on rebuild):**
+- **k3s server/agent config** — `config/k3s-server.yaml` (ipc1, cluster-init + tls-san +
+  `disable: servicelb`), `config/k3s-server-join.yaml` (ipc2/3), `config/k3s-agent.yaml`.
+  Deployed by `install-pelagos.sh` (role-aware). The HA control plane comes from
+  `cluster-init` on ipc1 + `join-server.sh` for ipc2/3.
+- **kube-vip + MetalLB** — Flux reconciles `clusters/ipc/{kube-vip,metallb,metallb-config}.yaml`
+  → `manifests/{kube-vip,metallb,metallb-config}/` once Flux is bootstrapped. No manual apply.
+- **node-class labels** — `scripts/label-nodes.sh`.
+
+**Out-of-band on the MikroTik (NOT in Git — re-apply by hand; see orgfiles `home-network/dns-dhcp.md`):**
+- **DHCP pool** must exclude the reserved IPs:
+  `ranges=192.168.88.10-192.168.88.57,192.168.88.59-192.168.88.239`
+  (excludes `.58` = kube-vip VIP, and `.240-.254` = MetalLB pool).
+- **Static DNS:** `k8s-api.home.skeptomai.com → 192.168.88.58`.
+- These are prerequisites: kube-vip's VIP `.58` and MetalLB's `.240-.250` must not be in
+  the DHCP pool, or they'll collide with dynamic leases.
+
+**Reserved IP map (bridge-lan 192.168.88.0/24):**
+| IP(s) | Purpose | Reserved how |
+|-------|---------|--------------|
+| `.52-.57` | ipc1-6 nodes | MikroTik static leases (by MAC) |
+| `.58` | kube-vip control-plane VIP | DHCP pool split (excluded) |
+| `.240-.250` | MetalLB LoadBalancer pool | DHCP pool shrunk to `.239` |
 
 ## MikroTik DHCP Lease Reset
 

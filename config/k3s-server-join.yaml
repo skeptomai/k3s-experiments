@@ -11,7 +11,9 @@
 # after placing this file (with token filled in) at /etc/rancher/k3s/config.yaml.
 container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
 flannel-backend: wireguard-native
-disable: local-storage
+disable:
+  - local-storage
+  - servicelb   # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
 server: "https://192.168.88.53:6443"   # ipc1
 token: "<INJECTED_AT_INSTALL_FROM_IPC1_TOKEN>"
 # Include the kube-vip control-plane VIP in the apiserver serving cert SAN.
