@@ -151,7 +151,8 @@ tolerates 1 failure); workloads stay on ipc4/5/6.
 - [ ] **Disable k3s ServiceLB** (`--disable servicelb`) once Traefik is moved to MetalLB
 - [ ] **Storage for tenant etcd** — `nfs` SC is reschedulable but etcd-on-NFS is discouraged; consider a local-SSD-backed CSI or accept the NFS perf caveat
 - [ ] **CNI** — flannel works; add Calico/Cilium only if tenant NetworkPolicy is needed
-- [ ] **(Recommended) HA control plane** on ipc1-3 via `--cluster-init` (see above) — removes the management-cluster SPOF
+- [x] **HA control plane** on ipc1-3 via `--cluster-init` ✅ done 2026-06-28 (see `ipc1-3-control-plane-ha-runbook.md`) — removes the management-cluster SPOF
+- [x] **HA management-cluster API endpoint** ✅ kube-vip VIP `192.168.88.58` (see `kube-vip.md`) — also the model for giving each hosted tenant control plane a stable endpoint, though tenants will use MetalLB-assigned IPs rather than this single CP VIP
 
 ## Sources
 

@@ -20,10 +20,14 @@ ipc1 server on SQLite; see `docs/ipc1-3-control-plane-ha-runbook.md`.)
   ipc1-3, agents ipc4-6); scripts consult it rather than hard-coding node names.
 - ipc1-3 carry `slow:NoSchedule` + `control-plane:NoSchedule` taints → dedicated to
   the control plane; all real workloads run on ipc4-6.
+- **HA API endpoint:** kube-vip floating VIP **`192.168.88.58`**
+  (`k8s-api.home.skeptomai.com`) across ipc1-3. omen kubeconfig has two contexts —
+  `default` (tailnet `ipc1:6443`, reachable anywhere, not HA) and `ipc-vip` (the VIP,
+  HA, LAN-only). See `docs/kube-vip.md`.
 - k3s v1.35.5, Ubuntu 26.04, x86_64
 - ipc1-3: Intel Pentium Gold G5400T, 2 cores / 4 threads, 32GB RAM (SATA SSD)
 - ipc4-6: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM (NVMe; ipc6 = 2×16 GiB)
-- Container runtime: Pelagos v0.65.37 on all six nodes (`pelagos://0.1.0`)
+- Container runtime: Pelagos v0.65.40 on all six nodes (`pelagos://0.1.0`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
 - SSH key: `~/.ssh/Omen` (cb@omen)

@@ -22,9 +22,11 @@ for using this cluster as a robust Kamaji management cluster (see `kamaji-on-k3s
 >   is role-aware (server config + `k3s` unit on ipc1-3, injecting the join token for
 >   ipc2/ipc3; agent config + `k3s-agent` unit on ipc4-6); `upgrade-server.sh` does a
 >   rolling quorum-safe upgrade of all three servers. See "Reinstall path" below.
-> - ⏳ **kube-vip** for an HA *external* API endpoint — kubeconfigs still point at
->   `https://ipc1:6443`, so external `kubectl` is not yet HA (in-cluster worker→API
->   already fails over via k3s's embedded LB).
+> - ✅ **kube-vip** HA external API endpoint **deployed 2026-06-28** — floating VIP
+>   `192.168.88.58` (`k8s-api.home.skeptomai.com`) across ipc1-3; added an additive
+>   `ipc-vip` kubeconfig context (default stays tailnet). Required pelagos v0.65.40
+>   (hostNetwork fix #410). Full detail + the apiserver-health failover caveat in
+>   **`kube-vip.md`**.
 
 ## Pre-flight facts (audited 2026-06-28)
 

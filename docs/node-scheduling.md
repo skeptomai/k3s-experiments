@@ -35,16 +35,18 @@ repelled from workloads:
 - What still runs on ipc1-3: DaemonSets (node-exporter, spire-agent) and any addon
   that explicitly **tolerates** these taints. Everything else schedules on ipc4-6.
 
-### Control-plane endpoint HA — partial
+### Control-plane endpoint HA
 
 - **In-cluster (workers → API): HA.** k3s's embedded client-side load balancer on
   each agent fails over across all three servers automatically (no external LB
   needed) — verified in the agent LB state listing ipc1/ipc2/ipc3.
-- **External clients (kubeconfig): NOT HA.** kubeconfigs point at `https://ipc1:6443`;
-  there is no VIP/LB in front of the servers, so losing ipc1 breaks external
-  `kubectl` even though the cluster keeps running. **Follow-up:** add **kube-vip**
-  (floating VIP across the three servers, plus `tls-san: <vip>` on the server
-  configs) for an HA client endpoint. Pairs with MetalLB for the Kamaji work.
+- **External clients (kubeconfig): HA via kube-vip (since 2026-06-28).** A floating
+  VIP `192.168.88.58` (`k8s-api.home.skeptomai.com`) is advertised across ipc1-3 by a
+  kube-vip DaemonSet; the apiserver cert carries it in `tls-san`. omen has an additive
+  `ipc-vip` kubeconfig context for it (the `default` context still uses the tailnet
+  `ipc1:6443` path, which is reachable anywhere but not HA). One caveat: kube-vip
+  floats on leader-election, so an apiserver-only failure on the leader doesn't fail
+  over — see **`kube-vip.md`**. Pairs with MetalLB (still pending) for the Kamaji work.
 
 ## Scheduling by hardware class
 
