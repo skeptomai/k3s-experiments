@@ -7,6 +7,19 @@ for using this cluster as a robust Kamaji management cluster (see `kamaji-on-k3s
 
 **Workloads stay on ipc4-6 throughout** — ipc1-3 remain control-plane-only via taints.
 
+> **✅ EXECUTED 2026-06-28.** Ran end-to-end successfully. ipc1 migrated
+> SQLite→etcd in place (`state.db.migrated`); ipc2 then ipc3 reprovisioned in-place
+> (agent-uninstall → delete node + node-password secret → reinstall as server
+> pinned to `v1.35.5+k3s1`). Final: 3× `control-plane,etcd` Ready, 3 workers,
+> pelagos CRI intact, HA failover verified (stopped ipc1, API still served via
+> ipc2 on 2/3 quorum). Stale daemonset pods on ipc2 (left by the node
+> delete/recreate) were cleared so the DaemonSets recreated them fresh.
+> **Open follow-ups:** (1) **kube-vip** for an HA *external* API endpoint —
+> kubeconfigs still point at `https://ipc1:6443`, so external `kubectl` is not yet
+> HA (in-cluster worker→API already fails over via k3s's embedded LB);
+> (2) update PXE autoinstall so a future reinstall of ipc2/ipc3 re-registers them
+> as **servers** (the reinstall path still provisions agents).
+
 ## Pre-flight facts (audited 2026-06-28)
 
 - **Datastore today:** SQLite/kine on ipc1 only (`/var/lib/rancher/k3s/server/db/state.db`).

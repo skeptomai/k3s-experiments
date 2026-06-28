@@ -1,9 +1,13 @@
 container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
 flannel-backend: wireguard-native
 disable: local-storage
+# Initialize the embedded-etcd datastore (HA control plane with ipc2/ipc3).
+# This member is the cluster-init seed; ipc2/ipc3 join it as additional servers.
+cluster-init: true
 # ipc1 is control-plane-only: repel workload pods to relieve the weak 2-core node.
 # k3s applies node-taint at node REGISTRATION, so this survives a PXE reinstall
 # (a live `kubectl taint` does not). Critical addons (coredns/traefik) + DaemonSets
 # that tolerate this taint still run here; everything else schedules on workers.
 node-taint:
   - "node-role.kubernetes.io/control-plane:NoSchedule"
+  - "slow:NoSchedule"

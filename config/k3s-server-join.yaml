@@ -1,0 +1,20 @@
+# Server config for ipc2 / ipc3 — join ipc1's embedded-etcd cluster as additional
+# control-plane members (HA control plane). Mirrors ipc1's config.yaml EXCEPT:
+#   - NO `cluster-init` (only the seed member, ipc1, initializes etcd)
+#   - adds `server:` + `token:` to join ipc1
+#
+# The token is a SECRET and is injected at install time (read from ipc1's
+# /var/lib/rancher/k3s/server/token) — it is intentionally NOT stored here.
+# Install with:
+#   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.35.5+k3s1 \
+#     INSTALL_K3S_EXEC=server sh -
+# after placing this file (with token filled in) at /etc/rancher/k3s/config.yaml.
+container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
+flannel-backend: wireguard-native
+disable: local-storage
+server: "https://192.168.88.53:6443"   # ipc1
+token: "<INJECTED_AT_INSTALL_FROM_IPC1_TOKEN>"
+# Control-plane-only: repel workloads to the performance nodes (ipc4-6).
+node-taint:
+  - "node-role.kubernetes.io/control-plane:NoSchedule"
+  - "slow:NoSchedule"

@@ -7,28 +7,44 @@ hardware-class labels, and the taints/tolerations/affinity model behind them.
 
 | Node | Role | CPU | `node-class` | Notes |
 |------|------|-----|--------------|-------|
-| ipc1 | **control-plane (only)** | Pentium G5400T, 2c/4t, 32G | `standard` | API server + SSH bastion; tainted, runs no workloads |
-| ipc2 | worker | Pentium G5400T, 2c/4t, 32G | `standard` | |
-| ipc3 | worker | Pentium G5400T, 2c/4t, 32G | `standard` | |
+| ipc1 | **control-plane,etcd** | Pentium G5400T, 2c/4t, 32G | `standard` | etcd cluster-init seed; SSH bastion; tainted, runs no workloads |
+| ipc2 | **control-plane,etcd** | Pentium G5400T, 2c/4t, 32G | `standard` | HA control-plane member (joined 2026-06-28); tainted |
+| ipc3 | **control-plane,etcd** | Pentium G5400T, 2c/4t, 32G | `standard` | HA control-plane member (joined 2026-06-28); tainted |
 | ipc4 | worker | i5-12500T, 6c/12t, 32G | `performance` | |
 | ipc5 | worker | i5-12500T, 6c/12t, 32G | `performance` | |
 | ipc6 | worker | i5-12500T, 6c/12t, 32G | `performance` | RAM upgraded to 2×16 GiB (was 16G) |
 
-## ipc1 is control-plane-only
+## HA control plane on ipc1-3 (embedded etcd)
 
-ipc1 is a weak 2-core node that is *also* the single API server and the SSH
-bastion, so it's dedicated to the control plane and repelled from workloads:
+As of **2026-06-28** the control plane is **3-node HA on embedded etcd** (ipc1-3),
+migrated from the old single-server SQLite on ipc1. See
+`ipc1-3-control-plane-ha-runbook.md` for how it was done. The slow Pentium nodes
+are dedicated to control-plane duty (etcd is light on CPU/RAM); all real workloads
+run on the i5 performance nodes ipc4-6.
 
-- **Taint:** `node-role.kubernetes.io/control-plane:NoSchedule`.
-- **Durable:** set as `node-taint:` in `config/k3s-server.yaml` (the ipc1-only
-  server config). k3s applies node-taints at **registration**, so it survives a
-  PXE reinstall — a live `kubectl taint` does **not** (a fresh node registers
-  untainted).
-- **Existing pods were moved off with `kubectl drain`** — `NoSchedule` only
-  blocks *new* scheduling, it doesn't evict (see "rechecking" below). The
-  workload Deployments rescheduled onto the i5 workers.
-- What still runs on ipc1: DaemonSets and the k3s critical addons (coredns,
-  traefik) that explicitly **tolerate** the control-plane taint.
+The weak 2-core Pentiums are *also* the API servers / etcd members, so they are
+repelled from workloads:
+
+- **Taints (both, on all three):** `node-role.kubernetes.io/control-plane:NoSchedule`
+  **and** `slow:NoSchedule`.
+- **Durable:** set as `node-taint:` in the server configs (`config/k3s-server.yaml`
+  for ipc1's cluster-init seed, `config/k3s-server-join.yaml` for ipc2/ipc3). k3s
+  applies node-taints at **registration**, so they survive a reinstall — a live
+  `kubectl taint` does **not**. (The `slow` taint used to be live-only; it is now
+  persisted in config.)
+- What still runs on ipc1-3: DaemonSets (node-exporter, spire-agent) and any addon
+  that explicitly **tolerates** these taints. Everything else schedules on ipc4-6.
+
+### Control-plane endpoint HA — partial
+
+- **In-cluster (workers → API): HA.** k3s's embedded client-side load balancer on
+  each agent fails over across all three servers automatically (no external LB
+  needed) — verified in the agent LB state listing ipc1/ipc2/ipc3.
+- **External clients (kubeconfig): NOT HA.** kubeconfigs point at `https://ipc1:6443`;
+  there is no VIP/LB in front of the servers, so losing ipc1 breaks external
+  `kubectl` even though the cluster keeps running. **Follow-up:** add **kube-vip**
+  (floating VIP across the three servers, plus `tls-san: <vip>` on the server
+  configs) for an HA client endpoint. Pairs with MetalLB for the Kamaji work.
 
 ## Scheduling by hardware class
 
