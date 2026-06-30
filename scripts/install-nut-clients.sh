@@ -2,10 +2,17 @@
 # Install and configure NUT client (upsmon) on ipc nodes.
 # Connects each node to the NUT server running on nazgul (192.168.89.2).
 # Run from omen after any node reinstall.
-# Usage: install-nut-clients.sh [node...]   (default: ipc1 ipc2 ipc3)
+# Usage: install-nut-clients.sh [node...]   (default: ALL six nodes)
+#
+# NOTE (#8): all six nodes (incl. workers ipc4-6) run upsmon — reinstall-nodes.sh
+# calls this per-node, so reinstalled workers get it automatically. For GRACEFUL pod
+# termination on a UPS shutdown, kubelet graceful-node-shutdown must ALSO be enabled
+# via the kubelet CONFIG FILE (`shutdownGracePeriod`) — NOT the removed
+# `--shutdown-grace-period` flag, which fails to parse and crashes k3s. See #8.
 set -euo pipefail
 
-NODES=("${@:-ipc1 ipc2 ipc3}")
+NODES=("$@")
+[[ ${#NODES[@]} -eq 0 ]] && NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6)
 NUT_SERVER="192.168.89.2"
 UPS_NAME="cyberpower"
 MON_USER="upsmon"
