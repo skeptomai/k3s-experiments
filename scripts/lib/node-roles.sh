@@ -17,7 +17,7 @@ CLUSTER_INIT_NODE="ipc1"
 # Control-plane / etcd members.
 SERVER_NODES=(ipc1 ipc2 ipc3)
 # Worker / agent nodes.
-AGENT_NODES=(ipc4 ipc5 ipc6)
+AGENT_NODES=(ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
 
 # is_server_node <node> -> 0 if the node is a control-plane server, else 1.
 is_server_node() {

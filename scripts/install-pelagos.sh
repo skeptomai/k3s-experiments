@@ -21,8 +21,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc1.taildd208.ts.net"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
-DEFAULT_NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6)
-declare -A NODE_IP=([ipc1]="" [ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
+DEFAULT_NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
+declare -A NODE_IP=([ipc1]="" [ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
 
 VERSION_PIN=""
 NODES=()
@@ -95,7 +95,13 @@ REGISTRIES_CONFIG=$(echo "$4" | base64 -d)
 
 echo "--- Installing deb ---"
 curl -sL "$DEB_URL" -o /tmp/pelagos.deb
-sudo dpkg -i /tmp/pelagos.deb 2>&1 | tail -5 || sudo apt-get install -f -y 2>&1 | tail -5
+# dpkg -i unpacks but does NOT resolve/configure dependencies — on a fresh base OS
+# it leaves the package "unconfigured". ALWAYS run `apt-get install -f` afterwards to
+# configure it (and pull any missing dep), then verify. (Piping dpkg to `tail` masks
+# its exit code, so the old `|| apt-get` fallback never fired — hence always run it.)
+sudo dpkg -i /tmp/pelagos.deb 2>&1 | tail -5 || true
+sudo apt-get install -f -y 2>&1 | tail -5
+dpkg -l pelagos 2>/dev/null | grep -q "^ii" || { echo "ERROR: pelagos deb failed to configure"; exit 1; }
 
 echo "--- Symlinking binaries ---"
 sudo ln -sf /usr/bin/pelagos /usr/local/bin/pelagos

@@ -17,8 +17,8 @@ set -euo pipefail
 IPC1="${IPC1:-cb@ipc1.taildd208.ts.net}"
 SSH="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 $IPC1"
 
-STANDARD="ipc1 ipc2 ipc3"      # Pentium Gold G5400T, 2c/4t
-PERFORMANCE="ipc4 ipc5 ipc6"   # Core i5-12500T, 6c/12t
+STANDARD="ipc1 ipc2 ipc3"                    # Pentium Gold G5400T, 2c/4t
+PERFORMANCE="ipc4 ipc5 ipc6 ipc7 ipc8 ipc9"  # i5-12500 (ipc4-6 T/32GB, ipc7-9 non-T/16GB)
 
 echo "=== labelling standard (2-core Pentium): $STANDARD ==="
 $SSH "sudo kubectl label node $STANDARD node-class=standard --overwrite"

@@ -19,7 +19,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
 
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
+declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
 
 CHANNEL="stable"
 AGENTS=()
@@ -43,9 +43,15 @@ done
 SERVER="ipc1.taildd208.ts.net"
 SERVER_URL="https://192.168.88.53:6443"
 
-echo "=== Fetching cluster token from $SERVER ==="
+echo "=== Fetching cluster token + version from $SERVER ==="
 TOKEN=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
     "sudo cat /var/lib/rancher/k3s/server/node-token")
+# Pin agents to the SERVER's k3s version. Agents must NOT run a newer minor than
+# the server (version skew) — the `stable` channel could install a newer k3s and
+# break the join. This overrides the channel arg (upgrade path = bump server first,
+# then re-run this to match).
+K3S_VERSION=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" "k3s --version | awk 'NR==1{print \$3}'")
+echo "  pinning agents to $K3S_VERSION"
 
 for agent in "${AGENTS[@]}"; do
     echo ""
@@ -53,9 +59,9 @@ for agent in "${AGENTS[@]}"; do
     ssh -o StrictHostKeyChecking=no cb@"$SERVER" \
         "sudo kubectl delete secret ${agent}.node-password.k3s -n kube-system 2>/dev/null && echo Deleted || echo 'Not present, skipping'"
 
-    echo "=== Upgrading k3s agent on $agent to channel $CHANNEL ==="
+    echo "=== Installing/updating k3s agent on $agent → $K3S_VERSION ==="
     ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$agent]}" \
-        "curl -sfL https://get.k3s.io | sudo K3S_URL=$SERVER_URL K3S_TOKEN=$TOKEN INSTALL_K3S_CHANNEL=$CHANNEL sh -"
+        "curl -sfL https://get.k3s.io | sudo K3S_URL=$SERVER_URL K3S_TOKEN=$TOKEN INSTALL_K3S_VERSION=$K3S_VERSION sh -"
     echo "Done: $agent"
 done
 

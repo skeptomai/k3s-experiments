@@ -27,9 +27,9 @@ MIKROTIK="admin@192.168.88.1"
 # Generous install timeout — the slow Pentium nodes (ipc2/ipc3) take ~30 min on 26.04.
 INSTALL_TIMEOUT_MIN=40
 
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
-declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1" [ipc6]="eno1")
-declare -A NODE_MAC=([ipc2]="A8:A1:59:43:2A:ED" [ipc3]="A8:A1:59:43:2A:74" [ipc4]="D0:AD:08:9C:D2:CB" [ipc5]="D0:AD:08:9C:D1:45" [ipc6]="E0:73:E7:C0:B0:08")
+declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
+declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1" [ipc6]="eno1" [ipc7]="eno1" [ipc8]="eno1" [ipc9]="eno1")
+declare -A NODE_MAC=([ipc2]="A8:A1:59:43:2A:ED" [ipc3]="A8:A1:59:43:2A:74" [ipc4]="D0:AD:08:9C:D2:CB" [ipc5]="D0:AD:08:9C:D1:45" [ipc6]="E0:73:E7:C0:B0:08" [ipc7]="E0:73:E7:3A:A6:7B" [ipc8]="7C:4D:8F:AA:FA:A4" [ipc9]="7C:4D:8F:AA:EF:73")
 
 NODES=("$@")
 [[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 <node> [node...]"; exit 1; }
