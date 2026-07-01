@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gruesome-platform
+  namespace: gruesome
+spec:
+  replicas: 1 # SQLite is single-writer — do NOT scale beyond 1
+  strategy:
+    type: Recreate # never two pods on one RWO SQLite volume
+  selector:
+    matchLabels: { app: gruesome-platform }
+  template:
+    metadata:
+      labels: { app: gruesome-platform }
+    spec:
+      containers:
+        - name: server
+          image: 192.168.89.2:5004/gruesome-platform:0.1.0 # Zot local (self-mirror → insecure HTTP)
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: "sqlite:///data/gruesome.db"
+            - name: FRONTEND_DIR
+              value: "/app/frontend"
+            # AIStor (S3) on nazgul — endpoint + buckets non-secret; keys from the Secret.
+            - name: S3_ENDPOINT
+              value: "http://192.168.89.2:30320"
+            - name: S3_REGION
+              value: "us-east-1"
+            - name: GAMES_BUCKET
+              value: "gruesome-games"
+            - name: SAVES_BUCKET
+              value: "gruesome-saves"
+            - name: CORS_ORIGIN
+              value: "*" # SPA is same-origin; presigned URLs go to AIStor (its own CORS=*)
+            - name: RUST_LOG
+              value: "info"
+          # gruesome-secrets: JWT_SECRET, S3_ACCESS_KEY, S3_SECRET_KEY.
+          # Created out-of-band (kubectl); NOT committed. See kustomization note.
+          envFrom:
+            - secretRef:
+                name: gruesome-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gruesome-data

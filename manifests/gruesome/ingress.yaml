@@ -1,0 +1,23 @@
+# Traefik ingress. Reachable at http://gruesome.home.skeptomai.com/ once the
+# MikroTik has a static DNS A record: gruesome.home.skeptomai.com -> 192.168.88.240
+# (Traefik's MetalLB IP). HTTP only for now; add cert-manager TLS later if wanted.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gruesome-platform
+  namespace: gruesome
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: gruesome.home.skeptomai.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gruesome-platform
+                port:
+                  number: 80
