@@ -1,0 +1,38 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: tailscale-operator
+      version: "1.98.x" # allow patch releases; bump minor deliberately
+      sourceRef:
+        kind: HelmRepository
+        name: tailscale
+        namespace: flux-system
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+  values:
+    # OAuth creds come from the pre-existing, out-of-band `operator-oauth`
+    # Secret in this namespace (keys: client_id, client_secret). Deliberately
+    # left empty here so nothing sensitive lands in git; the chart mounts the
+    # existing secret when clientId is empty. Create it once:
+    #   kubectl -n tailscale create secret generic operator-oauth \
+    #     --from-literal=client_id=<id> --from-literal=client_secret=<secret>
+    oauth:
+      clientId: ""
+      clientSecret: ""
+    # Reuse the operator's own tag for the per-Service proxy devices, so
+    # exposing a Service (tailscale.com/expose) needs no extra ACL/tagOwners
+    # entry — the OAuth client already owns tag:k8s-operator.
+    proxyConfig:
+      defaultTags: "tag:k8s-operator"
+    # NOTE: no HOME override. pelagos >= 0.65.42 injects a default HOME for
+    # containers whose image omits it (pelagos #421), so tsnet no longer fatals
+    # with "neither $XDG_CONFIG_HOME nor $HOME are defined". On pelagos < 0.65.42
+    # this HelmRelease would crash-loop the operator without an extraEnv HOME=/tmp.
