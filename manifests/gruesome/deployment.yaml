@@ -24,8 +24,12 @@ spec:
             - name: FRONTEND_DIR
               value: "/app/frontend"
             # AIStor (S3) on nazgul — endpoint + buckets non-secret; keys from the Secret.
+            # Tailnet MagicDNS name (not the LAN IP): presigned game/save URLs are
+            # fetched by the BROWSER, so the host must be reachable wherever the user
+            # is. nazgul runs Tailscale (host-net), AIStor binds 0.0.0.0:30320 → this
+            # resolves for any Tailscale-enrolled device, on-LAN or off (coffee shop).
             - name: S3_ENDPOINT
-              value: "http://192.168.89.2:30320"
+              value: "http://nazgul.taildd208.ts.net:30320"
             - name: S3_REGION
               value: "us-east-1"
             - name: GAMES_BUCKET

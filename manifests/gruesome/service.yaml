@@ -3,6 +3,12 @@ kind: Service
 metadata:
   name: gruesome-platform
   namespace: gruesome
+  annotations:
+    # Expose on the tailnet via the Tailscale k8s operator → gruesome.taildd208.ts.net.
+    # Plain HTTP (Service mode, not Ingress/HTTPS) so the HTTP presigned AIStor URLs
+    # aren't blocked as mixed content. Reachable from any Tailscale device, anywhere.
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "gruesome"
 spec:
   selector: { app: gruesome-platform }
   ports:
