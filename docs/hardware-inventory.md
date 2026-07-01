@@ -1,9 +1,10 @@
-# Hardware Inventory — ipc1–ipc6
+# Hardware Inventory — ipc1–ipc9
 
-Authoritative hardware findings for the physical cluster, audited live on
-**2026-06-28** (`/proc/cpuinfo`, `lscpu`, `free -h`, `lsblk`, `findmnt`). This is
-the source of truth for CPU/RAM/disk; `node-scheduling.md` covers how roles and
-taints map onto this hardware.
+Authoritative hardware findings for the physical cluster. ipc1-6 audited
+**2026-06-28**; **ipc7-9 added 2026-06-30** (`/proc/cpuinfo`, `lscpu`, `free -h`,
+`lsblk`). This is the source of truth for CPU/RAM/disk; `node-scheduling.md` covers
+roles/taints. **ipc7-9 are new HP Elite Mini 800 G9 workers — not yet joined to the
+cluster** (bare Ubuntu 26.04 as of 2026-06-30).
 
 ## Summary
 
@@ -12,21 +13,31 @@ taints map onto this hardware.
 | ipc1 | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | standard |
 | ipc2 | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | standard |
 | ipc3 | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | standard |
-| ipc4 | Core i5-12500T (12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
-| ipc5 | Core i5-12500T (12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
-| ipc6 | Core i5-12500T (12th Gen) | 6c / 12t | 30 GiB (2×16 GiB) | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
+| ipc4 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
+| ipc5 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
+| ipc6 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB (2×16 GiB) | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
+| ipc7 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **14 GiB (16 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance* |
+| ipc8 | Core i5-12500 (65W non-T)† | 6c / 12t† | 16 GB† | 238.5 GB NVMe† | NVMe | performance* |
+| ipc9 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **14 GiB (16 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance* |
 
-All six: **Ubuntu 26.04 LTS**, kernel **7.0.0-27-generic**, root on **ext4**,
-container runtime **pelagos** (`unix:///run/pelagos/cri.sock`).
+- \* ipc7-9 not yet joined; `node-class` to be applied when they join.
+- † ipc8 specs **assumed** (same batch/SKU as ipc7/ipc9) — not yet verified live
+  (pending reinstall; couldn't SSH in 2026-06-30).
 
-## Two hardware classes
+ipc1-6: **Ubuntu 26.04 LTS**, kernel `7.0.0-27-generic`, pelagos CRI. ipc7-9: bare
+**Ubuntu 26.04 LTS** (manual install), not yet running pelagos.
 
-- **`standard` (ipc1-3)** — Pentium Gold G5400T, 2 cores / 4 threads, **SATA SSD**.
-  Weak CPUs (the reason for the `slow:NoSchedule` taint), but plenty of RAM and a
-  real SSD. Well suited to light, always-on, latency-tolerant duty — i.e. the
-  **control plane / etcd**.
-- **`performance` (ipc4-6)** — Core i5-12500T, 6 cores / 12 threads, **NVMe SSD**.
-  These carry all real workloads.
+## Hardware classes
+
+- **`standard` (ipc1-3)** — Pentium Gold G5400T, 2c/4t, **SATA SSD**. Weak CPUs (the
+  `slow:NoSchedule` taint), plenty of RAM. Light, always-on duty → the **control
+  plane / etcd**.
+- **`performance` (ipc4-9)** — Core i5-12500-series, 6c/12t, **NVMe SSD**. Carry all
+  workloads. **Two sub-variants** (chassis: all HP Elite Mini 800 G9):
+  - **ipc4-6:** i5-12500**T** (35W), **32 GB** RAM.
+  - **ipc7-9:** i5-12500 (**65W non-T** — higher base clock 3.0 vs 2.0 GHz, faster
+    under load but hotter/more power), **16 GB** RAM (half of ipc4-6; upgradeable via
+    the G9's 2× DDR5 SO-DIMM slots). Different SKU — bought on availability.
 
 ## Disk detail (relevant to etcd)
 
