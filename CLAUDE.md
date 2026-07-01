@@ -66,7 +66,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order (servers rolling, then agents) |
 | `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (role-aware config + unit; default: all six) |
 | `scripts/install-nut-clients.sh [node...]` | Installs/configures NUT client (upsmon) on ipc nodes — run after reinstall |
-| `scripts/label-nodes.sh` | Applies durable `node-class` labels (standard=Pentium ipc1-3, performance=i5 ipc4-6) for capability-based scheduling; idempotent, run after reinstall |
+| `scripts/label-nodes.sh` | Applies durable `node-class` labels (standard=Pentium ipc1-3, performance=i5-12500T ipc4-6, fastest=i5-12500 non-T ipc7-9) for capability-based scheduling; idempotent, run after reinstall |
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
 | `scripts/pxe-control.sh <status\|enable\|disable> [node]` | Enables/disables PXE boot per node (run from omen) |
 | `scripts/tailscale-cleanup.sh [--verify] <node...>` | Deletes stale Tailscale device(s) for a node before reinstall so it reclaims its name; `--verify` checks post-install. Needs a Tailscale OAuth client (devices:core write) via `TS_OAUTH_CLIENT_ID`/`_SECRET` env or 1Password `op://Private/Tailscale OAuth k3s`. Called automatically by `reinstall-nodes.sh`; no-op with a WARN if creds absent. |

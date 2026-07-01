@@ -13,6 +13,9 @@ hardware-class labels, and the taints/tolerations/affinity model behind them.
 | ipc4 | worker | i5-12500T, 6c/12t, 32G | `performance` | |
 | ipc5 | worker | i5-12500T, 6c/12t, 32G | `performance` | |
 | ipc6 | worker | i5-12500T, 6c/12t, 32G | `performance` | RAM upgraded to 2×16 GiB (was 16G) |
+| ipc7 | worker | i5-12500 non-T (65W), 6c/12t, 16G | `fastest` | joined 2026-06-30; highest sustained clocks |
+| ipc8 | worker | i5-12500 non-T (65W), 6c/12t, 16G | `fastest` | joined 2026-06-30 |
+| ipc9 | worker | i5-12500 non-T (65W), 6c/12t, 16G | `fastest` | joined 2026-06-30 |
 
 ## HA control plane on ipc1-3 (embedded etcd)
 
@@ -52,19 +55,20 @@ repelled from workloads:
 
 ## Scheduling by hardware class
 
-Every node is labelled `node-class` (`standard` = Pentium, `performance` = i5).
-`scripts/label-nodes.sh` is the idempotent source of truth — re-run it after a
-node reinstall (labels are live cluster state and don't survive a fresh
-registration).
+Every node is labelled `node-class` in three tiers: `standard` = Pentium (ipc1-3),
+`performance` = i5-12500**T** 35W (ipc4-6), `fastest` = i5-12500 non-T 65W (ipc7-9,
+highest sustained clocks). `scripts/label-nodes.sh` is the idempotent source of
+truth — re-run it after a node reinstall (labels are live cluster state and don't
+survive a fresh registration).
 
-Pin a heavy workload to the i5s (**hard** — won't schedule elsewhere):
+Pin a heavy workload to the fastest i5s (**hard** — won't schedule elsewhere):
 ```yaml
 spec:
   nodeSelector:
-    node-class: performance
+    node-class: fastest
 ```
 
-*Prefer* the i5s but allow fallback (**soft**):
+*Prefer* the fast i5s but allow fallback to either i5 tier (**soft**):
 ```yaml
 spec:
   affinity:
@@ -73,7 +77,7 @@ spec:
         - weight: 100
           preference:
             matchExpressions:
-              - { key: node-class, operator: In, values: [performance] }
+              - { key: node-class, operator: In, values: [fastest, performance] }
 ```
 
 Park light/background work on the Pentiums with `nodeSelector: {node-class:

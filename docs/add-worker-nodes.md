@@ -9,9 +9,9 @@ workers with no changes to kube-vip / MetalLB.
 
 | Node | Role | IP (static lease) | `node-class` | Hardware |
 |------|------|-------------------|--------------|----------|
-| ipc7 | worker (agent) | 192.168.88.60 | performance | HP Elite Mini 800 G9, i5-12500T |
-| ipc8 | worker (agent) | 192.168.88.61 | performance | " |
-| ipc9 | worker (agent) | 192.168.88.62 | performance | " |
+| ipc7 | worker (agent) | 192.168.88.60 | fastest | HP Elite Mini 800 G9, i5-12500 (non-T, 65W) |
+| ipc8 | worker (agent) | 192.168.88.61 | fastest | " |
+| ipc9 | worker (agent) | 192.168.88.62 | fastest | " |
 
 `.60-.62` verified free (2026-06-30). Static MikroTik leases by MAC, same as ipc1-6
 (they live inside the DHCP pool but are reserved — no pool change needed). Primary NIC
@@ -49,8 +49,9 @@ data partition.
 5. **Script node maps** — add IP/NIC/MAC entries to `scripts/reinstall-nodes.sh`
    (`NODE_IP`, `NODE_NIC=eno1`, `NODE_MAC`) and `scripts/install-pelagos.sh`
    (`NODE_IP`, `DEFAULT_NODES`).
-6. **Labels** — `scripts/label-nodes.sh` applies `node-class: performance` to the i5s;
-   confirm it covers ipc7-9 (extend its node list if it enumerates explicitly).
+6. **Labels** — `scripts/label-nodes.sh` labels ipc4-6 `node-class: performance`
+   and ipc7-9 `node-class: fastest` (i5-12500 non-T, 65W — the fastest tier);
+   confirm it covers the new nodes (extend its node list if it enumerates explicitly).
 7. **Deploy PXE configs** — `bash scripts/deploy-pxe-configs.sh` (push to nazgul).
 
 ## Phase 2 — MikroTik (out-of-band; see orgfiles `home-network/dns-dhcp.md`)
@@ -84,14 +85,14 @@ This drives the full cycle per node: enable PXE → reboot → autoinstall (~30 
 `upgrade-agents.sh` → join as agents + install Pelagos CRI) → NUT (`install-nut-clients.sh`)
 → verify. Then:
 ```bash
-bash scripts/label-nodes.sh            # node-class: performance
+bash scripts/label-nodes.sh            # ipc4-6 performance, ipc7-9 fastest
 ```
 
 ## Phase 5 — Verify
 
 ```bash
 kubectl get nodes -o wide                                  # 9 Ready; ipc7-9 = <none> (worker)
-kubectl get nodes -L node-class | grep ipc[789]            # performance
+kubectl get nodes -L node-class | grep ipc[789]            # fastest
 for n in ipc7 ipc8 ipc9; do ssh $n 'pelagos --version; upsc cyberpower@192.168.89.2 ups.status'; done
 kubectl -n metallb-system get pods -o wide | grep ipc[789] # MetalLB speaker auto-scheduled
 ```
