@@ -1,253 +1,239 @@
 #!/usr/bin/env bash
-# PXE reinstall one or more ipc worker nodes.
-# Drives the full cycle: deploy PXE configs → clear dynamic DHCP leases →
-# enable PXE → set one-shot PXE BootNext → reboot → wait for OS install →
-# disable PXE → clear known_hosts → rejoin k3s → verify.
+# PXE-reinstall one or more ipc worker nodes — hardened, preflight-gated.
 #
-# Boot model: nodes are DISK-FIRST in EFI BootOrder. A reinstall sets a one-shot
-# `efibootmgr --bootnext <IPv4 PXE entry>` so the node PXE-boots exactly ONCE,
-# then reverts to booting the disk automatically. No persistent network-first,
-# so normal reboots never stick at the netboot.xyz menu.
+# Flow:  PREFLIGHT (abort if any node can't be reimaged) -> deploy configs
+#   per node:  cordon+drain -> clear known_hosts (driver+hub) -> arm PXE ->
+#              one-shot BootNext -> reboot -> MONITOR (stall-aware) -> disable PXE
+#              -> verify IP -> rejoin k3s+pelagos -> wait Ready -> uncordon ->
+#              POSTFLIGHT (Ready + pelagos + cluster-deploy key + tailnet name)
 #
-# Run from omen (or any machine with SSH to ipc1 via tailnet).
-# ipc1 is NEVER safe to reinstall with this script — it requires the manual
-# control-plane backup/restore. See docs/ipc1-upgrade-runbook.md.
+# Boot model: nodes are DISK-FIRST; a one-shot `efibootmgr --bootnext <IPv4 PXE>`
+# forces a single netboot, then reverts to disk automatically (normal reboots
+# never stick at the netboot menu). The per-MAC iPXE file (.disabled gate) is
+# armed/disarmed by pxe-control.sh.
 #
-# Note: ipc4/ipc5 require "Network Boot" enabled in BIOS firmware settings
-# (separate from efibootmgr boot order) — one-time physical setup.
+# The monitor is STALL-AWARE: if a node sits in the installer (MikroTik lease
+# host-name == "ubuntu-server") past STALL_WARN_MIN while the network is healthy,
+# it flags a likely link/hardware stall instead of a blind 40-min wait. The known
+# symptom is subiquity looping on "subiquity/Network/_send_update: CHANGE eno1"
+# (eno1 link flapping during install; Intel I219-LM EEE/link quirks). Root cause
+# is unconfirmed/intermittent, so this just makes it obvious and cheap to retry.
 #
-# Usage: ./reinstall-nodes.sh <node> [node...]
-#   node: ipc2 | ipc3 | ipc4 | ipc5 | ipc6
-set -euo pipefail
+# Usage: reinstall-nodes.sh [--check] <node> [node...]
+#   --check : PREFLIGHT ONLY (no changes) — fleet-readiness check.
+# ipc1 is refused (control-plane; see docs/ipc1-upgrade-runbook.md).
+set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
+source "$REPO_ROOT/scripts/lib/node-maps.sh"
 SERVER="ipc1.taildd208.ts.net"
 MIKROTIK="admin@192.168.88.1"
-# Generous install timeout — the slow Pentium nodes (ipc2/ipc3) take ~30 min on 26.04.
-INSTALL_TIMEOUT_MIN=40
+INSTALL_HARD_CAP_MIN=30      # hard timeout for install+first-boot
+STALL_WARN_MIN=12           # flag a likely hardware hang if still installing past this
+HUB_NODES=(ipc4 ipc5 ipc6)  # floating build nodes that reach every node via cluster-deploy
 
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
-declare -A NODE_NIC=([ipc2]="enp2s0" [ipc3]="enp2s0" [ipc4]="eno1" [ipc5]="eno1" [ipc6]="eno1" [ipc7]="eno1" [ipc8]="eno1" [ipc9]="eno1")
-declare -A NODE_MAC=([ipc2]="A8:A1:59:43:2A:ED" [ipc3]="A8:A1:59:43:2A:74" [ipc4]="D0:AD:08:9C:D2:CB" [ipc5]="D0:AD:08:9C:D1:45" [ipc6]="E0:73:E7:C0:B0:08" [ipc7]="E0:73:E7:3A:A6:7B" [ipc8]="7C:4D:8F:AA:FA:A4" [ipc9]="7C:4D:8F:AA:EF:73")
-
+CHECK_ONLY=0
+[[ "${1:-}" == "--check" ]] && { CHECK_ONLY=1; shift; }
 NODES=("$@")
-[[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 <node> [node...]"; exit 1; }
+[[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 [--check] <node> [node...]"; exit 1; }
 
 for node in "${NODES[@]}"; do
-    if [[ "$node" == "ipc1" ]]; then
-        echo "ERROR: ipc1 is the control plane. Reinstalling it wipes the datastore — use docs/ipc1-upgrade-runbook.md." >&2
-        exit 1
-    fi
-    if [[ -z "${NODE_IP[$node]+x}" ]]; then
-        echo "ERROR: unknown node '$node'. Valid nodes: ipc2 ipc3 ipc4 ipc5 ipc6" >&2
-        exit 1
-    fi
+    [[ "$node" == "ipc1" ]] && { echo "ERROR: ipc1 is the control plane — use docs/ipc1-upgrade-runbook.md" >&2; exit 1; }
+    [[ -z "${NODE_IP[$node]+x}" ]] && { echo "ERROR: unknown node '$node' (see scripts/lib/node-maps.sh)" >&2; exit 1; }
 done
 
-ssh_ipc1() {
-    ssh -o StrictHostKeyChecking=no cb@"$SERVER" "$@"
-}
+ssh_ipc1()   { ssh -o StrictHostKeyChecking=no cb@"$SERVER" "$@"; }
+ssh_node()   { local n=$1; shift; ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$n]}" "$@"; }
+node_ssh_up(){ ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$1]}" true 2>/dev/null; }
+kc()         { ssh_ipc1 "sudo kubectl $*"; }
+ssh_mt()     { ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" "$MIKROTIK" "$@"; }
 
-ssh_node() {
-    local node=$1; shift
-    ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$node]}" "$@"
-}
+# MikroTik lease host-name for a node's IP: "ubuntu-server"=installing, "<node>"=booted.
+lease_hostname() { ssh_mt "/ip dhcp-server lease get [find where address=\"${NODE_IP[$1]}\"] host-name" 2>/dev/null | tr -d '\r'; }
 
-node_ssh_up() {
-    local node=$1
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
-        -J cb@"$SERVER" cb@"${NODE_IP[$node]}" true 2>/dev/null
-}
-
-mac_nocolon() {
-    echo "${NODE_MAC[$1]}" | tr -d ':' | tr 'A-Z' 'a-z'
-}
-
-# Emit a one-line shell script that finds the node's IPv4 PXE/network boot entry
-# (matched by its PXE MAC, so we never grab the IPv6 entry or the wrong NIC) and
-# sets it as a ONE-SHOT BootNext. Prints BOOTNEXT=<id> or BOOTNEXT=NONE.
-# It's base64'd before transport to dodge quoting across ssh/kubectl/nsenter.
+# Emit a one-liner that finds the node's IPv4 PXE entry (by MAC, never IPv6/wrong NIC)
+# and sets it as a ONE-SHOT BootNext. base64'd to dodge quoting across ssh.
 bootnext_detect_script() {
     local macnc=$1
     printf '%s' "entry=\$(efibootmgr | grep -i 'MAC($macnc' | grep -i IPv4 | grep -oE '^Boot[0-9A-F]{4}' | grep -oE '[0-9A-F]{4}' | head -1); [ -n \"\$entry\" ] && efibootmgr --bootnext \"\$entry\" >/dev/null && echo \"BOOTNEXT=\$entry\" || echo BOOTNEXT=NONE"
 }
-
-wait_node_offline() {
-    local node=$1
-    echo "--- Waiting for $node to go offline (up to 10 min) ---"
-    local i=0
-    if ! ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -qw "Ready"; then
-        echo "  $node not in k3s — waiting for SSH to drop (reboot confirmation)"
-        until ! node_ssh_up "$node"; do
-            sleep 5; i=$((i+1))
-            [[ $i -gt 60 ]] && { echo "  WARN: $node SSH never dropped — reboot may have failed"; return 1; }
-        done
-        echo "  $node is offline (SSH dropped)"
-        return 0
-    fi
-    while ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -qw "Ready"; do
-        sleep 15; i=$((i+1))
-        [[ $i -gt 40 ]] && { echo "  NOTE: $node still Ready after 10 min — k3s NotReady detection lags behind the actual reboot; proceeding (the SSH-up wait confirms the reinstall)"; return 0; }
-    done
-    echo "  $node is offline"
-}
-
-wait_ssh_up() {
-    local node=$1
-    local max_polls=$(( (INSTALL_TIMEOUT_MIN * 60 - 240) / 30 ))
-    echo "--- Waiting for $node SSH to come back (autoinstall; up to ${INSTALL_TIMEOUT_MIN} min) ---"
-    echo "  Minimum 4 min wait to avoid a false-positive on a quick local-disk boot..."
-    sleep 240
-    local i=0
-    until node_ssh_up "$node"; do
-        printf "  waiting... (%d min elapsed)\r" $(( (i * 30 + 240) / 60 ))
-        sleep 30; i=$((i+1))
-        [[ $i -gt $max_polls ]] && { echo ""; echo "ERROR: $node SSH never came back after ${INSTALL_TIMEOUT_MIN} min"; exit 1; }
-    done
-    echo ""
-    echo "  $node SSH is up"
-}
-
-wait_node_ready() {
-    local node=$1
-    echo "--- Waiting for $node to appear Ready in kubectl (up to 5 min) ---"
-    local i=0
-    until ssh_ipc1 "sudo kubectl get node $node --no-headers 2>/dev/null" | grep -qw "Ready"; do
-        sleep 15; i=$((i+1))
-        [[ $i -gt 20 ]] && { echo "ERROR: $node not Ready in kubectl after 5 min"; exit 1; }
-    done
-    echo "  $node is Ready"
-}
-
-run_privileged_pod() {
-    local node=$1 pod=$2 cmd=$3
-    ssh_ipc1 "sudo kubectl run $pod \
-        --image=alpine \
-        --overrides='{\"spec\":{\"nodeName\":\"$node\",\"hostPID\":true,\"containers\":[{\"name\":\"r\",\"image\":\"alpine\",\"command\":[\"nsenter\",\"--mount=/proc/1/ns/mnt\",\"--\",\"sh\",\"-c\",\"$cmd\"],\"securityContext\":{\"privileged\":true}}]}}' \
-        --restart=Never -n default" 2>/dev/null || true
-    sleep 3
-    ssh_ipc1 "sudo kubectl delete pod $pod -n default --ignore-not-found 2>/dev/null" || true
-}
-
-# Preferred path: node is up, set BootNext over SSH and verify. Returns non-zero
-# if it can't — the caller MUST abort, because with disk-first BootOrder a plain
-# reboot won't reinstall.
 set_pxe_bootnext_via_ssh() {
     local node=$1 macnc; macnc=$(mac_nocolon "$node")
-    echo "--- Setting one-shot PXE BootNext on $node (IPv4 entry for ${NODE_MAC[$node]}) via SSH ---"
-    local b64 out
-    b64=$(bootnext_detect_script "$macnc" | base64 -w0)
+    echo "--- Setting one-shot PXE BootNext on $node (IPv4 entry for ${NODE_MAC[$node]}) ---"
+    local b64 out; b64=$(bootnext_detect_script "$macnc" | base64 -w0)
     out=$(ssh_node "$node" "echo $b64 | base64 -d | sudo -n sh" 2>/dev/null)
     echo "  $out"
     case "$out" in
         BOOTNEXT=NONE|"") echo "  ERROR: no IPv4 PXE entry for ${NODE_MAC[$node]} on $node" >&2; return 1 ;;
         BOOTNEXT=*) return 0 ;;
-        *) echo "  ERROR: unexpected output setting BootNext on $node" >&2; return 1 ;;
+        *) echo "  ERROR: unexpected BootNext output on $node" >&2; return 1 ;;
     esac
 }
 
-# Fallback path: node Ready in k3s but sshd down. Best-effort (output not
-# captured through the pod); the SSH path above is preferred and verified.
-set_pxe_bootnext_via_kubectl() {
-    local node=$1 macnc; macnc=$(mac_nocolon "$node")
-    local pod="pxe-bootnext-${node}-$$"
-    echo "--- Setting one-shot PXE BootNext on $node (IPv4 entry for ${NODE_MAC[$node]}) via kubectl ---"
-    local b64; b64=$(bootnext_detect_script "$macnc" | base64 -w0)
-    run_privileged_pod "$node" "$pod" "echo $b64 | base64 -d | sh"
-}
-
-reboot_via_kubectl() {
-    local node=$1
-    local pod="reboot-${node}-$$"
-    echo "--- Rebooting $node via kubectl privileged pod (no SSH available) ---"
-    run_privileged_pod "$node" "$pod" "reboot"
-}
-
 clear_dynamic_leases() {
-    local node=$1
-    local mac="${NODE_MAC[$node]}"
+    local node=$1 mac="${NODE_MAC[$node]}"
     echo "--- Clearing dynamic MikroTik DHCP leases for $node ($mac) ---"
-    # MikroTik (192.168.88.1) is on the home LAN, not the tailnet, so jump
-    # through ipc1 which is on both.
-    ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" "$MIKROTIK" \
-        "/ip dhcp-server lease remove [find where mac-address=\"$mac\" dynamic=yes]" 2>/dev/null \
-        && echo "  Dynamic leases cleared (or none existed)" || echo "  WARN: could not reach MikroTik"
+    ssh_mt "/ip dhcp-server lease remove [find where mac-address=\"$mac\" dynamic=yes]" 2>/dev/null \
+        && echo "  cleared (or none)" || echo "  WARN: could not reach MikroTik"
 }
 
-echo "=== PXE Reinstall: ${NODES[*]} ==="
-echo ""
+# Clear a node's host key everywhere we connect FROM, BEFORE the reboot — so a
+# re-imaged node's new key never deadlocks SSH detection (this bit us on ipc9).
+clear_known_hosts() {
+    local node=$1 ip="${NODE_IP[$node]}"
+    echo "--- Clearing stale known_hosts for $node (driver + hub) ---"
+    ssh-keygen -R "$node" 2>/dev/null || true
+    ssh-keygen -R "$ip" 2>/dev/null || true
+    for bn in "${HUB_NODES[@]}"; do
+        [[ "$bn" == "$node" ]] && continue
+        ssh_node "$bn" "ssh-keygen -R $node >/dev/null 2>&1; ssh-keygen -R $ip >/dev/null 2>&1" 2>/dev/null || true
+    done
+}
 
-echo "--- Deploying PXE configs to nazgul ---"
+drain_node() {
+    local node=$1
+    echo "--- Cordon + drain $node (evict StatefulSets/pods before the wipe) ---"
+    kc "cordon $node" || true
+    kc "drain $node --ignore-daemonsets --delete-emptydir-data --timeout=150s" || \
+        echo "  WARN: drain incomplete (continuing — node is being wiped anyway)"
+}
+
+wait_node_offline() {
+    local node=$1 i=0
+    echo "--- Waiting for $node to go offline (reboot; up to 10 min) ---"
+    until ! node_ssh_up "$node"; do
+        sleep 5; i=$((i+1)); [[ $i -gt 120 ]] && { echo "  WARN: $node never dropped SSH"; return 1; }
+    done
+    echo "  $node offline"
+}
+
+# Stall-aware install monitor. Returns 0 when the node's SSH is back (installed +
+# booted), 1 on hard-cap timeout. Flags the hardware/carrier-change hang loudly.
+wait_for_install() {
+    local node=$1 start=$SECONDS warned=0
+    echo "--- Monitoring $node install (hard cap ${INSTALL_HARD_CAP_MIN}m; stall warn at ${STALL_WARN_MIN}m) ---"
+    echo "  (min 4 min before trusting SSH, to avoid a fast local-disk false positive)"
+    sleep 240
+    while (( (SECONDS - start)/60 < INSTALL_HARD_CAP_MIN )); do
+        if node_ssh_up "$node"; then echo ""; echo "  $node SSH is up ($(( (SECONDS-start)/60 ))m)"; return 0; fi
+        local mins hn; mins=$(( (SECONDS - start)/60 )); hn=$(lease_hostname "$node")
+        if [[ "$hn" == "ubuntu-server" && $mins -ge $STALL_WARN_MIN && $warned -eq 0 ]]; then
+            warned=1
+            echo ""
+            echo "  ============================================================"
+            echo "  STALL WARNING: $node still in the installer at ${mins}m"
+            echo "  Network/config are healthy (preflight passed), so this looks"
+            echo "  like the known link stall: subiquity looping on"
+            echo "  'subiquity/Network/_send_update: CHANGE eno1' (eno1 flapping)."
+            echo "  NOT the pipeline; cause intermittent/unconfirmed."
+            echo "  ACTION: check $node console; power-cycle and/or reseat the NET"
+            echo "  cable, then it retries automatically on next boot (PXE stays armed)."
+            echo "  ============================================================"
+        fi
+        printf "  installing... (%dm, lease host-name=%s)\r" "$mins" "${hn:-?}"
+        sleep 30
+    done
+    echo ""
+    echo "ERROR: $node not back within ${INSTALL_HARD_CAP_MIN}m (last host-name='$(lease_hostname "$node")')." >&2
+    [[ "$(lease_hostname "$node")" == "ubuntu-server" ]] && \
+        echo "       Stuck in the installer → almost certainly the hardware/carrier-change hang. Power-cycle and retry." >&2
+    return 1
+}
+
+wait_node_ready() {
+    local node=$1 i=0
+    echo "--- Waiting for $node Ready in kubectl (up to 5 min) ---"
+    until kc "get node $node --no-headers" 2>/dev/null | grep -qw Ready; do
+        sleep 15; i=$((i+1)); [[ $i -gt 20 ]] && { echo "ERROR: $node not Ready after 5 min" >&2; return 1; }
+    done
+    echo "  $node Ready"
+}
+
+postflight() {
+    local node=$1 fail=0
+    echo "--- Postflight: $node ---"
+    if kc "get node $node --no-headers" 2>/dev/null | grep -qw Ready; then echo "  [OK] node Ready"; else echo "  [FAIL] node not Ready"; fail=1; fi
+    if kc "get node $node -o jsonpath={.spec.unschedulable}" 2>/dev/null | grep -q true; then echo "  [FAIL] still cordoned"; fail=1; else echo "  [OK] schedulable (uncordoned)"; fi
+    local ver; ver=$(ssh_node "$node" "pelagos --version 2>/dev/null" | awk '{print $2}')
+    if [[ -n "$ver" ]]; then echo "  [OK] pelagos $ver"; else echo "  [FAIL] pelagos not installed"; fail=1; fi
+    # Prove the PXE-provisioned cluster-deploy key works: a hub node reaches this node with it.
+    if ssh_node ipc4 "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/cluster-deploy -o StrictHostKeyChecking=accept-new -o ConnectTimeout=6 cb@$node true" 2>/dev/null; then
+        echo "  [OK] cluster-deploy key: ipc4 -> $node"
+    else echo "  [WARN] cluster-deploy key path ipc4 -> $node not working"; fi
+    return $fail
+}
+
+# ---------------------------------------------------------------------------
+echo "=== PXE Reinstall: ${NODES[*]} ==="
+
+echo ""
+echo "### PREFLIGHT ###"
+if ! bash "$REPO_ROOT/scripts/pxe-preflight.sh" "${NODES[@]}"; then
+    echo "ABORT: preflight failed — nothing was changed. Fix the above and retry." >&2
+    exit 1
+fi
+if [[ $CHECK_ONLY -eq 1 ]]; then echo "--check: preflight only, exiting."; exit 0; fi
+
+echo ""
+echo "### DEPLOY CONFIGS ###"
 bash "$REPO_ROOT/scripts/deploy-pxe-configs.sh"
 
+rc=0
 for node in "${NODES[@]}"; do
     echo ""
     echo "====== $node ======"
-
+    drain_node "$node"
     clear_dynamic_leases "$node"
-
-    echo "--- Removing stale Tailscale device(s) for $node (so it reclaims its name) ---"
+    echo "--- Removing stale Tailscale device for $node (reclaim its name) ---"
     bash "$REPO_ROOT/scripts/tailscale-cleanup.sh" "$node" || true
+    clear_known_hosts "$node"
 
-    echo "--- Enabling PXE for $node ---"
+    echo "--- Arming PXE for $node ---"
     bash "$REPO_ROOT/scripts/pxe-control.sh" enable "$node"
 
-    echo "--- Rebooting $node into a one-shot PXE install ---"
-    if node_ssh_up "$node"; then
-        echo "  SSH available"
-        set_pxe_bootnext_via_ssh "$node" || { echo "ERROR: aborting $node — disk-first boot order means no BootNext = no reinstall." >&2; exit 1; }
-        ssh_node "$node" sudo reboot || true
-    else
-        echo "  SSH not available — using kubectl (best-effort BootNext)"
-        set_pxe_bootnext_via_kubectl "$node"
-        reboot_via_kubectl "$node"
+    if ! node_ssh_up "$node"; then
+        echo "ERROR: $node not reachable to set BootNext — aborting $node (preflight should have caught this)." >&2
+        rc=1; continue
     fi
+    if ! set_pxe_bootnext_via_ssh "$node"; then
+        echo "ERROR: could not set BootNext on $node — aborting $node (disk-first won't PXE)." >&2
+        bash "$REPO_ROOT/scripts/pxe-control.sh" disable "$node" || true
+        rc=1; continue
+    fi
+    echo "--- Rebooting $node into the one-shot PXE install ---"
+    ssh_node "$node" sudo reboot || true
 
     wait_node_offline "$node" || true
-
-    wait_ssh_up "$node"
+    if ! wait_for_install "$node"; then
+        echo "ERROR: $node install did not complete — leaving PXE armed for a retry after you power-cycle it." >&2
+        rc=1; continue
+    fi
 
     echo "--- Disabling PXE for $node ---"
     bash "$REPO_ROOT/scripts/pxe-control.sh" disable "$node"
 
-    echo "--- Clearing stale known_hosts (driver + build-hub nodes) ---"
-    ssh-keygen -R "$node" 2>/dev/null || true
-    ssh-keygen -R "${NODE_IP[$node]}" 2>/dev/null || true
-    # The floating build nodes (ipc4/5/6) deliver pelagos to every node over the
-    # cluster-deploy key; a re-imaged node presents a NEW host key that would
-    # otherwise trip a host-key mismatch on the hub. Purge its old entry there too.
-    for bn in ipc4 ipc5 ipc6; do
-        [[ "$bn" == "$node" ]] && continue
-        ssh_node "$bn" "ssh-keygen -R $node >/dev/null 2>&1; ssh-keygen -R ${NODE_IP[$node]} >/dev/null 2>&1" 2>/dev/null || true
-    done
+    echo "--- Verifying DHCP address ($node -> ${NODE_IP[$node]}) ---"
+    actual=$(ssh_node "$node" "ip -4 -br addr show ${NODE_NIC[$node]} | awk '{print \$3}' | cut -d/ -f1" 2>/dev/null)
+    [[ "$actual" == "${NODE_IP[$node]}" ]] && echo "  IP correct: $actual" || echo "  WARN: $node has '$actual', expected ${NODE_IP[$node]}"
 
-    echo "--- Verifying DHCP address ($node should have ${NODE_IP[$node]}) ---"
-    actual_ip=$(ssh_node "$node" "ip -4 -br addr show ${NODE_NIC[$node]} | awk '{print \$3}' | cut -d/ -f1")
-    if [[ "$actual_ip" != "${NODE_IP[$node]}" ]]; then
-        echo "WARN: $node has IP $actual_ip, expected ${NODE_IP[$node]}."
-        echo "WARN: MikroTik static lease may need manual reset — see CLAUDE.md."
-    else
-        echo "  IP correct: $actual_ip"
-    fi
+    echo "--- Rejoining k3s + installing pelagos (role: $(k3s_role "$node")) ---"
+    if is_server_node "$node"; then bash "$REPO_ROOT/scripts/join-server.sh" "$node"
+    else bash "$REPO_ROOT/scripts/upgrade-agents.sh" "$node"; fi
 
-    echo "--- Rejoining k3s and installing Pelagos (role: $(k3s_role "$node")) ---"
-    if is_server_node "$node"; then
-        bash "$REPO_ROOT/scripts/join-server.sh" "$node"
-    else
-        bash "$REPO_ROOT/scripts/upgrade-agents.sh" "$node"
-    fi
+    wait_node_ready "$node" || rc=1
+    echo "--- Uncordoning $node ---"
+    kc "uncordon $node" || true
 
-    wait_node_ready "$node"
-
-    echo "--- Verifying Tailscale name is clean (single device, no -1 suffix) ---"
+    echo "--- Verifying Tailscale name is clean ---"
     bash "$REPO_ROOT/scripts/tailscale-cleanup.sh" --verify "$node" || true
 
-    echo "--- Final check ---"
-    ssh_ipc1 "sudo kubectl get node $node -o wide"
+    postflight "$node" || { echo "  postflight found issues on $node"; rc=1; }
     echo "Done: $node"
 done
 
 echo ""
 echo "=== Final cluster status ==="
-ssh_ipc1 "sudo kubectl get nodes -o wide"
+kc "get nodes -o wide" || true
+[[ $rc -eq 0 ]] && echo "=== ALL NODES OK ===" || echo "=== COMPLETED WITH ISSUES (rc=$rc) — see above ==="
+exit $rc
