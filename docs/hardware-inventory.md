@@ -35,6 +35,18 @@ All nine: **Ubuntu 26.04 LTS**, pelagos CRI, `v1.35.5+k3s1`. ipc7-9 joined 2026-
   The fastest tier for CPU-bound work (builds, tests). Different SKU — bought on
   availability. (Chassis: all six i5 nodes are HP Elite Mini 800 G9.)
 
+## Video out + out-of-band (KVM / WoL)
+
+- **Video outputs (HP Elite Mini 800 G9 — ipc4-9):** **1× HDMI + 2× DisplayPort.**
+  For a **PiKVM** (Geekworm **KVM-A3**, v3 platform — HDMI-in capture only; flash PiKVM OS
+  as `v3-hdmi`; wiki: https://wiki.geekworm.com/KVM-A3), use the single **HDMI** port;
+  a DP output would need a DP→HDMI adapter. Host Pi = the harvested Pi 4B/4GB (`.160`).
+- **PiKVM ATX won't connect to these:** the Elite Mini's front-panel power is a proprietary
+  header, **not a standard 2×5 ATX F_PANEL**, so PiKVM's ATX power-control has nothing to tap.
+  Use **Wake-on-LAN** for remote power-on and OS shutdown / a network smart-plug for off.
+- **Wake-on-LAN:** configured on the **earlier ipcs (ipc1-6)**. **ipc7-9 still need WoL
+  enabled (BIOS + OS `ethtool -s eno1 wol g`)** — TODO (see resume pointer).
+
 ## Disk detail (relevant to etcd)
 
 - **ipc1-3: `DEM28-B56M41BW1D`** — an Innodisk SATADOM-class industrial SATA flash
