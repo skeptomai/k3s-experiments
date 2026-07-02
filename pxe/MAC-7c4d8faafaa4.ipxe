@@ -1,0 +1,12 @@
+#!ipxe
+# ipc8 — 7c:4d:8f:aa:fa:a4 — Ubuntu 26.04 trial (other nodes are 24.04.4)
+set nb      http://192.168.89.2:31011
+set kurl    ${nb}/ubuntu-squash/releases/download/26.04
+set iso     ${nb}/ubuntu-26.04-live-server-amd64.iso
+set install_params autoinstall ds=nocloud-net;s=${nb}/autoinstall/7c-4d-8f-aa-fa-a4/
+
+imgfree
+echo Booting Ubuntu 26.04 autoinstall for ipc8
+kernel ${kurl}/vmlinuz root=/dev/ram0 ramdisk_size=3500000 cloud-config-url=/dev/null ip=dhcp url=${iso} ${install_params} initrd=initrd.magic
+initrd ${kurl}/initrd
+boot

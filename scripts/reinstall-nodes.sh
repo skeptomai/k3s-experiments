@@ -211,9 +211,16 @@ for node in "${NODES[@]}"; do
     echo "--- Disabling PXE for $node ---"
     bash "$REPO_ROOT/scripts/pxe-control.sh" disable "$node"
 
-    echo "--- Clearing stale known_hosts ---"
+    echo "--- Clearing stale known_hosts (driver + build-hub nodes) ---"
     ssh-keygen -R "$node" 2>/dev/null || true
     ssh-keygen -R "${NODE_IP[$node]}" 2>/dev/null || true
+    # The floating build nodes (ipc4/5/6) deliver pelagos to every node over the
+    # cluster-deploy key; a re-imaged node presents a NEW host key that would
+    # otherwise trip a host-key mismatch on the hub. Purge its old entry there too.
+    for bn in ipc4 ipc5 ipc6; do
+        [[ "$bn" == "$node" ]] && continue
+        ssh_node "$bn" "ssh-keygen -R $node >/dev/null 2>&1; ssh-keygen -R ${NODE_IP[$node]} >/dev/null 2>&1" 2>/dev/null || true
+    done
 
     echo "--- Verifying DHCP address ($node should have ${NODE_IP[$node]}) ---"
     actual_ip=$(ssh_node "$node" "ip -4 -br addr show ${NODE_NIC[$node]} | awk '{print \$3}' | cut -d/ -f1")

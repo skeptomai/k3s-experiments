@@ -112,3 +112,31 @@ kubectl -n metallb-system get pods -o wide | grep ipc[789] # MetalLB speaker aut
   stays 3-node (the right size; don't promote workers to servers).
 - If you add the 2nd NVMe to all six workers, that unblocks a proper CSI for Kamaji
   (#6) — replicated NVMe storage isolated from the OS disk.
+
+## Cluster deploy key (uniform in-cluster build/roll hub)
+
+The in-cluster build/roll (build Job → stage on a fast node → fan out to all nodes,
+install + `systemctl restart pelagos-cri`) needs the build node to SSH to every other
+node. Rather than depend on ad-hoc per-node keys, a dedicated **`cluster-deploy`**
+keypair provides node-agnostic, PXE-durable trust:
+
+- **Public key:** `pxe/keys/cluster-deploy.pub`, provisioned into **every** node's
+  autoinstall `ssh.authorized-keys` — so a freshly PXE-installed node trusts it with
+  no manual step. Keep every `pxe/autoinstall/*/user-data` carrying this line.
+- **Private key:** on the floating build nodes **ipc4/5/6** at `~/.ssh/cluster-deploy`
+  (0600) with an `~/.ssh/config` block using it for `ipc*`/`192.168.88.*`. Durable
+  copy: `nazgul:/mnt/primary_storage/cluster-deploy-key/` (0600 root).
+- **`reinstall-nodes.sh`** clears a re-imaged node's stale host key from the build-hub
+  nodes' `known_hosts` (its new host key would otherwise trip a mismatch on delivery).
+
+**After reinstalling a *build* node (ipc4/5/6)** the private key + ssh config are NOT in
+user-data (secret), so re-place them from nazgul:
+
+```bash
+scp root@nazgul:/mnt/primary_storage/cluster-deploy-key/cluster-deploy ~/.ssh/cluster-deploy
+chmod 600 ~/.ssh/cluster-deploy
+# add the Host ipc* block with IdentityFile ~/.ssh/cluster-deploy (see other build nodes)
+```
+
+Reinstalling a **worker** (ipc1-3, 7-9) needs nothing extra — it trusts the deploy key
+straight from user-data.

@@ -6,7 +6,7 @@ autoinstall:
     layout: us
   timezone: America/Los_Angeles
   identity:
-    hostname: ipc5
+    hostname: ipc8
     username: cb
     password: "$6$QimoX1zBxWmBnE2H$mkU./oEWT/bvdPfpYmiCgfNtC9Nh1.hIlsi67kJhMBeDwRh/RIQcsHE7rX7hilprk7FQK7Kd8Rrnl4FHDMM3u."
   ssh:
@@ -20,7 +20,9 @@ autoinstall:
   network:
     version: 2
     ethernets:
-      eno1:
+      id0:
+        match:
+          macaddress: "7c:4d:8f:aa:fa:a4"
         dhcp4: true
   storage:
     layout:
@@ -34,7 +36,7 @@ autoinstall:
     - echo 'cb ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/cb
     - chmod 440 /target/etc/sudoers.d/cb
     - mkdir -p /target/mnt/primary_storage/k8s-nfs
-    - "printf 'network:\\n  version: 2\\n  ethernets:\\n    eno1:\\n      dhcp-identifier: mac\\n' > /target/etc/netplan/99-dhcp-mac.yaml"
+    - "printf 'network:\\n  version: 2\\n  ethernets:\\n    id0:\\n      match:\\n        macaddress: \"7c:4d:8f:aa:fa:a4\"\\n      dhcp-identifier: mac\\n' > /target/etc/netplan/99-dhcp-mac.yaml"
     - "curtin in-target -- sh -c 'curl -fsSL https://tailscale.com/install.sh | sh'"
     - "printf '[Unit]\\nDescription=Tailscale auto-connect\\nAfter=tailscaled.service network-online.target\\nWants=network-online.target\\nConditionPathExists=!/var/lib/tailscale/tailscaled.state\\n\\n[Service]\\nType=oneshot\\nExecStart=/usr/bin/tailscale up --authkey=tskey-auth-krerCq6KgE11CNTRL-B14XnPSw2NaXmYAeeDeBNawMyftZ5yoN\\nRemainAfterExit=yes\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /target/etc/systemd/system/tailscale-autoconnect.service"
     - "curtin in-target -- systemctl enable tailscale-autoconnect.service"
