@@ -140,3 +140,15 @@ chmod 600 ~/.ssh/cluster-deploy
 
 Reinstalling a **worker** (ipc1-3, 7-9) needs nothing extra — it trusts the deploy key
 straight from user-data.
+
+## Reinstall readiness — ipc7-9 (verified 2026-07-01)
+
+Before re-imaging ipc7-9, these were confirmed so the run is deterministic:
+- **Single disk each** — ipc7/8/9 have exactly one `nvme0n1` (238.5G), so
+  `storage: layout: direct` is unambiguous (no 2nd-NVMe / wrong-disk risk).
+- **Static DHCP leases** — the MikroTik has `dynamic=false` reservations keyed by
+  MAC → the correct IPs (E0:73:E7:3A:A6:7B→.63, 7C:4D:8F:AA:FA:A4→.64,
+  7C:4D:8F:AA:EF:73→.65). Combined with `dhcp-identifier: mac` in each user-data
+  (node requests by MAC), IP assignment is deterministic on reinstall.
+- **PXE configs present** — autoinstall + `MAC-*.ipxe` created and deployed to
+  nazgul; cluster-deploy key in user-data (build hub trust survives the reinstall).
