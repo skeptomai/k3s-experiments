@@ -31,6 +31,8 @@ autoinstall:
     - efibootmgr
   updates: security
   late-commands:
+    - mkdir -p /target/etc/systemd/system/getty@tty1.service.d
+    - "echo W1NlcnZpY2VdCkV4ZWNTdGFydD0KRXhlY1N0YXJ0PS0vc2Jpbi9hZ2V0dHkgLS1hdXRvbG9naW4gY2IgLS1ub2NsZWFyICVJICRURVJNCg== | base64 -d > /target/etc/systemd/system/getty@tty1.service.d/autologin.conf"
     - echo 'cb ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/cb
     - chmod 440 /target/etc/sudoers.d/cb
     - mkdir -p /target/mnt/primary_storage/k8s-nfs
