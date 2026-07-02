@@ -160,8 +160,11 @@ postflight() {
     # Prove the PXE-provisioned cluster-deploy key works: a hub node reaches this node with it.
     # Clear the hub's stale entry first — the reimaged node has a NEW host key, and
     # accept-new won't override a CHANGED one (else this false-WARNs, as on ipc7).
-    ssh_node ipc4 "ssh-keygen -R $node >/dev/null 2>&1; ssh-keygen -R ${NODE_IP[$node]} >/dev/null 2>&1" 2>/dev/null || true
-    if ssh_node ipc4 "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/cluster-deploy -o StrictHostKeyChecking=accept-new -o ConnectTimeout=6 cb@$node true" 2>/dev/null; then
+    # Connect by LAN IP (the path the build hub actually delivers over) — the
+    # hostname resolves via Tailscale MagicDNS on the hub, which churns a
+    # different host key than the LAN one after the node re-enrolls.
+    ssh_node ipc4 "ssh-keygen -R ${NODE_IP[$node]} >/dev/null 2>&1" 2>/dev/null || true
+    if ssh_node ipc4 "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/cluster-deploy -o StrictHostKeyChecking=accept-new -o ConnectTimeout=6 cb@${NODE_IP[$node]} true" 2>/dev/null; then
         echo "  [OK] cluster-deploy key: ipc4 -> $node"
     else echo "  [WARN] cluster-deploy key path ipc4 -> $node not working"; fi
     return $fail
