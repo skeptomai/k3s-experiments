@@ -1,0 +1,25 @@
+# Split-horizon DNS for the tailnet name of nazgul (the AIStor/S3 + registry host).
+#
+# Why: apps like gruesome are configured with S3_ENDPOINT=nazgul.taildd208.ts.net
+# so that BROWSERS (off-LAN, on the tailnet) can fetch presigned URLs. But in-cluster
+# pods are NOT on the tailnet and can't resolve MagicDNS names, so the *server* side
+# S3 calls fail ("dispatch failure"). This override makes cluster pods resolve that
+# one name to nazgul's LAN IP (reachable from the nodes), while browsers keep
+# resolving it via their own MagicDNS to nazgul's tailnet IP. Both reach the same
+# AIStor; presigned-URL signatures (computed for host nazgul.taildd208.ts.net) stay valid.
+#
+# k3s's coredns imports /etc/coredns/custom/*.server, so this becomes a dedicated
+# server block (a second `hosts` in the MAIN block is rejected — "only once per block").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  nazgul.server: |
+    nazgul.taildd208.ts.net:53 {
+      hosts {
+        192.168.89.2 nazgul.taildd208.ts.net
+        fallthrough
+      }
+    }
