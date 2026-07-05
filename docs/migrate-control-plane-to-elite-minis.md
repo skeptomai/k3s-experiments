@@ -33,6 +33,25 @@ via kubelet during the API outage, but nothing reschedules until the API is back
 - No PV data or workloads on ipc1-3 (tainted) → **no data migration needed**; snapshot captures all etcd state.
 - IPs: ipc1 .53, ipc2 .52, ipc3 .54, ipc4 .55, ipc5 .56, ipc6 .57, ipc7 .63, ipc8 .64, ipc9 .65. VIP .58.
 
+### Node-local storage (verified 2026-07-04 — the reinstall-safety detail)
+The nodes we reinstall (ipc4-6) DO hold node-local PV data, but at paths **outside**
+k3s's dirs, so `k3s-agent-uninstall.sh` (removes only `/var/lib/rancher/k3s`,
+`/etc/rancher/k3s`, `/run/k3s`, `/var/lib/kubelet`, binaries) does **not** touch them:
+
+| PVC | node | storageclass | host path |
+|---|---|---|---|
+| `vault/data-vault-2` | ipc4 | vault-local (Retain) | `/var/lib/vault-data` (832K) |
+| `vault/data-vault-0` | ipc5 | vault-local | `/var/lib/vault-data` |
+| `vault/data-vault-1` | ipc6 | vault-local | `/var/lib/vault-data` |
+| `default/pelagos-build-cache` | ipc4 | local-path (Delete) | `/opt/local-path-provisioner/...` (regenerable) |
+| `gruesome/gruesome-data` | ipc6 | local-path | `/opt/local-path-provisioner/...` |
+
+So the data **survives the reinstall on disk**; the etcd restore re-creates the PV
+objects (nodeAffinity pins them back to ipc4/5/6 by hostname) and they re-bind.
+Everything else is NFS (`nfs-subdir-external-provisioner`, on nazgul) — node-independent.
+**Still, back these dirs up right before each node's reinstall (Phase 2) as insurance**
+(vault raft = 3-node, self-heals from the other two even if one member's data is lost).
+
 ---
 
 ## Phase 0 — Prep the repo (no cluster impact; do this first, commit, but DON'T deploy yet)
@@ -84,10 +103,20 @@ sudo k3s kubectl get kustomizations -A 2>/dev/null; sudo k3s kubectl get helmrel
 for n in ipc1 ipc2 ipc3; do ssh $n 'sudo systemctl stop k3s'; done
 for n in ipc4 ipc5 ipc6 ipc7 ipc8 ipc9; do ssh $n 'sudo systemctl stop k3s-agent'; done
 
-# 2. Wipe ipc4's old AGENT state so it can become a fresh server (data is on ipc4 only
-#    as an agent cache — no workload PV data here; those dirs survive under /var/lib/rancher/k3s/storage)
+# 1b. INSURANCE: back up node-local PV data on ipc4/5/6 to nazgul before any wipe.
+#     (Verified k3s-agent-uninstall.sh does NOT touch these paths, so this is belt-and-
+#     suspenders — but vault is your secret store, so do it.) vault-data on all three;
+#     gruesome data on ipc6. Build-cache is regenerable — skip.
+for n in ipc4 ipc5 ipc6; do
+  ssh $n "sudo tar -C /var/lib -czf - vault-data" | ssh root@nazgul "cat > /mnt/primary_storage/backups/k3s/vault-data-$n-premigrate.tgz"
+done
+ssh ipc6 "sudo tar -C /opt -czf - local-path-provisioner" | ssh root@nazgul "cat > /mnt/primary_storage/backups/k3s/localpath-ipc6-premigrate.tgz"
+
+# 2. Wipe ipc4's old AGENT state so it can become a fresh server. k3s-agent-uninstall.sh
+#    removes only /var/lib/rancher/k3s, /etc/rancher/k3s, /run/k3s, /var/lib/kubelet, binaries.
+#    It does NOT touch /var/lib/vault-data or /opt/local-path-provisioner (verified) — the
+#    PV data stays on disk and re-binds after the etcd restore.
 ssh ipc4 'sudo systemctl stop k3s-agent; sudo /usr/local/bin/k3s-agent-uninstall.sh 2>/dev/null || true'
-#    (Preserve /var/lib/rancher/k3s/storage if any local-path PV data is on ipc4 — verify first.)
 
 # 3. Install k3s SERVER on ipc4 with the ORIGINAL token + new server config, then restore.
 #    Use ipc4's own IP for bootstrap; the VIP comes up once kube-vip is applied.
