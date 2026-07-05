@@ -40,8 +40,8 @@ for a in "${AGENTS[@]}"; do
     fi
 done
 
-SERVER="ipc1.taildd208.ts.net"
-SERVER_URL="https://192.168.88.53:6443"
+SERVER="ipc4.taildd208.ts.net"                 # a control-plane node (token source)
+SERVER_URL="https://192.168.88.58:6443"        # kube-vip VIP (HA endpoint, not a single node)
 
 echo "=== Fetching cluster token + version from $SERVER ==="
 TOKEN=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" \

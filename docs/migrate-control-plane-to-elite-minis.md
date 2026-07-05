@@ -35,7 +35,18 @@ via kubelet during the API outage, but nothing reschedules until the API is back
 
 ---
 
-## Phase 0 — Prep the repo (no cluster impact; do this first, commit, but DON'T deploy yet)
+## Phase 0 — Prep the repo (no cluster impact) — ✅ DONE, staged on branch `migrate-cp-6node`
+
+> **STATUS:** Phase 0 config is staged on branch **`migrate-cp-6node`** (this branch),
+> NOT `master`. `master` still describes the live 9-node cluster, so routine ops
+> (install-pelagos.sh / upgrade-*.sh run from `master`) stay correct until migration
+> day. **On migration day: `git checkout migrate-cp-6node` first**, then run the
+> Phase 1+ steps so the scripts read the new roles/config. The monitoring change is
+> staged on the matching `migrate-cp-6node` branch in the `home-monitoring` repo.
+>
+> Staged edits (this branch): `scripts/lib/node-roles.sh`, `config/k3s-server.yaml`,
+> `config/k3s-server-join.yaml`, `scripts/upgrade-agents.sh`,
+> `manifests/kube-vip/daemonset.yaml`. Details below (kept for reference/review).
 
 Stage the new config so the migration just applies known-good files:
 
