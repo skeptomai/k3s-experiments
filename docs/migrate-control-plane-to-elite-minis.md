@@ -54,7 +54,18 @@ Everything else is NFS (`nfs-subdir-external-provisioner`, on nazgul) — node-i
 
 ---
 
-## Phase 0 — Prep the repo (no cluster impact; do this first, commit, but DON'T deploy yet)
+## Phase 0 — Prep the repo (no cluster impact) — ✅ DONE, staged on branch `migrate-cp-6node`
+
+> **STATUS:** Phase 0 config is staged on branch **`migrate-cp-6node`** (this branch),
+> NOT `master`. `master` still describes the live 9-node cluster, so routine ops
+> (install-pelagos.sh / upgrade-*.sh run from `master`) stay correct until migration
+> day. **On migration day: `git checkout migrate-cp-6node` first**, then run the
+> Phase 1+ steps so the scripts read the new roles/config. The monitoring change is
+> staged on the matching `migrate-cp-6node` branch in the `home-monitoring` repo.
+>
+> Staged edits (this branch): `scripts/lib/node-roles.sh`, `config/k3s-server.yaml`,
+> `config/k3s-server-join.yaml`, `scripts/upgrade-agents.sh`,
+> `manifests/kube-vip/daemonset.yaml`. Details below (kept for reference/review).
 
 Stage the new config so the migration just applies known-good files:
 
@@ -186,6 +197,36 @@ and you're back to the 9-node cluster. **Do NOT wipe/repurpose ipc1-3 until ipc4
 are verified-healthy servers and you've confirmed the restore is complete.** Keep
 the pre-migration snapshot on nazgul indefinitely.
 
+## LESSONS FROM THE LIVE RUN (2026-07-04) — read before the next DR/migration
+
+The migration succeeded but hit these — all now handled in the scripts/config, but
+know them:
+
+1. **Every reinstalled node needs a REBOOT afterward.** The churn (uninstall →
+   reinstall → restore → service restarts) leaks namespace/mount state, and then
+   ~all of that node's containers fail to start with
+   `pelagos run failed: Failed to spawn process: Invalid argument (os error 22)`
+   (a *masked* custom error — pre_exec has no `raw_os_error`, so it reads as EINVAL).
+   A config reconcile does NOT clear it; a reboot does. Reboot control-plane nodes
+   one at a time (quorum holds via the other two).
+2. **k3s reinstall WIPES custom node labels.** `node-class` (used by vault's
+   affinity, and any future perf-pinned workload) is gone after a reinstall → pods
+   go `Pending` (`didn't match Pod's node affinity`). Now persisted via `node-label`
+   in `config/k3s-{server,agent}.yaml` (servers=performance, agents=fastest), applied
+   at registration. If you ever relabel live, also update those configs.
+3. **Rejoining a node needs its stale `<node>.node-password.k3s` secret deleted**
+   on the seed (else the fresh agent's password is rejected → NotReady). The
+   join/agent scripts do this now.
+4. **`install-pelagos.sh` only writes config + restarts** — it does NOT install the
+   k3s binary or convert agent↔server. Use `restore-cluster.sh` (seed), `join-server.sh`
+   (server), `install-agent.sh` (agent) — they run `get.k3s.io INSTALL_K3S_EXEC=…`.
+5. **Never pipe data to `ssh "bash -s" <<HEREDOC`** — the heredoc wins stdin, the
+   pipe gets SIGPIPE, nothing runs. Pass the config as a base64 ARG (the scripts do).
+6. **ipc7-9 direct ssh is flaky** → `install-agent.sh` supports `JUMP=1` to hop via
+   the seed (on their LAN). The old ipc1 jump-host is gone; use a surviving node.
+7. **`install-pelagos.sh` placeholder** must match the config's token placeholder
+   (now regex-tolerant: `<INJECTED_AT_INSTALL_FROM_[A-Z0-9]+_TOKEN>`).
+
 ## Gotchas checklist
 - [ ] Used the **original server token** for the ipc4 restore (else restored secrets won't decrypt).
 - [ ] kube-vip `vip_interface = eno1` (not `enp2s0`).
@@ -194,3 +235,4 @@ the pre-migration snapshot on nazgul indefinitely.
 - [ ] Deleted stale `ipc1/2/3` node objects.
 - [ ] Snapshot copied OFF-cluster (nazgul) before touching anything.
 - [ ] Verified no local-path PV data on ipc1-3 (none, since tainted) before wipe.
+- [ ] **Rebooted each reinstalled node** + re-verified node-class labels + cleared node-password secrets.

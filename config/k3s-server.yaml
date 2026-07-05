@@ -3,18 +3,20 @@ flannel-backend: wireguard-native
 disable:
   - local-storage
   - servicelb   # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
-# Initialize the embedded-etcd datastore (HA control plane with ipc2/ipc3).
-# This member is the cluster-init seed; ipc2/ipc3 join it as additional servers.
+# Initialize the embedded-etcd datastore (HA control plane with ipc5/ipc6).
+# This member is the cluster-init seed (ipc4); ipc5/ipc6 join as additional servers.
 cluster-init: true
 # Include the kube-vip control-plane VIP in the apiserver serving cert SAN so
 # kubeconfigs can target https://192.168.88.58:6443 (HA endpoint).
 tls-san:
   - "192.168.88.58"
   - "k8s-api.home.skeptomai.com"
-# ipc1 is control-plane-only: repel workload pods to relieve the weak 2-core node.
-# k3s applies node-taint at node REGISTRATION, so this survives a PXE reinstall
-# (a live `kubectl taint` does not). Critical addons (coredns/traefik) + DaemonSets
-# that tolerate this taint still run here; everything else schedules on workers.
-node-taint:
-  - "node-role.kubernetes.io/control-plane:NoSchedule"
-  - "slow:NoSchedule"
+# NO node-taint: post-migration the control-plane nodes (ipc4-6, i5 Elite Minis)
+# are CO-LOCATED and run workloads too. (The old Pentium CP nodes were tainted
+# control-plane/slow NoSchedule because they were weak & dedicated; that no longer
+# applies.) Re-add a taint here if you ever want dedicated control-plane again.
+# node-label persists node-class through a reinstall (k3s applies it at node
+# REGISTRATION, like node-taint — a live `kubectl label` is lost on reinstall).
+# Servers = the i5-12500T "performance" tier (ipc4-6); workloads select node-class.
+node-label:
+  - "node-class=performance"

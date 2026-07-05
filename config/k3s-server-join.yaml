@@ -1,9 +1,9 @@
-# Server config for ipc2 / ipc3 — join ipc1's embedded-etcd cluster as additional
-# control-plane members (HA control plane). Mirrors ipc1's config.yaml EXCEPT:
-#   - NO `cluster-init` (only the seed member, ipc1, initializes etcd)
-#   - adds `server:` + `token:` to join ipc1
+# Server config for ipc5 / ipc6 — join ipc4's embedded-etcd cluster as additional
+# control-plane members (HA control plane). Mirrors ipc4's config.yaml EXCEPT:
+#   - NO `cluster-init` (only the seed member, ipc4, initializes etcd)
+#   - adds `server:` (the VIP) + `token:` to join
 #
-# The token is a SECRET and is injected at install time (read from ipc1's
+# The token is a SECRET and is injected at install time (read from the seed's
 # /var/lib/rancher/k3s/server/token) — it is intentionally NOT stored here.
 # Install with:
 #   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.35.5+k3s1 \
@@ -14,13 +14,10 @@ flannel-backend: wireguard-native
 disable:
   - local-storage
   - servicelb   # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
-server: "https://192.168.88.53:6443"   # ipc1
-token: "<INJECTED_AT_INSTALL_FROM_IPC1_TOKEN>"
+server: "https://192.168.88.58:6443"   # kube-vip VIP (HA endpoint — NOT a single node)
+token: "<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>"
 # Include the kube-vip control-plane VIP in the apiserver serving cert SAN.
 tls-san:
   - "192.168.88.58"
   - "k8s-api.home.skeptomai.com"
-# Control-plane-only: repel workloads to the performance nodes (ipc4-6).
-node-taint:
-  - "node-role.kubernetes.io/control-plane:NoSchedule"
-  - "slow:NoSchedule"
+# NO node-taint: ipc5/ipc6 are co-located control-plane + worker (see k3s-server.yaml).

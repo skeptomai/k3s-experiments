@@ -1,11 +1,13 @@
 # kube-vip — floating VIP for the HA control-plane API endpoint (192.168.88.58).
-# ARP/L2 mode, control-plane only, leader-elected so exactly one of ipc1-3
-# advertises the VIP at a time. svc_enable=false: this handles ONLY the
-# control-plane VIP, not Service LoadBalancers (MetalLB will own those).
+# ARP/L2 mode, control-plane only, leader-elected so exactly one control-plane
+# node (ipc4-6) advertises the VIP at a time. svc_enable=false: this handles ONLY
+# the control-plane VIP, not Service LoadBalancers (MetalLB will own those).
 #
 # The VIP must be in the apiserver serving-cert SAN (tls-san in the k3s server
 # configs) and excluded from the MikroTik DHCP pool — both done 2026-06-28.
-# Interface enp2s0 is the bridge-lan NIC on all three Pentium control-plane nodes.
+# Interface eno1 is the primary NIC on the HP Elite Mini control-plane nodes
+# (ipc4-6). NOTE: the retired Pentium CP nodes used enp2s0 — changed at the
+# control-plane migration (docs/migrate-control-plane-to-elite-minis.md).
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -69,7 +71,7 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: vip_interface
-              value: enp2s0
+              value: eno1
             - name: vip_cidr
               value: "32"
             - name: cp_enable
