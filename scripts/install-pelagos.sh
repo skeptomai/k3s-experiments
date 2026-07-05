@@ -76,7 +76,8 @@ install_node() {
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
     elif is_server_node "$node"; then
         [[ -n "$SERVER_TOKEN" ]] || { echo "ERROR: server token not fetched for $node" >&2; return 1; }
-        k3s_config_b64=$(sed "s|<INJECTED_AT_INSTALL_FROM_IPC1_TOKEN>|${SERVER_TOKEN}|" \
+        # Match either placeholder name (IPC1 on master / SEED on the migration branch).
+        k3s_config_b64=$(sed -E "s|<INJECTED_AT_INSTALL_FROM_[A-Z0-9]+_TOKEN>|${SERVER_TOKEN}|" \
             "$REPO_ROOT/config/k3s-server-join.yaml" | base64 -w0)
     else
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent.yaml")
