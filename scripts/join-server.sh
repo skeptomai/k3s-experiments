@@ -1,62 +1,65 @@
 #!/usr/bin/env bash
-# Join a freshly-reinstalled control-plane node (ipc2 or ipc3) to ipc1's embedded
-# etcd cluster as an additional k3s SERVER, then install the Pelagos CRI.
+# Join a node to the cluster as an additional control-plane SERVER (etcd member).
 #
-# This is the control-plane counterpart of upgrade-agents.sh (which joins worker
-# nodes as agents). reinstall-nodes.sh dispatches to whichever matches the node's
-# role (see scripts/lib/node-roles.sh). Background:
-# docs/ipc1-3-control-plane-ha-runbook.md.
+# Topology-driven: the etcd seed / token source is CLUSTER_INIT_NODE and IPs come
+# from node-maps.sh, so this works for ANY topology (not hardcoded to ipc1). The
+# joining server's config (config/k3s-server-join.yaml) sets `server:` to the
+# kube-vip VIP, so it registers against the HA endpoint, not a single node.
 #
-# IMPORTANT: a server join needs the seed's SERVER token (/var/lib/rancher/k3s/
-# server/token) AND a config.yaml carrying `server:` + `token:` BEFORE the k3s
-# install runs — without `server:` the installer would cluster-init a NEW etcd
-# instead of joining. The k3s version is pinned to the seed's running version so
-# the new etcd member never skews ahead of the cluster.
+# Observed install (2026-07-04): k3s v1.35.5+k3s1 via get.k3s.io (INSTALL_K3S_EXEC=
+# server), pelagos CRI, config in /etc/rancher/k3s/config.yaml. Reached over the
+# tailnet (ssh <node> resolves to <node>.taildd208.ts.net via ~/.ssh/config).
 #
-# Run from any machine with SSH to ipc1 via the tailnet (ipc2/ipc3 reached via
-# the ipc1 jump). Usage: ./join-server.sh <ipc2|ipc3>
+# IMPORTANT: a server join needs the seed's SERVER token AND a config.yaml carrying
+# `server:` + `token:` BEFORE the k3s install runs — without `server:` the installer
+# would cluster-init a NEW etcd instead of joining.
+#
+# Usage: scripts/join-server.sh <node>   (a SERVER_NODES member other than the seed)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
-
-SERVER="ipc1.taildd208.ts.net"
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54")
+source "$REPO_ROOT/scripts/lib/node-maps.sh"
 
 node="${1:-}"
 if [[ -z "$node" ]] || ! is_server_node "$node" || [[ "$node" == "$CLUSTER_INIT_NODE" ]]; then
-    echo "Usage: $0 <ipc2|ipc3>  (joining control-plane servers only; not the etcd seed $CLUSTER_INIT_NODE)" >&2
+    echo "Usage: $0 <node>   (joining control-plane servers only; not the etcd seed $CLUSTER_INIT_NODE)" >&2
+    echo "  SERVER_NODES: ${SERVER_NODES[*]}" >&2
     exit 1
 fi
+[[ -n "${NODE_IP[$node]:-}" ]] || { echo "ERROR: unknown node '$node'" >&2; exit 1; }
 
-echo "=== Pinning k3s version to the etcd seed ($CLUSTER_INIT_NODE) ==="
-VERSION=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" 'k3s --version' | awk 'NR==1{print $3}')
-echo "  version: $VERSION"
+SEED="$CLUSTER_INIT_NODE"
+echo "=== join-server: $node -> cluster (seed/token source: $SEED) ==="
 
-echo "=== Fetching server token + clearing stale node state for $node ==="
-TOKEN=$(ssh -o StrictHostKeyChecking=no cb@"$SERVER" 'sudo cat /var/lib/rancher/k3s/server/token')
-ssh -o StrictHostKeyChecking=no cb@"$SERVER" "
-    sudo kubectl delete node $node --ignore-not-found
-    sudo kubectl -n kube-system delete secret ${node}.node-password.k3s --ignore-not-found"
+echo "--- pin k3s version to the seed + fetch the join token ---"
+VER=$(ssh -o StrictHostKeyChecking=no "cb@$SEED" 'k3s --version' | awk 'NR==1{print $3}')
+TOKEN=$(ssh -o StrictHostKeyChecking=no "cb@$SEED" 'sudo cat /var/lib/rancher/k3s/server/token')
+echo "  version: $VER"
 
-echo "=== Writing server-join config + installing k3s SERVER on $node ==="
-# Token is piped over stdin so it never appears in argv / process listings.
-{ printf '%s\n' "$TOKEN"; sed "s|<INJECTED_AT_INSTALL_FROM_IPC1_TOKEN>|__TOKEN__|" \
-    "$REPO_ROOT/config/k3s-server-join.yaml"; } \
-  | ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$node]}" \
-    "VER='$VERSION' bash -s" <<'REMOTE'
+echo "--- clear any stale node object + node-password secret for $node ---"
+ssh -o StrictHostKeyChecking=no "cb@$SEED" "
+    sudo k3s kubectl delete node $node --ignore-not-found
+    sudo k3s kubectl -n kube-system delete secret ${node}.node-password.k3s --ignore-not-found"
+
+echo "--- uninstall any prior k3s/k3s-agent on $node, write server-join config, install k3s SERVER ---"
+{ printf '%s\n' "$TOKEN"; grep -vE '^\s*#' "$REPO_ROOT/config/k3s-server-join.yaml"; } \
+  | ssh -o StrictHostKeyChecking=no "cb@$node" "VER='$VER' bash -s" <<'REMOTE'
 set -euo pipefail
-T=$(head -n1)                       # first stdin line = token
-CONFIG=$(cat | sed "s|__TOKEN__|${T}|")   # remaining lines = config template
+T=$(head -n1)                                   # first stdin line = token
+CONFIG=$(cat | sed "s|<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>|${T}|")   # rest = config template
+sudo systemctl is-active pelagos-cri >/dev/null 2>&1 || { echo "ERROR: pelagos-cri not active — run install-pelagos.sh first"; exit 1; }
+if [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh; \
+elif [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh; fi
 sudo mkdir -p /etc/rancher/k3s
 printf '%s\n' "$CONFIG" | sudo tee /etc/rancher/k3s/config.yaml >/dev/null
 sudo chmod 600 /etc/rancher/k3s/config.yaml
-echo "config written (token line present: $(sudo grep -c '^token:' /etc/rancher/k3s/config.yaml))"
+echo "config written (server line: $(sudo grep -c '^server:' /etc/rancher/k3s/config.yaml), token line: $(sudo grep -c '^token:' /etc/rancher/k3s/config.yaml))"
 curl -sfL https://get.k3s.io | sudo INSTALL_K3S_VERSION="$VER" INSTALL_K3S_EXEC=server sh -
 REMOTE
 
-echo "=== Installing Pelagos CRI on $node (role-aware: server config + k3s unit) ==="
+echo "--- reconcile Pelagos CRI + role config on $node ---"
 "$REPO_ROOT/scripts/install-pelagos.sh" "$node"
 
 echo "=== $node joined as control-plane server ==="
-ssh -o StrictHostKeyChecking=no cb@"$SERVER" "sudo kubectl get node $node -o wide"
+ssh -o StrictHostKeyChecking=no "cb@$SEED" "sudo k3s kubectl get node $node -o wide"
