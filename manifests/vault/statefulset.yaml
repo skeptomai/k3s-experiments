@@ -22,12 +22,15 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000          # chowns the local PV + tls secret so the vault user can read/write
       # One Raft member per i5 worker: a single node loss costs only one member.
+      # Accept BOTH i5 tiers — "performance" (i5-12500T, ipc4-6) and "fastest"
+      # (i5-12500 non-T, ipc7-9, which is strictly better). node-class is a single
+      # label value per node, so we widen the selector rather than double-label nodes.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - { key: node-class, operator: In, values: [performance] }
+                  - { key: node-class, operator: In, values: [performance, fastest] }
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
