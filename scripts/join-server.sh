@@ -43,20 +43,19 @@ ssh -o StrictHostKeyChecking=no "cb@$SEED" "
     sudo k3s kubectl -n kube-system delete secret ${node}.node-password.k3s --ignore-not-found"
 
 echo "--- uninstall any prior k3s/k3s-agent on $node, write server-join config, install k3s SERVER ---"
-{ printf '%s\n' "$TOKEN"; grep -vE '^\s*#' "$REPO_ROOT/config/k3s-server-join.yaml"; } \
-  | ssh -o StrictHostKeyChecking=no "cb@$node" "VER='$VER' bash -s" <<'REMOTE'
-set -euo pipefail
-T=$(head -n1)                                   # first stdin line = token
-CONFIG=$(cat | sed "s|<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>|${T}|")   # rest = config template
-sudo systemctl is-active pelagos-cri >/dev/null 2>&1 || { echo "ERROR: pelagos-cri not active — run install-pelagos.sh first"; exit 1; }
-if [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh; \
-elif [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh; fi
-sudo mkdir -p /etc/rancher/k3s
-printf '%s\n' "$CONFIG" | sudo tee /etc/rancher/k3s/config.yaml >/dev/null
-sudo chmod 600 /etc/rancher/k3s/config.yaml
-echo "config written (server line: $(sudo grep -c '^server:' /etc/rancher/k3s/config.yaml), token line: $(sudo grep -c '^token:' /etc/rancher/k3s/config.yaml))"
-curl -sfL https://get.k3s.io | sudo INSTALL_K3S_VERSION="$VER" INSTALL_K3S_EXEC=server sh -
-REMOTE
+# Config (token injected) is base64-encoded and passed as an ARGUMENT — do NOT pipe
+# data to `ssh "bash -s" <<HEREDOC`: the heredoc wins stdin, so the pipe gets SIGPIPE.
+CFG_B64=$(grep -vE '^\s*#' "$REPO_ROOT/config/k3s-server-join.yaml" \
+    | sed "s|<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>|${TOKEN}|" | base64 -w0)
+ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=10 "cb@$node" "set -e
+  sudo systemctl is-active pelagos-cri >/dev/null 2>&1 || { echo 'ERROR: pelagos-cri not active — run install-pelagos.sh first'; exit 1; }
+  if [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh >/dev/null 2>&1; \
+  elif [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh >/dev/null 2>&1; fi
+  sudo mkdir -p /etc/rancher/k3s
+  echo '$CFG_B64' | base64 -d | sudo tee /etc/rancher/k3s/config.yaml >/dev/null
+  sudo chmod 600 /etc/rancher/k3s/config.yaml
+  echo \"config written (server line: \$(sudo grep -c '^server:' /etc/rancher/k3s/config.yaml), token line: \$(sudo grep -c '^token:' /etc/rancher/k3s/config.yaml))\"
+  curl -sfL https://get.k3s.io | sudo INSTALL_K3S_VERSION='$VER' INSTALL_K3S_EXEC=server sh -"
 
 echo "--- reconcile Pelagos CRI + role config on $node ---"
 "$REPO_ROOT/scripts/install-pelagos.sh" "$node"

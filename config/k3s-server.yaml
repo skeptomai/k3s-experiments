@@ -15,3 +15,8 @@ tls-san:
 # are CO-LOCATED and run workloads too. (The old Pentium CP nodes were tainted
 # control-plane/slow NoSchedule because they were weak & dedicated; that no longer
 # applies.) Re-add a taint here if you ever want dedicated control-plane again.
+# node-label persists node-class through a reinstall (k3s applies it at node
+# REGISTRATION, like node-taint — a live `kubectl label` is lost on reinstall).
+# Servers = the i5-12500T "performance" tier (ipc4-6); workloads select node-class.
+node-label:
+  - "node-class=performance"

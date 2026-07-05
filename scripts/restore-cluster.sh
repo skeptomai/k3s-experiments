@@ -53,7 +53,7 @@ SSH 'sudo mkdir -p /root/restore && sudo chmod 700 /root/restore'
 # shellcheck disable=SC2002
 cat "$SNAP_LOCAL"  | SSH 'sudo tee /root/restore/snapshot >/dev/null'
 cat "$TOKEN_LOCAL" | SSH 'sudo tee /root/restore/token >/dev/null && sudo chmod 600 /root/restore/token /root/restore/snapshot'
-SSH 'echo "  snapshot bytes: $(sudo stat -c %s /root/restore/snapshot); token bytes: $(sudo wc -c < /root/restore/token)"'
+SSH 'echo "  snapshot bytes: $(sudo stat -c %s /root/restore/snapshot); token bytes: $(sudo cat /root/restore/token | wc -c)"'
 
 echo "--- [3/6] uninstall any existing k3s/k3s-agent on $SEED (keeps /var/lib/vault-data, /opt/local-path) ---"
 SSH 'if [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh; \
