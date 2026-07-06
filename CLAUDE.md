@@ -21,8 +21,9 @@ previously workers.
 
 - Roles are the single source of truth in `scripts/lib/node-roles.sh` (servers
   ipc4-6, agents ipc7-9); scripts consult it rather than hard-coding node names.
-- ipc4-6 carry `control-plane:NoSchedule` taints → dedicated to the control plane;
-  all real workloads run on ipc7-9.
+- ipc4-6 are **intentionally untainted** — all 6 nodes run workloads. With uniform
+  i5-12500/T hardware there's no reason to dedicate control-plane nodes exclusively to
+  k3s overhead (unlike the old Pentium Gold control plane, which was too slow for work).
 - **HA API endpoint:** kube-vip floating VIP **`192.168.88.58`**
   (`k8s-api.home.skeptomai.com`) across ipc4-6. omen kubeconfig has two contexts —
   `default` (tailnet `ipc4:6443`, reachable anywhere, not HA) and `ipc-vip` (the VIP,
