@@ -2,16 +2,21 @@
 # shutdown-cluster.sh
 # Gracefully drains and shuts down the entire k3s cluster.
 # Run from omen. Cordons all nodes, drains workers, drains control plane,
-# then shuts down workers first and ipc1 last.
+# then shuts down workers first and ipc4 last.
+#
+# Topology: ipc4/5/6 = control-plane+etcd (ipc4 is seed/jump host)
+#           ipc7/8/9 = workers
 
 set -euo pipefail
 
 SSH="ssh -i $HOME/.ssh/Omen -o StrictHostKeyChecking=accept-new"
-WORKERS="ipc2 ipc3 ipc4 ipc5 ipc6"
-CONTROL_PLANE="ipc1"
+WORKERS="ipc7 ipc8 ipc9"
+CONTROL_PLANE_SECONDARY="ipc5 ipc6"
+CONTROL_PLANE_SEED="ipc4"
+ALL_NODES="$WORKERS $CONTROL_PLANE_SECONDARY $CONTROL_PLANE_SEED"
 
 echo "==> Cordoning all nodes..."
-for node in $CONTROL_PLANE $WORKERS; do
+for node in $ALL_NODES; do
   echo "    cordoning $node"
   kubectl cordon "$node"
 done
@@ -24,22 +29,36 @@ for node in $WORKERS; do
 done
 
 echo ""
-echo "==> Draining control plane (ipc1)..."
-kubectl drain "$CONTROL_PLANE" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
+echo "==> Draining secondary control-plane nodes..."
+for node in $CONTROL_PLANE_SECONDARY; do
+  echo "    draining $node"
+  kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
+done
+
+echo ""
+echo "==> Draining seed control-plane (ipc4)..."
+kubectl drain "$CONTROL_PLANE_SEED" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
 
 echo ""
 echo "==> Shutting down worker nodes..."
 for node in $WORKERS; do
   echo "    shutting down $node"
-  $SSH -J cb@ipc1.taildd208.ts.net "cb@$node" sudo shutdown -h now || true
+  $SSH -J "cb@ipc4.taildd208.ts.net" "cb@$node" sudo shutdown -h now || true
 done
 
 echo ""
-echo "==> Waiting 10 seconds before shutting down control plane..."
+echo "==> Shutting down secondary control-plane nodes..."
+for node in $CONTROL_PLANE_SECONDARY; do
+  echo "    shutting down $node"
+  $SSH -J "cb@ipc4.taildd208.ts.net" "cb@$node" sudo shutdown -h now || true
+done
+
+echo ""
+echo "==> Waiting 10 seconds before shutting down seed (ipc4)..."
 sleep 10
 
-echo "==> Shutting down ipc1 (control plane)..."
-$SSH cb@ipc1.taildd208.ts.net sudo shutdown -h now || true
+echo "==> Shutting down ipc4 (seed control-plane)..."
+$SSH "cb@ipc4.taildd208.ts.net" sudo shutdown -h now || true
 
 echo ""
 echo "==> Done. All nodes have been sent the shutdown signal."

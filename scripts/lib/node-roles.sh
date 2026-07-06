@@ -2,15 +2,13 @@
 # Single source of truth for k3s node roles in this cluster.
 # Source this from other scripts:  source "$(dirname "$0")/lib/node-roles.sh"
 #
-# Topology (post-migration, all-Elite-Mini 6-node — see
-# docs/migrate-control-plane-to-elite-minis.md; the Pentiums ipc1-3 were retired):
+# Topology (since 2026-07-05, ipc1-3 retired — i5-12500T nodes promoted):
+#   See docs/migrate-control-plane-to-elite-minis.md for migration history.
 #   - SERVER nodes  : ipc4 (embedded-etcd cluster-init seed) + ipc5/ipc6 (join).
-#                     Run the `k3s` (server) unit; control-plane,etcd + workloads
-#                     (co-located, un-tainted).
+#                     Run the `k3s` (server) systemd unit; control-plane,etcd.
 #   - AGENT nodes   : ipc7/ipc8/ipc9. Run the `k3s-agent` unit; carry workloads.
 #
-# Prior model (2026-06-28..07): dedicated Pentium control plane ipc1-3 + agents
-# ipc4-9. Many scripts hard-coded ipc1 as seed/bastion — consult these helpers.
+# Consult these helpers instead of re-encoding roles in scripts.
 
 # The cluster-init seed (the one server installed with `cluster-init: true`).
 CLUSTER_INIT_NODE="ipc4"
