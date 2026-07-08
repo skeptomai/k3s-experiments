@@ -1,6 +1,6 @@
 # k3s-experiments
 
-Kubernetes learning cluster on six ipc machines: **3 control-plane (HA embedded
+Kubernetes learning cluster on six ipc machines: **3 control-plane+worker (HA embedded
 etcd, ipc4-6) + 3 workers (ipc7-9)**. Scripts and docs for cluster management and
 experiments.
 
@@ -35,12 +35,12 @@ previously workers.
   MikroTik DHCP/DNS reservations they depend on are **out-of-band** (see "Recreating
   from scratch" below).
 - k3s v1.35.5, Ubuntu 26.04, x86_64
-- ipc4-6: Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM (NVMe)
-- ipc7-9: Intel Core i5-12500 (12th Gen, non-T), 6 cores / 12 threads, 16GB RAM (NVMe ~256GB)
+- ipc4-6: HP Elite Mini 800 G9, Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM (NVMe) — node-class: `performance`
+- ipc7-9: Intel Core i5-12500 (12th Gen, non-T), 6 cores / 12 threads, 16GB RAM (NVMe ~256GB) — node-class: `fastest`
 - Container runtime: Pelagos v0.65.47 on all six nodes (`pelagos://0.65.47+c748f09`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
-- SSH key: `~/.ssh/Omen` (cb@omen)
+- SSH key: `~/.ssh/id_rsa` (cb@omen)
 - kubectl requires sudo on the nodes: `sudo kubectl ...`
 - k3s token lives at `/var/lib/rancher/k3s/server/node-token` on ipc4
 
@@ -162,10 +162,14 @@ All nodes are configured PXE-first (set via `efibootmgr`, persists in NVRAM). No
 |------|-----------|
 | ipc4 | 0003 PXE IP4 Intel I219-LM (d0:ad:08:9c:d2:cb), 0006 Ubuntu, ... |
 | ipc5 | 0003 PXE IP4 Intel I219-LM (d0:ad:08:9c:d1:45), 0001 Ubuntu, ... |
+| ipc6 | verify with `sudo efibootmgr` — PXE IP4 (e0:73:e7:c0:b0:08) should be first |
+| ipc7 | verify with `sudo efibootmgr` — PXE IP4 (e0:73:e7:3a:a6:7b) should be first |
+| ipc8 | verify with `sudo efibootmgr` — PXE IP4 (7c:4d:8f:aa:fa:a4) should be first |
+| ipc9 | verify with `sudo efibootmgr` — PXE IP4 (7c:4d:8f:aa:ef:73) should be first |
 
 To query: `sudo efibootmgr` on any node. To fix if a reinstall resets it: `sudo efibootmgr --bootorder <pxe-entry>,0002,...`
 
-**All nodes:** Require "Network Boot" enabled in BIOS firmware settings (F2 at POST → Advanced → Network Boot or similar). This is a one-time physical setup — efibootmgr boot order alone is not sufficient for this Intel NUC-style hardware.
+All HP Elite Mini 800 G9 nodes require "Network Boot" enabled in BIOS firmware settings (F2 at POST → Advanced → Network Boot or similar). This is a one-time physical setup — efibootmgr boot order alone is not sufficient.
 
 ## Node Role Notes (k3s install)
 
