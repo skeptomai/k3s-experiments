@@ -165,8 +165,12 @@ echo "==> Installing server bundle-signing public key on ${NODE}..."
 # The server's bundle-signing public key is fetched from ipc4 (handle 0x81008006)
 # and written to /etc/spire/ on every node — this is the out-of-band trust anchor
 # that lets agents verify the SPIRE server's trust bundle without trusting Kubernetes.
+# tpm2_readpublic -f pem writes the PEM key to -o file (not stdout); extract it via a
+# temp file so we get only the PEM block, not the YAML metadata openssl can't parse.
 SERVER_PUB=$(ssh -i "${HOME}/.ssh/id_rsa" -o StrictHostKeyChecking=no \
-  cb@ipc4.taildd208.ts.net "sudo tpm2_readpublic -c 0x81008006 -f pem 2>/dev/null")
+  cb@ipc4.taildd208.ts.net \
+  "sudo tpm2_readpublic -c 0x81008006 -f pem -o /tmp/srv_signing.pem 2>/dev/null && sudo cat /tmp/srv_signing.pem; sudo rm -f /tmp/srv_signing.pem" \
+  | awk '/-----BEGIN PUBLIC KEY-----/,/-----END PUBLIC KEY-----/')
 if [[ -z "$SERVER_PUB" ]]; then
   echo "  WARN: could not read server bundle-signing public key from ipc4 TPM."
   echo "        Run 'bash scripts/provision-server-bundle-signing.sh' first."
