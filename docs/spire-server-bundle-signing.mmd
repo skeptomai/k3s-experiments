@@ -3,14 +3,11 @@ flowchart TD
         SS["SPIRE Server\n(main container)"]
         SIGN["spire-server-attestor-tpm-sign\n(BundlePublisher plugin — hostPath binary)"]
         SIGNER["spire-server-attestor-tpm-signer-unix\n(sidecar — root, /dev/tpmrm0 mounted — hostPath binary)"]
-        HTTP["nginx:alpine\n(bundle-http sidecar — port 8181)"]
+        HTTP["nginx:alpine\n(bundle-http sidecar — port 8181)\nserves /var/spire/signed-bundle/"]
         TPM_SERVER["Server TPM  /dev/tpmrm0\nbundle-signing key  handle 0x81008006"]
     end
 
-    subgraph k8s_infra["Kubernetes Infrastructure"]
-        SVC["spire-bundle-signing\nClusterIP Service  port 80→8181"]
-        BUNDLE_CM["spire-bundle ConfigMap\n(maintained by k8sbundle Notifier\nbut NOT used for agent bootstrap)"]
-    end
+    SVC["spire-bundle-signing\nClusterIP Service  (spire namespace)\nport 80 → pod port 8181\nroutes to bundle-http sidecar in spire-server-0"]
 
     subgraph agent_pod["spire-agent pod  (each node)  — init container runs first"]
         VERIFIER["verify-bundle init container\n(python:3.12 / openssl)\nexits 0 on valid signature, 1 on failure"]
@@ -23,25 +20,29 @@ flowchart TD
         PROV["provision-tpm-devid.sh\nreads PEM from ipc4 TPM 0x81008006\nwrites to /etc/spire/ on each node"]
     end
 
+    BUNDLE_CM["spire-bundle ConfigMap\n(maintained by k8sbundle Notifier\nbut NOT used for agent bootstrap)"]
+
     SS -->|"bundle updated"| SIGN
     SIGN -->|"push bundle\n(Unix socket)"| SIGNER
     SIGNER -->|"sign with TPM key\n(RSASSA-PKCS1-v1.5 / SHA-256)"| TPM_SERVER
     TPM_SERVER -->|"RS256 signature"| SIGNER
     SIGNER -->|"write signed JWT\n(spiffetrustbundle.token)"| HTTP
-    HTTP -->|"serve over HTTP"| SVC
+    HTTP -->|"port 8181"| SVC
 
-    SVC -->|"fetch signed JWT"| VERIFIER
+    SVC -->|"HTTP GET /spiffetrustbundle.token"| VERIFIER
     SERVER_PUB -->|"verify RS256 signature\n(openssl dgst -sha256 -verify)"| VERIFIER
     VERIFIER -->|"write verified CA PEM\n(exits 0 — agent then starts)"| EBUNDLE
     EBUNDLE -->|"read as trust_bundle_path"| SA
 
     PROV -->|"writes PEM public key\nbefore SPIRE starts"| SERVER_PUB
+    SS -->|"writes CA cert"| BUNDLE_CM
 
     style SS fill:#1a6b8a,color:#fff
     style SIGN fill:#1a6b8a,color:#fff
     style SIGNER fill:#7d3c98,color:#fff
     style HTTP fill:#7d3c98,color:#fff
     style TPM_SERVER fill:#7d3c98,color:#fff
+    style SVC fill:#1a5276,color:#fff
     style VERIFIER fill:#2c7a2c,color:#fff
     style SA fill:#1a6b8a,color:#fff
     style SERVER_PUB fill:#6e2c00,color:#fff

@@ -40,6 +40,7 @@ graph TD
         subgraph spire_infra["SPIRE Infrastructure (spire namespace)"]
             NFS["NFS PVC\nSQLite datastore\n+ CA keys"]
             BUNDLE["spire-bundle ConfigMap\n(k8sbundle notifier output\nnot used for agent bootstrap)"]
+            BUNDLESVC["spire-bundle-signing\nClusterIP Service\nport 80 → spire-server-0:8181\n(nginx serving signed JWT)"]
         end
     end
 
@@ -48,9 +49,18 @@ graph TD
         EK_BUNDLE["EK CA Bundle\nNuvoton + Infineon chains\nconfig/tpm/endorsement-ca-bundle.pem"]
     end
 
-    %% server storage
+    %% server storage and bundle signing service
     SS --- NFS
     SS --->|"writes CA cert"| BUNDLE
+    SS --->|"nginx sidecar\nserves signed JWT"| BUNDLESVC
+
+    %% agents fetch signed bundle via ClusterIP service at startup
+    BUNDLESVC -.->|"verify-bundle init container\nfetches signed JWT"| SA4
+    BUNDLESVC -.->|"verify-bundle init container\nfetches signed JWT"| SA5
+    BUNDLESVC -.->|"verify-bundle init container\nfetches signed JWT"| SA6
+    BUNDLESVC -.->|"verify-bundle init container\nfetches signed JWT"| SA7
+    BUNDLESVC -.->|"verify-bundle init container\nfetches signed JWT"| SA8
+    BUNDLESVC -.->|"verify-bundle init container\nfetches signed JWT"| SA9
 
     %% each agent uses its node's TPM
     TPM4 -->|"DevID blobs"| SA4
@@ -95,6 +105,7 @@ graph TD
     style TPM9 fill:#7d3c98,color:#fff
     style NFS fill:#2c3e50,color:#fff
     style BUNDLE fill:#7f8c8d,color:#fff
+    style BUNDLESVC fill:#1a5276,color:#fff
     style DEVID_CA fill:#6e2c00,color:#fff
     style EK_BUNDLE fill:#6e2c00,color:#fff
     style WL4 fill:#27ae60,color:#fff
