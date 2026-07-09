@@ -78,12 +78,19 @@ valid. The agent will not start if this check fails. This means the agent's trus
 server is rooted in the server's hardware TPM, not in Kubernetes infrastructure.
 
 **1. Server trusts the agent (TPM DevID credential activation)**
-The agent sends its DevID certificate (signed by the cluster DevID CA) and proves it holds
-the corresponding private key by signing a server-issued nonce. The server then performs a
-credential activation challenge using the node's EK public key: it encrypts a secret so
-that only the TPM holding the EK can decrypt it, and only if the DevID key is also loaded
-in that same TPM. The agent's TPM decrypts and returns the secret. Both proofs together —
-key possession and TPM residency — satisfy the server that the agent is running on a real,
+DevID (IEEE 802.1AR Secure Device Identity) is the standard that defines a hardware-bound
+device credential: a key pair generated inside the TPM so the private key never leaves the
+chip, paired with a certificate signed by an authority that vouches for which device the
+key belongs to. The agent sends its DevID certificate (signed by the cluster DevID CA) and
+proves it holds the corresponding private key by signing a server-issued nonce. The server
+then performs a credential activation challenge using the node's EK (Endorsement Key)
+public key. The EK is a key pair burned into the TPM at manufacturing time; the
+manufacturer signs an EK certificate and stores it in the TPM's non-volatile memory,
+making the EK the hardware root of trust for that physical chip. The credential activation
+challenge encrypts a secret to the EK public key such that only the TPM holding that EK
+can decrypt it, and only if the DevID key is also loaded in that same TPM at the same
+time. The agent's TPM decrypts and returns the secret. Both proofs together — key
+possession and TPM residency — satisfy the server that the agent is running on a real,
 enrolled node.
 
 **2. Agent attests the workload (SO_PEERCRED + kubelet)**
