@@ -16,44 +16,6 @@ spec:
       hostPID: true  # required: workload attestor resolves PIDs to pods
       tolerations:
         - operator: Exists
-      initContainers:
-        # Native sidecar: starts before the main agent and keeps running.
-        # Fetches the signed trust bundle JWT from the signer-http service,
-        # verifies the TPM signature against /etc/spire/server-bundle-signing.pub
-        # (written out-of-band by provision-tpm-devid.sh — not from Kubernetes),
-        # and serves the verified bundle via Unix socket to the SPIRE agent.
-        - name: verifier
-          image: docker.io/library/busybox:1.36
-          restartPolicy: Always
-          command: ["/usr/local/bin/spire-server-attestor-tpm-verifier",
-                    "/etc/spire-sat/verifier.conf"]
-          volumeMounts:
-            - name: verifier-binary
-              mountPath: /usr/local/bin/spire-server-attestor-tpm-verifier
-              subPath: spire-server-attestor-tpm-verifier
-              readOnly: true
-            - name: verifier-config
-              mountPath: /etc/spire-sat
-              readOnly: true
-            - name: spire-devid
-              mountPath: /etc/spire
-              readOnly: true
-            - name: verifier-socket-dir
-              mountPath: /var/run/spire/server-attestor-tpm
-
-        # Wait for verifier socket before the main agent starts.
-        - name: init-verifier
-          image: docker.io/library/busybox:1.36
-          command: ["sh", "-c"]
-          args:
-            - |
-              until [ -S /var/run/spire/server-attestor-tpm/verifier.sock ]; do
-                echo "Waiting for verifier..."; sleep 2
-              done && echo "Verifier ready."
-          volumeMounts:
-            - name: verifier-socket-dir
-              mountPath: /var/run/spire/server-attestor-tpm
-
       containers:
         - name: spire-agent
           image: ghcr.io/spiffe/spire-agent:1.9.6
@@ -91,6 +53,29 @@ spec:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
+
+        # Fetches the signed trust bundle JWT from the signer-http service,
+        # verifies the TPM signature against /etc/spire/server-bundle-signing.pub
+        # (written out-of-band by provision-tpm-devid.sh — not from Kubernetes),
+        # and serves the verified bundle via Unix socket to the SPIRE agent.
+        # If not ready when agent starts, agent restarts and finds it ready.
+        - name: verifier
+          image: docker.io/library/busybox:1.36
+          command: ["/usr/local/bin/spire-server-attestor-tpm-verifier",
+                    "/etc/spire-sat/verifier.conf"]
+          volumeMounts:
+            - name: verifier-binary
+              mountPath: /usr/local/bin/spire-server-attestor-tpm-verifier
+              subPath: spire-server-attestor-tpm-verifier
+              readOnly: true
+            - name: verifier-config
+              mountPath: /etc/spire-sat
+              readOnly: true
+            - name: spire-devid
+              mountPath: /etc/spire
+              readOnly: true
+            - name: verifier-socket-dir
+              mountPath: /var/run/spire/server-attestor-tpm
 
       volumes:
         - name: spire-config
