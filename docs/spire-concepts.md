@@ -638,30 +638,100 @@ proof. If that policy is ever violated — through a compromised ServiceAccount,
 misconfigured RBAC rule, or a cluster-admin mistake — the agent cannot detect it. The
 `spire` namespace is the security boundary, not individual workloads.
 
-### TPM-Based Server Attestation (the fix)
+### TPM-Based Server Attestation (the fix — implemented 2026-07-09)
 
-The `spiffe/spire-server-attestor-tpm` project closes this gap by giving agents a
-cryptographic way to verify the server's identity before accepting its bundle.
+The `spiffe/spire-server-attestor-tpm` project (v0.0.4, April 2025) closes this gap.
+It provides four binaries that together give agents a cryptographic way to verify the
+server before accepting its bundle.
 
-The approach:
+#### Components
 
-- The SPIRE server signs the trust bundle with a key held in its own TPM
-- The agent, during bootstrap, verifies that signature against the server's TPM public
-  key, which was enrolled out-of-band during provisioning
-- Only if the signature is valid does the agent accept the bundle and proceed to attest
+| Binary | Role | Runs on |
+|--------|------|---------|
+| `spire-server-attestor-tpm-sign` | SPIRE `BundlePublisher` plugin; receives the trust bundle from the server and pushes it to the signer | SPIRE server pod (sidecar) |
+| `spire-server-attestor-tpm-signer-unix` | Root daemon with TPM access; signs the bundle using the server's TPM key; writes signed bundle to disk; serves via Unix socket | SPIRE server pod (sidecar, `/dev/tpmrm0` mounted) |
+| `spire-server-attestor-tpm-signer-http` | Non-root HTTP service; serves the signed bundle over HTTP so agents can fetch it | SPIRE server pod (sidecar, exposed as Kubernetes Service) |
+| `spire-server-attestor-tpm-verifier` | Agent-side daemon; fetches the signed bundle from the HTTP endpoint; verifies the signature; serves the verified bundle via Unix socket to the SPIRE agent | SPIRE agent pod (sidecar) |
 
-This makes both directions hardware-rooted:
-- **Agent → Server trust:** verified by TPM signature on the bundle before connection
-- **Server → Agent trust:** verified by `tpm_devid` credential activation challenge
+#### Data Flow
 
-The server's TPM is already available: `spire-server-0` runs on ipc4, which has a
-Nuvoton NPCT75x TPM with a valid EK cert. The server could be provisioned with a DevID
-cert using the same `scripts/provision-tpm-devid.sh` script used for the agents.
+```
+SPIRE server
+  |  (trust bundle updated)
+  v
+sign plugin  --pushes bundle-->  signer-unix (signs with server TPM key)
+                                     |
+                                     v
+                                signer-http  --HTTP-->  [Kubernetes Service]
+                                                              |
+                              +-------------------------------+
+                              |  (each agent node)
+                              v
+                         verifier  (fetches + verifies signature)
+                              |
+                              v  (Unix socket)
+                         SPIRE agent  (gets verified trust bundle)
+```
 
-**Current state:** `spiffe/spire-server-attestor-tpm` was at v0.0.4 (April 2025) and
-described as development-phase. It is the right architectural direction but not yet
-production-ready. Implementing it would be the next step after the current `tpm_devid`
-work to achieve fully symmetric hardware-rooted trust.
+#### Why This Breaks the Circular Trust
+
+The verifier must verify the HTTP bundle before the SPIRE agent accepts it. The
+verification requires the server's TPM public key. That public key is NOT fetched from
+Kubernetes — it is written to `/etc/spire/server-bundle-signing.pub` on each agent node
+during physical provisioning (by `scripts/provision-tpm-devid.sh`), before any SPIRE
+component starts.
+
+This is the out-of-band anchor. An attacker who compromises the Kubernetes control plane
+and rewrites the `spire-bundle` ConfigMap or the signer-http response still cannot
+produce a valid signature over the substituted bundle because:
+
+- Producing the signature requires the server's TPM private key
+- That private key never leaves ipc4's TPM chip
+- The verifier checks the signature before the SPIRE agent accepts anything
+- Signature check fails → agent rejects the bundle → does not connect to the rogue server
+
+The server's TPM public key on the agent nodes is the cryptographic root of the entire
+bootstrap chain. It is distributed through the same physical provisioning channel as the
+agent's own DevID material, not through Kubernetes.
+
+#### Server TPM Key (separate from DevID)
+
+A dedicated **bundle-signing key** is provisioned on ipc4's TPM, separate from the
+agent's DevID key. Key separation is important: the DevID key is used for SPIRE agent
+attestation; the bundle-signing key is used only to authenticate the trust bundle to
+agents. Different purposes, different keys, both TPM-bound.
+
+The bundle-signing key uses TPM handle `0x81008006` (the handle recommended by the
+project). It is created under the Owner hierarchy (same as DevID keys) with RSA 2048 and
+`rsassa` signing scheme.
+
+#### Integration for This Cluster
+
+Because our SPIRE server and agents run as Kubernetes pods rather than systemd services,
+the components are adapted as pod sidecars:
+
+- `signer-unix` and `signer-http` run as sidecar containers in the `spire-server`
+  StatefulSet pod. `signer-unix` has `/dev/tpmrm0` mounted.
+- The `sign` plugin binary is available to the SPIRE server container via a shared
+  emptyDir volume populated by an init container.
+- The HTTP endpoint is exposed as a ClusterIP Kubernetes Service.
+- `verifier` runs as a sidecar container in the `spire-agent` DaemonSet pod. It reads
+  the server's public key from `/etc/spire/server-bundle-signing.pub` (on the node
+  filesystem, written during provisioning).
+- The SPIRE agent uses `trust_bundle_unix_socket` (pointing to the verifier's socket)
+  instead of `trust_bundle_path` (the ConfigMap). The `init-bundle` init container is
+  removed — the verifier replaces it.
+- `scripts/provision-tpm-devid.sh` is extended to also write
+  `/etc/spire/server-bundle-signing.pub` on every agent node.
+
+#### Resulting Security Posture
+
+| Direction | Before (k8s_psat era) | After tpm_devid | After server attestation |
+|-----------|----------------------|-----------------|--------------------------|
+| Server trusts agent | Kubernetes TokenReview (policy) | TPM credential activation (hardware) | TPM credential activation (hardware) |
+| Agent trusts server | ConfigMap (unauthenticated) | ConfigMap (unauthenticated) | TPM signature on bundle (hardware) |
+| Attacker must compromise | RBAC policy | Physical TPM on agent node | Physical TPM on both ipc4 AND agent node |
+| Can agent detect rogue server? | No | No | Yes — signature check fails |
 
 ### Vault Integration via JWT SVID
 
