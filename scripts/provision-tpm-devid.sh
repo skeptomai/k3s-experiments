@@ -93,7 +93,7 @@ tpm2_create \
   -u \${TPM_DIR}/devid.pub \
   -Q
 
-# Load key into TPM and persist to NV handle so tpm2-openssl can reference it
+# Load key into TPM (tpm2_load expects TPM2B_PUBLIC with 2-byte size prefix)
 tpm2_load -C /tmp/tpm_primary.ctx -r \${TPM_DIR}/devid.priv -u \${TPM_DIR}/devid.pub -c /tmp/devid.ctx -Q
 # Evict any stale handle at this address before persisting
 tpm2_evictcontrol -C o -c \${DEVID_HANDLE} 2>/dev/null || true
@@ -111,6 +111,12 @@ openssl req \
 
 # Evict the persistent handle — SPIRE uses the blob files, not the handle
 tpm2_evictcontrol -C o -c \${DEVID_HANDLE} -Q
+
+# tpm2_create -u outputs TPM2B_PUBLIC (2-byte size prefix + TPMT_PUBLIC).
+# SPIRE's tpm2.DecodePublic expects raw TPMT_PUBLIC — strip the prefix now
+# that tpm2_load (which needs the full TPM2B_PUBLIC) is done.
+dd if=\${TPM_DIR}/devid.pub bs=1 skip=2 of=\${TPM_DIR}/devid.pub.tpmt 2>/dev/null \
+  && mv \${TPM_DIR}/devid.pub.tpmt \${TPM_DIR}/devid.pub
 
 # Export public key PEM for reference only (not used by SPIRE)
 tpm2_readpublic -c /tmp/devid.ctx -f PEM -o \${TPM_DIR}/devid_pubkey.pem -Q 2>/dev/null || true
