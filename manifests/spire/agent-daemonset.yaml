@@ -24,7 +24,7 @@ spec:
         # Replaces the unauthenticated spire-bundle ConfigMap bootstrap path.
         # Exits 1 and blocks agent startup if the signature is invalid.
         - name: verify-bundle
-          image: docker.io/library/python:3.12-alpine
+          image: docker.io/library/ubuntu:22.04
           command: ["python3", "/scripts/verify-bundle.py"]
           volumeMounts:
             - name: verifier-script
