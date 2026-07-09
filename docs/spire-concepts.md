@@ -55,6 +55,60 @@ software. It defines:
 **SPIRE** is the reference implementation of SPIFFE: a server that acts as a CA and a
 registration database, plus per-node agents that handle attestation and SVID issuance.
 
+### What Is an SVID, and Who Is Attesting to Whom?
+
+An SVID is an **identity document**, not a safety certificate. The analogy is a passport:
+a passport doesn't say "this person is trustworthy" — it says "this person is who they
+claim to be, and a government vouches for that." What the receiving party does with that
+identity is their own business.
+
+This distinction matters because attestation flows in multiple directions simultaneously.
+Here is the full chain as implemented on this cluster:
+
+**0. Agent trusts the server (TPM-signed bundle)**
+Before the SPIRE agent starts, the `verify-bundle` init container fetches the trust bundle
+JWT from the `spire-bundle-signing` service, verifies the RS256 signature against
+`/etc/spire/server-bundle-signing.pub` — the server's TPM public key written to the node
+during physical provisioning — and only writes the bundle to disk if the signature is
+valid. The agent will not start if this check fails. This means the agent's trust in the
+server is rooted in the server's hardware TPM, not in Kubernetes infrastructure.
+
+**1. Server trusts the agent (TPM DevID credential activation)**
+The agent sends its DevID certificate (signed by the cluster DevID CA) and proves it holds
+the corresponding private key by signing a server-issued nonce. The server then performs a
+credential activation challenge using the node's EK public key: it encrypts a secret so
+that only the TPM holding the EK can decrypt it, and only if the DevID key is also loaded
+in that same TPM. The agent's TPM decrypts and returns the secret. Both proofs together —
+key possession and TPM residency — satisfy the server that the agent is running on a real,
+enrolled node.
+
+**2. Agent attests the workload (SO_PEERCRED + kubelet)**
+When a workload process connects to `agent.sock`, the agent reads `SO_PEERCRED` from the
+Unix socket to get the caller's host PID, walks `/proc/<pid>/cgroup` to extract the
+container ID, and calls the kubelet API to get the pod's namespace, service account, and
+labels. The workload never claims its own identity — the agent determines it by
+observation, from outside the workload.
+
+**3. Server issues an SVID to the workload via the agent**
+The agent presents the observed workload identity to the server. If it matches a
+registration entry, the server signs an X.509 SVID and returns it to the agent, which
+hands it to the waiting workload process.
+
+**4. Workload presents the SVID to a peer**
+The workload now has a cryptographically-signed identity document. When it connects to
+another service — `mtls-server`, Vault, an API gateway — it presents the SVID as its TLS
+client certificate.
+
+**5. Peer verifies against the trust bundle**
+The receiving service verifies the SVID's signature against the SPIRE CA trust bundle.
+No pre-shared secrets, no sidecar injection of credentials, no service-specific token. If
+the signature checks out and the SPIFFE ID matches an access policy, the connection is
+accepted.
+
+Steps 0–3 are handled entirely by SPIRE. Steps 4–5 are between the workload and whatever
+it is talking to; SPIRE's job is to get a cryptographically-grounded identity into the
+workload's hands without the workload needing to manage secrets itself.
+
 ---
 
 ## Node Attestation
