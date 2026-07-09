@@ -112,11 +112,11 @@ openssl req \
 # Evict the persistent handle — SPIRE uses the blob files, not the handle
 tpm2_evictcontrol -C o -c \${DEVID_HANDLE} -Q
 
-# tpm2_create -u outputs TPM2B_PUBLIC (2-byte size prefix + TPMT_PUBLIC).
-# SPIRE's tpm2.DecodePublic expects raw TPMT_PUBLIC — strip the prefix now
-# that tpm2_load (which needs the full TPM2B_PUBLIC) is done.
-dd if=\${TPM_DIR}/devid.pub bs=1 skip=2 of=\${TPM_DIR}/devid.pub.tpmt 2>/dev/null \
-  && mv \${TPM_DIR}/devid.pub.tpmt \${TPM_DIR}/devid.pub
+# tpm2_create outputs TPM2B_PUBLIC/TPM2B_PRIVATE (2-byte size prefix + payload).
+# SPIRE's go-tpm library adds the prefix itself via U16Bytes(), so the files
+# must contain raw payload only. Strip both prefixes now that tpm2_load is done.
+dd if=\${TPM_DIR}/devid.pub  bs=1 skip=2 of=\${TPM_DIR}/devid.pub.raw  2>/dev/null && mv \${TPM_DIR}/devid.pub.raw  \${TPM_DIR}/devid.pub
+dd if=\${TPM_DIR}/devid.priv bs=1 skip=2 of=\${TPM_DIR}/devid.priv.raw 2>/dev/null && mv \${TPM_DIR}/devid.priv.raw \${TPM_DIR}/devid.priv
 
 # Export public key PEM for reference only (not used by SPIRE)
 tpm2_readpublic -c /tmp/devid.ctx -f PEM -o \${TPM_DIR}/devid_pubkey.pem -Q 2>/dev/null || true
