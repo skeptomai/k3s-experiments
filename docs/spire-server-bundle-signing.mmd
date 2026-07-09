@@ -1,50 +1,50 @@
 flowchart TD
     subgraph server_pod["spire-server-0 pod  (ipc4)"]
         SS["SPIRE Server\n(main container)"]
-        SIGN["spire-server-attestor-tpm-sign\n(BundlePublisher plugin)"]
-        SIGNER["spire-server-attestor-tpm-signer-unix\n(sidecar — root, /dev/tpmrm0 mounted)"]
-        HTTP["spire-server-attestor-tpm-signer-http\n(sidecar — non-root)"]
-        TPM_SERVER["Server TPM\n/dev/tpmrm0\nbundle-signing key\nhandle 0x81008006"]
+        SIGN["spire-server-attestor-tpm-sign\n(BundlePublisher plugin — hostPath binary)"]
+        SIGNER["spire-server-attestor-tpm-signer-unix\n(sidecar — root, /dev/tpmrm0 mounted — hostPath binary)"]
+        HTTP["nginx:alpine\n(bundle-http sidecar — port 8181)"]
+        TPM_SERVER["Server TPM  /dev/tpmrm0\nbundle-signing key  handle 0x81008006"]
     end
 
     subgraph k8s_infra["Kubernetes Infrastructure"]
-        SVC["signer-http\nClusterIP Service"]
-        BUNDLE_CM["spire-bundle ConfigMap\n(REPLACED — no longer the trust anchor)"]
+        SVC["spire-bundle-signing\nClusterIP Service  port 80→8181"]
+        BUNDLE_CM["spire-bundle ConfigMap\n(maintained by k8sbundle Notifier\nbut NOT used for agent bootstrap)"]
     end
 
-    subgraph agent_pod["spire-agent pod  (each node)"]
-        VERIFIER["spire-server-attestor-tpm-verifier\n(sidecar)"]
-        SA["SPIRE Agent\n(main container)"]
-        SERVER_PUB["server-bundle-signing.pub\n(from /etc/spire/ — written at provisioning)"]
+    subgraph agent_pod["spire-agent pod  (each node)  — init container runs first"]
+        VERIFIER["verify-bundle init container\n(python:3.12 / openssl)\nexits 0 on valid signature, 1 on failure"]
+        SA["SPIRE Agent\n(main container)\ntrust_bundle_path = /run/spire/verified-bundle/bundle.crt"]
+        SERVER_PUB["server-bundle-signing.pub\n(from /etc/spire/ — PEM RSA public key\nwritten at provisioning — NOT from Kubernetes)"]
+        EBUNDLE["verified-bundle emptyDir\n/run/spire/verified-bundle/bundle.crt"]
     end
 
     subgraph provisioning["Out-of-band Provisioning  (omen)"]
-        PROV["provision-tpm-devid.sh\n(also writes server public key\nto /etc/spire/ on each agent node)"]
+        PROV["provision-tpm-devid.sh\nreads PEM from ipc4 TPM 0x81008006\nwrites to /etc/spire/ on each node"]
     end
 
     SS -->|"bundle updated"| SIGN
     SIGN -->|"push bundle\n(Unix socket)"| SIGNER
-    SIGNER -->|"sign with TPM key"| TPM_SERVER
-    TPM_SERVER -->|"signature"| SIGNER
-    SIGNER -->|"signed bundle\nto disk"| HTTP
-    HTTP -->|"serve signed bundle\nover HTTP"| SVC
+    SIGNER -->|"sign with TPM key\n(RSASSA-PKCS1-v1.5 / SHA-256)"| TPM_SERVER
+    TPM_SERVER -->|"RS256 signature"| SIGNER
+    SIGNER -->|"write signed JWT\n(spiffetrustbundle.token)"| HTTP
+    HTTP -->|"serve over HTTP"| SVC
 
-    SVC -->|"fetch signed bundle"| VERIFIER
-    SERVER_PUB -->|"verify signature\nagainst enrolled key"| VERIFIER
-    VERIFIER -->|"verified trust bundle\n(Unix socket)"| SA
+    SVC -->|"fetch signed JWT"| VERIFIER
+    SERVER_PUB -->|"verify RS256 signature\n(openssl dgst -sha256 -verify)"| VERIFIER
+    VERIFIER -->|"write verified CA PEM\n(exits 0 — agent then starts)"| EBUNDLE
+    EBUNDLE -->|"read as trust_bundle_path"| SA
 
-    PROV -->|"writes server public key\nbefore SPIRE starts"| SERVER_PUB
-
-    note1["Key insight:\nSERVER_PUB arrives via provisioning\nnot via Kubernetes\n→ breaks circular trust"]
+    PROV -->|"writes PEM public key\nbefore SPIRE starts"| SERVER_PUB
 
     style SS fill:#1a6b8a,color:#fff
     style SIGN fill:#1a6b8a,color:#fff
     style SIGNER fill:#7d3c98,color:#fff
     style HTTP fill:#7d3c98,color:#fff
     style TPM_SERVER fill:#7d3c98,color:#fff
-    style VERIFIER fill:#1a6b8a,color:#fff
+    style VERIFIER fill:#2c7a2c,color:#fff
     style SA fill:#1a6b8a,color:#fff
     style SERVER_PUB fill:#6e2c00,color:#fff
+    style EBUNDLE fill:#2c3e50,color:#fff
     style PROV fill:#6e2c00,color:#fff
     style BUNDLE_CM fill:#7f8c8d,color:#fff
-    style note1 fill:#f9e79f,color:#000

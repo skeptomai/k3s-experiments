@@ -39,7 +39,7 @@ graph TD
 
         subgraph spire_infra["SPIRE Infrastructure (spire namespace)"]
             NFS["NFS PVC\nSQLite datastore\n+ CA keys"]
-            BUNDLE["spire-bundle ConfigMap\n(SPIRE CA certificate)\nwritten by k8sbundle notifier"]
+            BUNDLE["spire-bundle ConfigMap\n(k8sbundle notifier output\nnot used for agent bootstrap)"]
         end
     end
 
@@ -51,14 +51,6 @@ graph TD
     %% server storage
     SS --- NFS
     SS --->|"writes CA cert"| BUNDLE
-
-    %% agents bootstrap trust from bundle
-    BUNDLE -.->|"mount: trust bundle"| SA4
-    BUNDLE -.->|"mount: trust bundle"| SA5
-    BUNDLE -.->|"mount: trust bundle"| SA6
-    BUNDLE -.->|"mount: trust bundle"| SA7
-    BUNDLE -.->|"mount: trust bundle"| SA8
-    BUNDLE -.->|"mount: trust bundle"| SA9
 
     %% each agent uses its node's TPM
     TPM4 -->|"DevID blobs"| SA4
@@ -102,7 +94,7 @@ graph TD
     style TPM8 fill:#7d3c98,color:#fff
     style TPM9 fill:#7d3c98,color:#fff
     style NFS fill:#2c3e50,color:#fff
-    style BUNDLE fill:#2c3e50,color:#fff
+    style BUNDLE fill:#7f8c8d,color:#fff
     style DEVID_CA fill:#6e2c00,color:#fff
     style EK_BUNDLE fill:#6e2c00,color:#fff
     style WL4 fill:#27ae60,color:#fff

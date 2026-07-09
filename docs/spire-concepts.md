@@ -524,15 +524,14 @@ from the SHA-1 fingerprint of its DevID certificate:
 
 | Node | SPIFFE ID (agent) |
 |------|-------------------|
-| ipc4 | `spiffe://ipc.local/spire/agent/tpm_devid/42a1e85ad43b4c136b83573d0b4ac60b93306ee6` |
-| ipc5 | `spiffe://ipc.local/spire/agent/tpm_devid/78d5a22ca1d23e1fcf7e18258bcdfc341167eeac` |
-| ipc6 | `spiffe://ipc.local/spire/agent/tpm_devid/8cbaa975848b0c844f7a3197f6240c35ad060f58` |
-| ipc7 | `spiffe://ipc.local/spire/agent/tpm_devid/31dc39d59d115c652b1d46e9f5b8dd2deebb799e` |
-| ipc8 | `spiffe://ipc.local/spire/agent/tpm_devid/4acd537f6b1e99624917a59bce683559d04aa04e` |
-| ipc9 | `spiffe://ipc.local/spire/agent/tpm_devid/f5d3754a4cf4c0f65caeb3ae027e9f03d24c5019` |
+| ipc4 | `spiffe://ipc.local/spire/agent/tpm_devid/25a1f67bfc2a6dc830de61d8dd2b5e788593864d` |
+| ipc5 | `spiffe://ipc.local/spire/agent/tpm_devid/37bec218b1f39af8e7db42f04d710a3a73f0cca5` |
+| ipc6 | `spiffe://ipc.local/spire/agent/tpm_devid/ab96c7507b860042e3711446552e8d2eb5374476` |
+| ipc7 | `spiffe://ipc.local/spire/agent/tpm_devid/8b84df1549516ddba24415505b989fbb9cea49a9` |
+| ipc8 | `spiffe://ipc.local/spire/agent/tpm_devid/27bd47f544c71bd8ed20ec07c546a225f514375a` |
+| ipc9 | `spiffe://ipc.local/spire/agent/tpm_devid/dd04bfbf9dbfb604b0fdc1bf1d42d03e73788417` |
 
-**Registration entries** updated: the old node alias entry (selector `k8s_psat:cluster:ipc`)
-was deleted and replaced with a new one:
+**Registration entries** updated: a new node alias entry was added alongside the existing `k8s_psat` entry:
 ```
 SPIFFE ID: spiffe://ipc.local/k8s-node
 Parent:    spiffe://ipc.local/spire/server
@@ -696,15 +695,11 @@ the components are adapted as pod sidecars:
 
 - `signer-unix` and `signer-http` run as sidecar containers in the `spire-server`
   StatefulSet pod. `signer-unix` has `/dev/tpmrm0` mounted.
-- The `sign` plugin binary is available to the SPIRE server container via a shared
-  emptyDir volume populated by an init container.
+- The `sign` plugin binary is a hostPath volume mounted from `/usr/local/bin/spire-server-attestor-tpm-sign` on ipc4 (the server node). Similarly, the `signer-unix` binary is mounted from `/usr/local/bin/spire-server-attestor-tpm-signer-unix`.
 - The HTTP endpoint is exposed as a ClusterIP Kubernetes Service.
-- `verifier` runs as a sidecar container in the `spire-agent` DaemonSet pod. It reads
-  the server's public key from `/etc/spire/server-bundle-signing.pub` (on the node
-  filesystem, written during provisioning).
-- The SPIRE agent uses `trust_bundle_unix_socket` (pointing to the verifier's socket)
-  instead of `trust_bundle_path` (the ConfigMap). The `init-bundle` init container is
-  removed — the verifier replaces it.
+- Instead of the `verifier` binary, a `verify-bundle` **init container** (`docker.io/library/python:3.12`) runs the verification at agent pod startup. It fetches the signed JWT from the `spire-bundle-signing` ClusterIP Service (the nginx sidecar), verifies the RS256 signature using `openssl dgst -sha256 -verify` against `/etc/spire/server-bundle-signing.pub`, extracts the `spiffetb` payload, and writes it to `/run/spire/verified-bundle/bundle.crt` on a shared `emptyDir` volume. The agent pod does not start until this init container exits 0.
+- The SPIRE agent uses `trust_bundle_path = "/run/spire/verified-bundle/bundle.crt"` (the emptyDir written by the init container) instead of the unauthenticated `spire-bundle` ConfigMap.
+- The `bundle-http` sidecar in the server pod is **nginx:alpine** (not the dedicated `signer-http` binary from the project). nginx serves `/var/spire/signed-bundle/` on port 8181; the ConfigMap `spire-signer-unix-config` contains both the signer-unix config and an nginx vhost config with `Cache-Control: no-store`.
 - `scripts/provision-tpm-devid.sh` is extended to also write
   `/etc/spire/server-bundle-signing.pub` on every agent node.
 
@@ -753,10 +748,11 @@ This replaces Vault's Kubernetes auth method with a stronger, SPIFFE-native iden
 | Setting | Value |
 |---------|-------|
 | Trust domain | `ipc.local` |
-| Node attestor | `k8s_psat`, cluster: `ipc`, allowed SA: `spire:spire-agent` |
+| Node attestor | `tpm_devid`; DevID CA: `config/tpm/devid-ca.pem`; EK CA bundle: `config/tpm/endorsement-ca-bundle.pem` |
 | Key manager | Disk (`/run/spire/data/keys.json`) |
 | Datastore | SQLite3 (`/run/spire/data/datastore.sqlite3`) |
 | Notifier | `k8s_bundle` → ConfigMap `spire-bundle` |
+| BundlePublisher | `tpm-sign` plugin → signer-unix socket; frequency 5m |
 | gRPC port | 8081 |
 | Health port | 8080 (`/live`, `/ready`) |
 
@@ -766,9 +762,9 @@ This replaces Vault's Kubernetes auth method with a stronger, SPIFFE-native iden
 |---------|-------|
 | Trust domain | `ipc.local` |
 | Server | `spire-server:8081` |
-| Trust bundle | `/run/spire/bundle/bundle.crt` |
+| Trust bundle | `/run/spire/verified-bundle/bundle.crt` (emptyDir written by `verify-bundle` init container) |
 | Workload API socket | `/run/spire/sockets/agent.sock` |
-| Node attestor | `k8s_psat`, cluster: `ipc` |
+| Node attestor | `tpm_devid`; DevID blobs from `/etc/spire/`; `/dev/tpmrm0` |
 | Workload attestor | `k8s`, `skip_kubelet_verification: true`, `use_new_container_locator: true` |
 | Key manager | Memory |
 | Health port | 8080 |
