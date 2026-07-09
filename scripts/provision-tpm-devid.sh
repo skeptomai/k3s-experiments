@@ -87,7 +87,7 @@ tpm2_createprimary \
 tpm2_create \
   -C /tmp/tpm_primary.ctx \
   -g sha256 \
-  -G rsa \
+  -G "rsa:rsassa" \
   -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|sign" \
   -r \${TPM_DIR}/devid.priv \
   -u \${TPM_DIR}/devid.pub \
