@@ -13,6 +13,10 @@ attestation). Exposes the Workload API at `/run/spire/sockets/agent.sock` as a h
 volume. Each agent bootstraps trust using the `spire-bundle` ConfigMap, which the server
 populates with its CA cert via the `k8s_bundle` notifier.
 
+### Cluster Architecture
+
+![SPIRE cluster architecture — nodes, agents, server, TPMs, and workloads](spire-architecture.png)
+
 ---
 
 ## SPIFFE and SPIRE — the Concepts
@@ -54,6 +58,14 @@ identity (AWS EC2 instance identity documents, GCP GCE tokens, etc.), and no
 pre-provisioned join token — PSAT is the right choice for bare-metal Kubernetes. The
 trust root is "Kubernetes itself validated this token."
 
+> **Note:** this cluster has been upgraded to TPM DevID node attestation (`tpm_devid`).
+> The k8s_psat description above is retained as conceptual background; the actual
+> implementation uses the hardware TPM and is documented in the TPM Attestation sections.
+
+### TPM DevID Node Attestation Flow
+
+![TPM DevID node attestation sequence](spire-node-attestation-tpm.png)
+
 ---
 
 ## Workload Attestation
@@ -88,6 +100,10 @@ Two Pelagos bugs affected SPIRE workload attestation on this cluster:
 | 32-char container IDs (#301) | SPIRE regex expected 64-char hex; attestation failed | v0.65.8 |
 
 Both are fixed in the running version (v0.65.47).
+
+### Workload Attestation Flow
+
+![Workload attestation flow](spire-workload-attestation-flow.png)
 
 ---
 

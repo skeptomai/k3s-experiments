@@ -1,0 +1,113 @@
+graph TD
+    subgraph cluster["ipc Kubernetes Cluster — trust domain: ipc.local"]
+        subgraph cp["Control-Plane + Worker Nodes (ipc4 – ipc6)"]
+            subgraph ipc4box["ipc4  ·  Nuvoton NPCT75x TPM"]
+                SS["spire-server-0\n(StatefulSet)"]
+                SA4["spire-agent\n(DaemonSet)"]
+                TPM4["TPM\n/dev/tpmrm0\nDevID key + cert\nat /etc/spire/"]
+                WL4["workload pods\n(spire-demo, mtls-demo, …)"]
+            end
+            subgraph ipc5box["ipc5  ·  Nuvoton NPCT75x TPM"]
+                SA5["spire-agent\n(DaemonSet)"]
+                TPM5["TPM\n/dev/tpmrm0\nDevID key + cert"]
+                WL5["workload pods"]
+            end
+            subgraph ipc6box["ipc6  ·  Nuvoton NPCT75x TPM"]
+                SA6["spire-agent\n(DaemonSet)"]
+                TPM6["TPM\n/dev/tpmrm0\nDevID key + cert"]
+                WL6["workload pods"]
+            end
+        end
+
+        subgraph workers["Worker Nodes (ipc7 – ipc9)"]
+            subgraph ipc7box["ipc7  ·  Nuvoton NPCT75x TPM"]
+                SA7["spire-agent\n(DaemonSet)"]
+                TPM7["TPM\n/dev/tpmrm0\nDevID key + cert"]
+                WL7["workload pods"]
+            end
+            subgraph ipc8box["ipc8  ·  Infineon SLB9672 TPM"]
+                SA8["spire-agent\n(DaemonSet)"]
+                TPM8["TPM\n/dev/tpmrm0\nDevID key + cert"]
+                WL8["workload pods"]
+            end
+            subgraph ipc9box["ipc9  ·  Infineon SLB9672 TPM"]
+                SA9["spire-agent\n(DaemonSet)"]
+                TPM9["TPM\n/dev/tpmrm0\nDevID key + cert"]
+                WL9["workload pods"]
+            end
+        end
+
+        subgraph spire_infra["SPIRE Infrastructure (spire namespace)"]
+            NFS["NFS PVC\nSQLite datastore\n+ CA keys"]
+            BUNDLE["spire-bundle ConfigMap\n(SPIRE CA certificate)\nwritten by k8sbundle notifier"]
+        end
+    end
+
+    subgraph pki["Offline PKI  (omen / 1Password)"]
+        DEVID_CA["DevID CA\nEC P-256\nconfig/tpm/devid-ca.pem\nprivate key in 1Password"]
+        EK_BUNDLE["EK CA Bundle\nNuvoton + Infineon chains\nconfig/tpm/endorsement-ca-bundle.pem"]
+    end
+
+    %% server storage
+    SS --- NFS
+    SS --->|"writes CA cert"| BUNDLE
+
+    %% agents bootstrap trust from bundle
+    BUNDLE -.->|"mount: trust bundle"| SA4
+    BUNDLE -.->|"mount: trust bundle"| SA5
+    BUNDLE -.->|"mount: trust bundle"| SA6
+    BUNDLE -.->|"mount: trust bundle"| SA7
+    BUNDLE -.->|"mount: trust bundle"| SA8
+    BUNDLE -.->|"mount: trust bundle"| SA9
+
+    %% each agent uses its node's TPM
+    TPM4 -->|"DevID blobs"| SA4
+    TPM5 -->|"DevID blobs"| SA5
+    TPM6 -->|"DevID blobs"| SA6
+    TPM7 -->|"DevID blobs"| SA7
+    TPM8 -->|"DevID blobs"| SA8
+    TPM9 -->|"DevID blobs"| SA9
+
+    %% agents attest to server
+    SA4 -->|"tpm_devid attestation\n(gRPC :8081)"| SS
+    SA5 -->|"tpm_devid attestation"| SS
+    SA6 -->|"tpm_devid attestation"| SS
+    SA7 -->|"tpm_devid attestation"| SS
+    SA8 -->|"tpm_devid attestation"| SS
+    SA9 -->|"tpm_devid attestation"| SS
+
+    %% workloads get SVIDs via local agent socket
+    WL4 -->|"Workload API\nagent.sock"| SA4
+    WL5 -->|"Workload API\nagent.sock"| SA5
+    WL6 -->|"Workload API\nagent.sock"| SA6
+    WL7 -->|"Workload API\nagent.sock"| SA7
+    WL8 -->|"Workload API\nagent.sock"| SA8
+    WL9 -->|"Workload API\nagent.sock"| SA9
+
+    %% server uses offline PKI material
+    DEVID_CA -.->|"devid_ca_path\n(spire-tpm-ca ConfigMap)"| SS
+    EK_BUNDLE -.->|"endorsement_ca_path\n(spire-tpm-ca ConfigMap)"| SS
+
+    style SS fill:#1a6b8a,color:#fff
+    style SA4 fill:#1a6b8a,color:#fff
+    style SA5 fill:#1a6b8a,color:#fff
+    style SA6 fill:#1a6b8a,color:#fff
+    style SA7 fill:#1a6b8a,color:#fff
+    style SA8 fill:#1a6b8a,color:#fff
+    style SA9 fill:#1a6b8a,color:#fff
+    style TPM4 fill:#7d3c98,color:#fff
+    style TPM5 fill:#7d3c98,color:#fff
+    style TPM6 fill:#7d3c98,color:#fff
+    style TPM7 fill:#7d3c98,color:#fff
+    style TPM8 fill:#7d3c98,color:#fff
+    style TPM9 fill:#7d3c98,color:#fff
+    style NFS fill:#2c3e50,color:#fff
+    style BUNDLE fill:#2c3e50,color:#fff
+    style DEVID_CA fill:#6e2c00,color:#fff
+    style EK_BUNDLE fill:#6e2c00,color:#fff
+    style WL4 fill:#27ae60,color:#fff
+    style WL5 fill:#27ae60,color:#fff
+    style WL6 fill:#27ae60,color:#fff
+    style WL7 fill:#27ae60,color:#fff
+    style WL8 fill:#27ae60,color:#fff
+    style WL9 fill:#27ae60,color:#fff

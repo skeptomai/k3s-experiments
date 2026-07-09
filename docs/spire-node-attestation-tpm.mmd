@@ -1,0 +1,47 @@
+sequenceDiagram
+    participant TPM as TPM Chip<br/>(hardware)
+    participant Agent as SPIRE Agent<br/>(spire-agent pod)
+    participant Server as SPIRE Server<br/>(spire-server-0)
+    participant DevIDCA as DevID CA<br/>(offline / ConfigMap)
+    participant EKCA as EK CA Bundle<br/>(Nuvoton / Infineon)
+
+    Note over Agent: Startup: load DevID material from /etc/spire/
+
+    Agent->>TPM: CreatePrimary(Owner hierarchy, SRKTemplateHighRSA)
+    TPM-->>Agent: SRK handle (deterministic — same params = same key)
+
+    Agent->>TPM: Load(SRK, devid.priv, devid.pub)
+    TPM-->>Agent: DevID key handle
+
+    Note over Agent,Server: Phase 1 — Proof of Key Possession
+
+    Agent->>Server: AttestationRequest(devid.crt, signed nonce)
+    Server->>DevIDCA: Verify devid.crt chain → ipc-cluster DevID CA
+    DevIDCA-->>Server: chain valid ✓
+
+    Note over Agent,Server: Phase 2 — Proof of TPM Residency (Credential Activation)
+
+    Server->>TPM: Fetch EK public key (read from EK cert in devid.crt or directly)
+    Server->>EKCA: Verify EK cert chain → Nuvoton / Infineon manufacturer CA
+    EKCA-->>Server: EK cert valid — hardware is a genuine TPM ✓
+
+    Server->>Server: MakeCredential(EK pub, DevID key name, random secret)
+    Note right of Server: Encrypted blob can only be decrypted<br/>by the TPM holding the EK,<br/>and only if the DevID key is loaded<br/>in that same TPM
+
+    Server-->>Agent: CredentialActivation challenge (encrypted blob)
+
+    Agent->>TPM: ActivateCredential(EK handle, DevID handle, blob)
+    Note right of TPM: TPM decrypts using EK.<br/>Succeeds only if DevID key<br/>is loaded in this TPM.
+    TPM-->>Agent: decrypted secret
+
+    Agent->>Server: Return decrypted secret
+
+    Server->>Server: secret matches → both proofs satisfied
+
+    Note over Agent,Server: Attestation complete
+
+    Server-->>Agent: Node SVID<br/>spiffe://ipc.local/spire/agent/tpm_devid/<sha1>
+
+    Agent->>Agent: Store Node SVID<br/>Open mTLS connection to server<br/>Sync registration entries
+
+    Note over Agent: Agent is now ready to serve<br/>the Workload API on agent.sock
