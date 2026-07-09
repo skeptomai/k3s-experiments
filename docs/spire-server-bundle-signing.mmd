@@ -3,7 +3,7 @@ flowchart TD
         SS["SPIRE Server\n(main container)"]
         SIGN["spire-server-attestor-tpm-sign\n(BundlePublisher plugin — hostPath binary)"]
         SIGNER["spire-server-attestor-tpm-signer-unix\n(sidecar — root, /dev/tpmrm0 mounted — hostPath binary)"]
-        HTTP["nginx:alpine\n(bundle-http sidecar — port 8181)\nserves /var/spire/signed-bundle/"]
+        HTTP["busybox httpd\n(bundle-http sidecar — port 8181)\nserves /var/spire/signed-bundle/"]
         TPM_SERVER["Server TPM  /dev/tpmrm0\nbundle-signing key  handle 0x81008006"]
     end
 

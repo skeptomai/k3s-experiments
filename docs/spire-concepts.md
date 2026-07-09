@@ -737,10 +737,25 @@ server before accepting its bundle.
 
 | Binary | Role | Runs on |
 |--------|------|---------|
-| `spire-server-attestor-tpm-sign` | SPIRE `BundlePublisher` plugin; receives the trust bundle from the server and pushes it to the signer | SPIRE server pod (sidecar) |
-| `spire-server-attestor-tpm-signer-unix` | Root daemon with TPM access; signs the bundle using the server's TPM key; writes signed bundle to disk; serves via Unix socket | SPIRE server pod (sidecar, `/dev/tpmrm0` mounted) |
-| `spire-server-attestor-tpm-signer-http` | Non-root HTTP service; serves the signed bundle over HTTP so agents can fetch it | SPIRE server pod (sidecar, exposed as Kubernetes Service) |
-| `spire-server-attestor-tpm-verifier` | Agent-side daemon; fetches the signed bundle from the HTTP endpoint; verifies the signature; serves the verified bundle via Unix socket to the SPIRE agent | SPIRE agent pod (sidecar) |
+| `spire-server-attestor-tpm-sign` | SPIRE `BundlePublisher` plugin; receives the trust bundle from the server and pushes it to the signer | SPIRE server pod (hostPath binary) |
+| `spire-server-attestor-tpm-signer-unix` | Root daemon with TPM access; signs the bundle using the server's TPM key; writes signed JWT to disk | SPIRE server pod (hostPath binary, `/dev/tpmrm0` mounted) |
+| `spire-server-attestor-tpm-signer-http` | **Not used on this cluster.** Despite its name, this is a software-key signing alternative to `signer-unix` — it signs JWTs using a PEM RSA private key, not the TPM. It is not an HTTP frontend for `signer-unix`. Using it here would replace hardware attestation with a software key. | — |
+| `spire-server-attestor-tpm-verifier` | **Not used on this cluster.** Agent-side daemon intended for systemd deployments; replaced here by the `verify-bundle` init container. | — |
+
+The project ships all four binaries. Two are appropriate for this cluster's Kubernetes/TPM
+deployment; two are not:
+
+- **`sign` + `signer-unix`**: use these. They provide the TPM-backed signing chain.
+- **`signer-http`**: skip. It is for deployments *without* a TPM, where a software key
+  is acceptable. Deploying it alongside `signer-unix` would serve a separately signed
+  (software-keyed) bundle that agents could not verify against the TPM public key anyway.
+- **`verifier`**: skip. Designed as a persistent daemon for systemd-managed agents.
+  Replaced here by the `verify-bundle` init container, which is better suited to the
+  Kubernetes pod lifecycle (runs once, exits, agent starts).
+
+The HTTP serving role that `signer-http` would fill in a non-TPM deployment is handled
+here by a `busybox httpd` sidecar — one line, no config, serves the file that
+`signer-unix` writes.
 
 #### Data Flow
 
