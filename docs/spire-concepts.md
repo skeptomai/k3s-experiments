@@ -4,14 +4,38 @@
 
 **Trust domain:** `ipc.local`
 
-**SPIRE Server** — StatefulSet (1 replica) on the cluster, NFS-backed SQLite for the CA
-keys and registration entries, listening on gRPC port 8081 via a headless service. Flux
-manages it from `manifests/spire/`.
+**SPIRE Server** — StatefulSet (1 replica) on the cluster. CA keys and registration
+entries live in SQLite on a 1Gi PVC provisioned by the `nfs-subdir-external-provisioner`
+StorageClass, backed by nazgul (`192.168.89.2`) at `/mnt/primary_storage/k8s-nfs`.
+Listens on gRPC port 8081 via a headless service. Flux manages it from `manifests/spire/`.
 
-**SPIRE Agent** — DaemonSet on all 6 nodes. `hostPID: true` (required for workload
-attestation). Exposes the Workload API at `/run/spire/sockets/agent.sock` as a hostPath
-volume. Each agent bootstraps trust using the `spire-bundle` ConfigMap, which the server
-populates with its CA cert via the `k8s_bundle` notifier.
+**SPIRE Agent** — DaemonSet on all 6 nodes.
+
+`hostPID: true` is required for workload attestation. When a workload calls the Workload
+API socket, the agent reads `SO_PEERCRED` from the Unix domain socket connection, which
+gives it the calling process's PID. Under normal Kubernetes pod isolation, PIDs are
+namespaced — each pod sees its own PID 1 and the host processes are invisible. With
+`hostPID: true` the agent's container shares the host PID namespace, so `SO_PEERCRED`
+returns the *host* PID of the calling process. The agent then reads
+`/proc/<host-pid>/cgroup` to extract the container ID, and from there calls the kubelet
+API to get the pod's namespace, service account, and labels. Without `hostPID: true`,
+`SO_PEERCRED` returns PID 0 and the entire workload attestation chain breaks.
+
+The Workload API socket at `/run/spire/sockets/agent.sock` is a Unix domain socket
+created by the agent inside the container. The DaemonSet mounts
+`/run/spire/sockets` as a `hostPath` volume with `DirectoryOrCreate`, which means the
+directory is created on the node's filesystem if it doesn't exist, and the socket file
+lives there rather than inside the container's ephemeral overlay filesystem. Any pod on
+the same node that mounts `/run/spire/sockets` as a hostPath gets access to the same
+socket — this is how workload containers reach the agent without any service discovery or
+network routing. The socket is node-local by design: the agent on ipc7 only knows about
+workloads on ipc7, and those workloads only connect to ipc7's agent socket.
+
+Each agent bootstraps its trust bundle via the `verify-bundle` init container (see TPM
+Server Attestation below), which fetches the bundle signed by the server's TPM key and
+writes it to a shared emptyDir before the agent starts. The server also maintains the
+`spire-bundle` ConfigMap via the `k8sbundle` notifier, but agents no longer bootstrap
+from it directly.
 
 ### Cluster Architecture
 
