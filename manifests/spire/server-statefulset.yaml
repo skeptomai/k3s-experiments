@@ -49,7 +49,6 @@ spec:
               mountPath: /var/run/spire/server-attestor-tpm
             - name: sign-binary
               mountPath: /usr/local/bin/spire-server-attestor-tpm-sign
-              subPath: spire-server-attestor-tpm-sign
               readOnly: true
           livenessProbe:
             httpGet:
@@ -76,7 +75,6 @@ spec:
           volumeMounts:
             - name: signer-unix-binary
               mountPath: /usr/local/bin/spire-server-attestor-tpm-signer-unix
-              subPath: spire-server-attestor-tpm-signer-unix
               readOnly: true
             - name: signer-config
               mountPath: /etc/spire-sat
