@@ -496,10 +496,6 @@ inside the container even after the device was mounted.
 - **Removed**: projected service account token volume (`spire-token`) — no longer needed
   since node attestation is TPM-based, not PSAT-based.
 
-**Flux reconciliation:** any `kubectl apply` that races with Flux reconciliation can be
-silently reverted. Changes must be committed and pushed to Git before they will persist —
-`flux reconcile kustomization spire --with-source` forces an immediate reconcile.
-
 ### Phase 6 — Deploy and Re-register (complete, 2026-07-09)
 
 **Server** rolled first. Log confirms:
