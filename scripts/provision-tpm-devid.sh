@@ -59,51 +59,69 @@ fi
 echo "==> Ensuring /etc/spire exists on ${NODE}..."
 ssh_node "sudo mkdir -p /etc/spire && sudo chmod 700 /etc/spire"
 
-echo "==> Generating TPM DevID key on ${NODE}..."
-ssh_node "sudo bash -s" << 'REMOTE_EOF'
+echo "==> Ensuring tpm2-openssl provider is installed on ${NODE}..."
+ssh_node "sudo apt-get install -y tpm2-openssl -qq 2>/dev/null"
+
+echo "==> Generating TPM DevID key and CSR on ${NODE}..."
+NODE_CN="spire-agent-${NODE}.ipc.local"
+ssh_node "sudo bash -s" << REMOTE_EOF
 set -euo pipefail
 
 TPM_DIR=/etc/spire
+DEVID_HANDLE=0x81010001  # persistent NV handle; evicted after CSR generation
 
-# Create primary key under Endorsement hierarchy
-tpm2_createprimary -C e -g sha256 -G ecc -c /tmp/tpm_primary.ctx -Q
+# Create SRK (Storage Root Key) primary under the Owner hierarchy.
+# Parameters MUST match SPIRE's internal SRKTemplateHighRSA() from go-tpm-tools:
+#   HandleOwner, RSA 2048, SHA-256, AES-128-CFB symmetric, restricted|decrypt
+# The primary is deterministic: same params on same TPM = same key handle.
+tpm2_createprimary \
+  -C o \
+  -g sha256 \
+  -G rsa \
+  -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" \
+  -c /tmp/tpm_primary.ctx \
+  -Q
 
-# Create DevID key under primary (ECC P-256, restricted=false so it can sign arbitrary data)
+# Create DevID key under the SRK (RSA 2048, unrestricted sign — unrestricted so
+# tpm2-openssl can use it to sign the CSR; SPIRE loads it for attestation signing)
 tpm2_create \
   -C /tmp/tpm_primary.ctx \
   -g sha256 \
-  -G ecc \
-  -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|sign|noda" \
-  -r ${TPM_DIR}/devid.priv \
-  -u ${TPM_DIR}/devid.pub \
+  -G rsa \
+  -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|sign" \
+  -r \${TPM_DIR}/devid.priv \
+  -u \${TPM_DIR}/devid.pub \
   -Q
 
-# Load key and export public key as PEM for CSR generation
-tpm2_load -C /tmp/tpm_primary.ctx -r ${TPM_DIR}/devid.priv -u ${TPM_DIR}/devid.pub -c /tmp/devid.ctx -Q
-tpm2_readpublic -c /tmp/devid.ctx -f PEM -o ${TPM_DIR}/devid_pubkey.pem -Q
+# Load key into TPM and persist to NV handle so tpm2-openssl can reference it
+tpm2_load -C /tmp/tpm_primary.ctx -r \${TPM_DIR}/devid.priv -u \${TPM_DIR}/devid.pub -c /tmp/devid.ctx -Q
+# Evict any stale handle at this address before persisting
+tpm2_evictcontrol -C o -c \${DEVID_HANDLE} 2>/dev/null || true
+tpm2_evictcontrol -C o -c /tmp/devid.ctx \${DEVID_HANDLE} -Q
 
-# Lock down permissions
-chmod 600 ${TPM_DIR}/devid.priv ${TPM_DIR}/devid.pub ${TPM_DIR}/devid_pubkey.pem
-
-# Clean up context files (not needed after key is persisted as blobs)
-rm -f /tmp/tpm_primary.ctx /tmp/devid.ctx
-
-echo "TPM DevID key generated."
-REMOTE_EOF
-
-echo "==> Generating CSR on ${NODE}..."
-NODE_CN="spire-agent-${NODE}.ipc.local"
-ssh_node "sudo bash -s" << REMOTE_CSR_EOF
-set -euo pipefail
-openssl req -new \
-  -key /etc/spire/devid_pubkey.pem \
+# Generate CSR using tpm2 OpenSSL provider — the private key signs the CSR inside the TPM
+openssl req \
+  -provider tpm2 -provider default \
+  -key "handle:\${DEVID_HANDLE}" \
+  -new \
   -out /tmp/devid.csr \
   -subj "/CN=${NODE_CN}/O=ipc.local" \
   -addext "basicConstraints=critical,CA:FALSE" \
   -addext "keyUsage=critical,digitalSignature"
+
+# Evict the persistent handle — SPIRE uses the blob files, not the handle
+tpm2_evictcontrol -C o -c \${DEVID_HANDLE} -Q
+
+# Export public key PEM for reference only (not used by SPIRE)
+tpm2_readpublic -c /tmp/devid.ctx -f PEM -o \${TPM_DIR}/devid_pubkey.pem -Q 2>/dev/null || true
+
+# Lock down permissions
+chmod 600 \${TPM_DIR}/devid.priv \${TPM_DIR}/devid.pub
 chmod 644 /tmp/devid.csr
-echo "CSR generated."
-REMOTE_CSR_EOF
+
+rm -f /tmp/tpm_primary.ctx /tmp/devid.ctx
+echo "TPM DevID key and CSR generated."
+REMOTE_EOF
 
 echo "==> Fetching CSR from ${NODE}..."
 TMPDIR_LOCAL=$(mktemp -d)
@@ -112,7 +130,7 @@ scp_from_node "/tmp/devid.csr" "${TMPDIR_LOCAL}/devid.csr"
 ssh_node "sudo rm -f /tmp/devid.csr"
 
 echo "==> Retrieving DevID CA key from 1Password..."
-op item get "ipc-cluster DevID CA key" --fields notesPlain --reveal > "${TMPDIR_LOCAL}/devid-ca.key.pem"
+op item get "ipc-cluster DevID CA key" --fields notesPlain --reveal | tr -d '"' > "${TMPDIR_LOCAL}/devid-ca.key.pem"
 chmod 600 "${TMPDIR_LOCAL}/devid-ca.key.pem"
 
 echo "==> Signing CSR with DevID CA..."

@@ -20,9 +20,10 @@ data:
     plugins {
       NodeAttestor "tpm_devid" {
         plugin_data {
-          devid_cert_path = "/etc/spire/devid.crt"
-          devid_priv_path = "/etc/spire/devid.priv"
-          devid_pub_path  = "/etc/spire/devid.pub"
+          devid_cert_path  = "/etc/spire/devid.crt"
+          devid_priv_path  = "/etc/spire/devid.priv"
+          devid_pub_path   = "/etc/spire/devid.pub"
+          tpm_device_path  = "/dev/tpmrm0"
         }
       }
 

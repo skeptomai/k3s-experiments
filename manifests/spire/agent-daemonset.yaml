@@ -61,6 +61,8 @@ spec:
             - name: spire-devid
               mountPath: /etc/spire
               readOnly: true
+            - name: tpm-device
+              mountPath: /dev/tpmrm0
           livenessProbe:
             httpGet:
               path: /live
@@ -88,3 +90,7 @@ spec:
           hostPath:
             path: /etc/spire
             type: Directory
+        - name: tpm-device
+          hostPath:
+            path: /dev/tpmrm0
+            type: CharDevice
