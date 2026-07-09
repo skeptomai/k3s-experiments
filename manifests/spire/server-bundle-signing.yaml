@@ -1,0 +1,41 @@
+---
+# ConfigMap for spire-server-attestor-tpm-signer-unix
+# Runs as a sidecar in the spire-server pod with /dev/tpmrm0 mounted.
+# Signs the SPIRE trust bundle using the server's TPM key (handle 0x81008006)
+# and writes a signed JWT to /var/spire/signed-bundle/spiffetrustbundle.token.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-signer-unix-config
+  namespace: spire
+data:
+  signer-unix.conf: |
+    socket: /var/run/spire/server-attestor-tpm/signer-unix.sock
+    tpm-address: 0x81008006
+    duration: 10m
+    dir: /var/spire/signed-bundle
+  nginx.conf: |
+    server {
+        listen 8181;
+        root /usr/share/nginx/html;
+        location / {
+            add_header Cache-Control "no-store";
+        }
+    }
+---
+# ClusterIP Service exposing the signed bundle over HTTP.
+# The spire-server pod (ipc4) runs an nginx sidecar serving /var/spire/signed-bundle.
+# Agent verifiers fetch http://spire-bundle-signing.spire.svc.cluster.local/spiffetrustbundle.token
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-bundle-signing
+  namespace: spire
+spec:
+  selector:
+    app: spire-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8181
+  type: ClusterIP

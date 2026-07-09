@@ -5,7 +5,9 @@ resources:
   - server-rbac.yaml
   - server-config.yaml
   - server-tpm-ca.yaml
+  - server-bundle-signing.yaml
   - server-statefulset.yaml
   - agent-rbac.yaml
   - agent-config.yaml
+  - agent-verifier-config.yaml
   - agent-daemonset.yaml

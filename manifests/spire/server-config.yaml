@@ -34,6 +34,14 @@ data:
         }
       }
 
+      BundlePublisher "tpm-sign" {
+        plugin_cmd = "/usr/local/bin/spire-server-attestor-tpm-sign"
+        plugin_data {
+          socket    = "/var/run/spire/server-attestor-tpm/signer-unix.sock"
+          frequency = "5m"
+        }
+      }
+
       Notifier "k8sbundle" {
         plugin_data {
           namespace = "spire"

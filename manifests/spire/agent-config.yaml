@@ -11,9 +11,10 @@ data:
       trust_domain = "ipc.local"
       server_address = "spire-server"
       server_port = "8081"
-      # Bundle file is mounted from the spire-bundle ConfigMap; the server's
-      # k8s_bundle Notifier writes bundle.crt into it after startup.
-      trust_bundle_path = "/run/spire/bundle/bundle.crt"
+      # Trust bundle is obtained from the verifier sidecar, which fetches it
+      # from the signer-http service and verifies the TPM signature before
+      # delivering it. This replaces the unauthenticated ConfigMap path.
+      trust_bundle_unix_socket_path = "/var/run/spire/server-attestor-tpm/verifier.sock"
       socket_path = "/run/spire/sockets/agent.sock"
     }
 

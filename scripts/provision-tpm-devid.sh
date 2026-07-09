@@ -161,10 +161,25 @@ ssh_node "sudo mv /tmp/devid.crt /etc/spire/devid.crt && sudo chmod 644 /etc/spi
 echo "==> Verifying installation on ${NODE}..."
 ssh_node "sudo openssl verify -CAfile /dev/stdin /etc/spire/devid.crt" < "${DEVID_CA_CERT}"
 
+echo "==> Installing server bundle-signing public key on ${NODE}..."
+# The server's bundle-signing public key is fetched from ipc4 (handle 0x81008006)
+# and written to /etc/spire/ on every node — this is the out-of-band trust anchor
+# that lets agents verify the SPIRE server's trust bundle without trusting Kubernetes.
+SERVER_PUB=$(ssh -i "${HOME}/.ssh/id_rsa" -o StrictHostKeyChecking=no \
+  cb@ipc4.taildd208.ts.net "sudo tpm2_readpublic -c 0x81008006 -f pem 2>/dev/null")
+if [[ -z "$SERVER_PUB" ]]; then
+  echo "  WARN: could not read server bundle-signing public key from ipc4 TPM."
+  echo "        Run 'bash scripts/provision-server-bundle-signing.sh' first."
+else
+  echo "$SERVER_PUB" | ssh_node "sudo tee /etc/spire/server-bundle-signing.pub > /dev/null && sudo chmod 644 /etc/spire/server-bundle-signing.pub"
+  echo "  /etc/spire/server-bundle-signing.pub written"
+fi
+
 echo ""
 echo "DevID provisioning complete for ${NODE}."
 echo "Files on node:"
-echo "  /etc/spire/devid.crt   — signed DevID certificate (PEM)"
-echo "  /etc/spire/devid.priv  — TPM private key blob"
-echo "  /etc/spire/devid.pub   — TPM public key blob"
-echo "  /etc/spire/devid_pubkey.pem — public key (PEM, for reference)"
+echo "  /etc/spire/devid.crt                — signed DevID certificate (PEM)"
+echo "  /etc/spire/devid.priv               — TPM private key blob"
+echo "  /etc/spire/devid.pub                — TPM public key blob"
+echo "  /etc/spire/devid_pubkey.pem         — public key (PEM, for reference)"
+echo "  /etc/spire/server-bundle-signing.pub — server TPM public key (out-of-band trust anchor)"
