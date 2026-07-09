@@ -11,10 +11,11 @@ data:
       trust_domain = "ipc.local"
       server_address = "spire-server"
       server_port = "8081"
-      # Trust bundle is obtained from the verifier sidecar, which fetches it
-      # from the signer-http service and verifies the TPM signature before
-      # delivering it. This replaces the unauthenticated ConfigMap path.
-      trust_bundle_unix_socket_path = "/var/run/spire/server-attestor-tpm/verifier.sock"
+      # Trust bundle written by the verify-bundle init container, which fetches
+      # the JWT from the signer-http service and verifies the RS256 signature
+      # against the server's TPM public key before writing the PEM here.
+      # Agent startup is blocked until the signature check passes.
+      trust_bundle_path = "/run/spire/verified-bundle/bundle.crt"
       socket_path = "/run/spire/sockets/agent.sock"
     }
 

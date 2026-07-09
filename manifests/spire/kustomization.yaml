@@ -9,5 +9,5 @@ resources:
   - server-statefulset.yaml
   - agent-rbac.yaml
   - agent-config.yaml
-  - agent-verifier-config.yaml
+  - agent-bundle-verifier.yaml
   - agent-daemonset.yaml

@@ -1,0 +1,77 @@
+---
+# Script run by the verify-bundle init container at agent pod startup.
+# Fetches the signed trust bundle JWT from the signer-http service, verifies
+# the RS256 signature against the server's TPM public key (written out-of-band
+# to /etc/spire/server-bundle-signing.pub by provision-tpm-devid.sh), extracts
+# the PEM trust bundle, and writes it to a shared emptyDir volume.
+#
+# The SPIRE agent then reads from trust_bundle_path pointing at that file.
+# This breaks the circular bootstrap trust: the bundle is only accepted after
+# the server's TPM private key has signed it, and only if the signature matches
+# the public key that was enrolled during physical provisioning.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-bundle-verifier-script
+  namespace: spire
+data:
+  verify-bundle.py: |
+    #!/usr/bin/env python3
+    import base64, json, os, subprocess, sys, time, urllib.request
+
+    def b64d(s):
+        s = s.replace('-', '+').replace('_', '/')
+        return base64.b64decode(s + '=' * (-len(s) % 4))
+
+    URL = "http://spire-bundle-signing.spire.svc.cluster.local/spiffetrustbundle.token"
+    PUB  = "/etc/spire/server-bundle-signing.pub"
+    OUT  = "/run/spire/verified-bundle/bundle.crt"
+
+    print("Fetching signed trust bundle from signer-http service...")
+    jwt = None
+    for i in range(90):
+        try:
+            jwt = urllib.request.urlopen(URL, timeout=5).read().decode().strip()
+            if jwt:
+                print(f"  fetched on attempt {i+1}")
+                break
+        except Exception as e:
+            if i % 10 == 0:
+                print(f"  retry {i+1}/90: {e}")
+            time.sleep(2)
+    if not jwt:
+        sys.exit("ERROR: could not fetch signed bundle after 3 minutes")
+
+    parts = jwt.split('.')
+    if len(parts) != 3:
+        sys.exit(f"ERROR: invalid JWT ({len(parts)} parts, expected 3)")
+
+    header_b64, payload_b64, sig_b64 = parts
+
+    open('/tmp/jwtdata', 'wb').write(f"{header_b64}.{payload_b64}".encode())
+    open('/tmp/jwtsig',  'wb').write(b64d(sig_b64))
+
+    print("Verifying RS256 signature against server TPM public key...")
+    r = subprocess.run(
+        ['openssl', 'dgst', '-sha256', '-verify', PUB,
+         '-signature', '/tmp/jwtsig', '/tmp/jwtdata'],
+        capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        print(f"SIGNATURE VERIFICATION FAILED:\n{r.stderr}")
+        sys.exit(
+            "Refusing to start — trust bundle is not signed by the server TPM key. "
+            "This may indicate a rogue SPIRE server."
+        )
+
+    print(f"Signature verified OK ({r.stdout.strip()})")
+
+    payload = json.loads(b64d(payload_b64).decode())
+    bundle_pem = payload.get('spiffetb')
+    if not bundle_pem:
+        sys.exit(f"ERROR: no 'spiffetb' field in JWT payload. Keys: {list(payload.keys())}")
+
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, 'w').write(bundle_pem)
+    print(f"Verified trust bundle written to {OUT}")
+    print("Bootstrap trust established via hardware TPM signature.")
