@@ -32,10 +32,10 @@ network routing. The socket is node-local by design: the agent on ipc7 only know
 workloads on ipc7, and those workloads only connect to ipc7's agent socket.
 
 Each agent bootstraps its trust bundle via the `verify-bundle` init container (see TPM
-Server Attestation below), which fetches the bundle signed by the server's TPM key and
-writes it to a shared emptyDir before the agent starts. The server also maintains the
-`spire-bundle` ConfigMap via the `k8sbundle` notifier, but agents no longer bootstrap
-from it directly.
+Server Attestation below), which fetches the bundle signed by the server's TPM key,
+verifies the signature, and writes the bundle to an emptyDir for the agent to read on
+startup. The server also maintains the `spire-bundle` ConfigMap via the `k8sbundle`
+notifier, but agents no longer bootstrap from it directly.
 
 ### Cluster Architecture
 
