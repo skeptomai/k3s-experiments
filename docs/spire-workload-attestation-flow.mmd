@@ -1,0 +1,57 @@
+flowchart LR
+    subgraph k8s["Kubernetes Control Plane"]
+        APISERVER["API Server"]
+        KUBELET["Kubelet"]
+    end
+
+    subgraph workload_creation["Workload Creation"]
+        MANIFEST["kubectl apply\nPod manifest\nns: spire-demo\nsa: demo-sa"]
+        POD["Pod scheduled\n+ started"]
+        SOCK_MOUNT["agent.sock mounted\nvia hostPath"]
+    end
+
+    subgraph node_tcb["SPIRE Agent (on the same node)"]
+        PEERCRED["SO_PEERCRED\nread PID from socket call"]
+        CGROUP["Resolve PID →\n/proc/pid/cgroup\n+ kubelet API"]
+        MATCH["Match pod metadata\nagainst registration entries\nns=spire-demo, sa=demo-sa"]
+        ISSUE["Issue X.509 SVID\nspiffe://ipc.local/demo-app"]
+    end
+
+    subgraph spire_server["SPIRE Server"]
+        REG["Registration Entry\nns: spire-demo / sa: demo-sa\n→ spiffe://ipc.local/demo-app"]
+    end
+
+    subgraph workload_runtime["Workload (running)"]
+        CALL["Call Workload API\n/run/spire/sockets/agent.sock"]
+        SVID["Receive X.509 SVID\nspiffe://ipc.local/demo-app"]
+        USE["Use SVID for\nmTLS / auth"]
+    end
+
+    MANIFEST -->|"admitted + scheduled"| APISERVER
+    APISERVER -->|"start pod"| KUBELET
+    KUBELET -->|"launches container"| POD
+    POD -->|"hostPath volume"| SOCK_MOUNT
+    SOCK_MOUNT -->|"socket available to"| CALL
+
+    CALL -->|"connect"| PEERCRED
+    PEERCRED -->|"PID lookup"| CGROUP
+    CGROUP -->|"queries"| KUBELET
+    CGROUP -->|"pod identity confirmed"| MATCH
+    MATCH -->|"looks up"| REG
+    REG -->|"entry found"| ISSUE
+    ISSUE -->|"SVID delivered"| SVID
+    SVID --> USE
+
+    style APISERVER fill:#326ce5,color:#fff
+    style KUBELET fill:#326ce5,color:#fff
+    style REG fill:#1a6b8a,color:#fff
+    style PEERCRED fill:#1a6b8a,color:#fff
+    style CGROUP fill:#1a6b8a,color:#fff
+    style MATCH fill:#1a6b8a,color:#fff
+    style ISSUE fill:#1a6b8a,color:#fff
+    style MANIFEST fill:#2c3e50,color:#fff
+    style POD fill:#6c3483,color:#fff
+    style SOCK_MOUNT fill:#6c3483,color:#fff
+    style CALL fill:#6c3483,color:#fff
+    style SVID fill:#27ae60,color:#fff
+    style USE fill:#27ae60,color:#fff

@@ -1,0 +1,53 @@
+flowchart TD
+    K8S["☸ Kubernetes API Server\n(root of trust)"]
+
+    subgraph node_attest["Node Attestation"]
+        PSAT["Projected Service Account Token\nissued to spire-agent DaemonSet pod\n(SA: spire:spire-agent)"]
+        TR["TokenReview API\nauthentication.k8s.io/tokenreviews\n(spire-server ClusterRole)"]
+        BUNDLE["spire-bundle ConfigMap\nbundle.crt written by k8sbundle Notifier\n(agent trust_bundle_path)"]
+    end
+
+    subgraph spire["SPIRE"]
+        SERVER["SPIRE Server\nStatefulSet / spire-server SA\nCA key on NFS PVC\nSQLite registration entries"]
+        AGENT["SPIRE Agent\nDaemonSet / spire-agent SA\nk8s_psat node attestor\nk8s workload attestor"]
+        NODE_SVID["Node SVID\nspiffe://ipc.local/k8s-node\n(agent identity after attestation)"]
+    end
+
+    subgraph workload_attest["Workload Attestation"]
+        SOCK["Workload API Socket\n/run/spire/sockets/agent.sock\n(hostPath mounted into pods)"]
+        PEERCRED["SO_PEERCRED → PID\nresolved via /proc/pid/cgroup\n+ kubelet API (nodes/proxy)"]
+        REG["Registration Entry match\nns: spire-demo\nsa: demo-sa\n→ spiffe://ipc.local/demo-app"]
+    end
+
+    WORKLOAD["Demo Workload Pod\nnamespace: spire-demo\nserviceAccount: demo-sa"]
+    SVID["X.509 SVID\nspiffe://ipc.local/demo-app\nsigned by SPIRE CA"]
+
+    REG_JOB["Registration Job\n(spire-registrar SA)\nkubectl exec → spire-server entry create\nwrites entries to SQLite"]
+
+    K8S -->|"issues PSAT to pod"| PSAT
+    K8S -->|"server bootstraps trust via"| BUNDLE
+    PSAT -->|"agent presents to server"| SERVER
+    SERVER -->|"validates via"| TR
+    TR -->|"calls back to"| K8S
+    SERVER -->|"writes CA cert to"| BUNDLE
+    BUNDLE -->|"agent reads on startup"| AGENT
+    SERVER -->|"grants node SVID"| NODE_SVID
+    NODE_SVID -->|"held by"| AGENT
+
+    REG_JOB -->|"has pods/exec RBAC\nshells into server pod"| SERVER
+
+    WORKLOAD -->|"calls"| SOCK
+    SOCK -->|"handled by"| AGENT
+    AGENT -->|"inspects caller via"| PEERCRED
+    PEERCRED -->|"matched against"| REG
+    REG -->|"entry seeded by"| REG_JOB
+    REG -->|"issues"| SVID
+    SVID -->|"returned to"| WORKLOAD
+
+    style K8S fill:#326ce5,color:#fff
+    style SERVER fill:#4a90d9,color:#fff
+    style AGENT fill:#4a90d9,color:#fff
+    style SVID fill:#27ae60,color:#fff
+    style NODE_SVID fill:#27ae60,color:#fff
+    style REG_JOB fill:#e67e22,color:#fff
+    style WORKLOAD fill:#8e44ad,color:#fff

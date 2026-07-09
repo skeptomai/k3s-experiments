@@ -27,7 +27,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
 source "$REPO_ROOT/scripts/lib/node-maps.sh"
-SERVER="ipc1.taildd208.ts.net"
+SERVER="ipc4.taildd208.ts.net"
 MIKROTIK="admin@192.168.88.1"
 INSTALL_HARD_CAP_MIN=30      # hard timeout for install+first-boot
 STALL_WARN_MIN=12           # flag a likely hardware hang if still installing past this
@@ -39,7 +39,7 @@ NODES=("$@")
 [[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 [--check] <node> [node...]"; exit 1; }
 
 for node in "${NODES[@]}"; do
-    [[ "$node" == "ipc1" ]] && { echo "ERROR: ipc1 is the control plane — use docs/ipc1-upgrade-runbook.md" >&2; exit 1; }
+    [[ "$node" == "ipc4" ]] && { echo "ERROR: ipc4 is the etcd seed — use docs/ipc1-upgrade-runbook.md" >&2; exit 1; }
     [[ -z "${NODE_IP[$node]+x}" ]] && { echo "ERROR: unknown node '$node' (see scripts/lib/node-maps.sh)" >&2; exit 1; }
 done
 
@@ -230,6 +230,14 @@ for node in "${NODES[@]}"; do
     wait_node_ready "$node" || rc=1
     echo "--- Uncordoning $node ---"
     kc "uncordon $node" || true
+
+    echo "--- Provisioning TPM DevID certificate for $node ---"
+    if bash "$REPO_ROOT/scripts/provision-tpm-devid.sh" "$node"; then
+        echo "  [OK] TPM DevID provisioned"
+    else
+        echo "  [WARN] TPM DevID provisioning failed (op auth missing or TPM error)."
+        echo "         Run 'bash scripts/provision-tpm-devid.sh $node' manually after authenticating 1Password."
+    fi
 
     echo "--- Verifying Tailscale name is clean ---"
     bash "$REPO_ROOT/scripts/tailscale-cleanup.sh" --verify "$node" || true

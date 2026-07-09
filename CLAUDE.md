@@ -74,6 +74,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
 | `scripts/pxe-control.sh <status\|enable\|disable> [node]` | Enables/disables PXE boot per node (run from omen) |
 | `scripts/tailscale-cleanup.sh [--verify] <node...>` | Deletes stale Tailscale device(s) for a node before reinstall so it reclaims its name; `--verify` checks post-install. Needs a Tailscale OAuth client (devices:core write) via `TS_OAUTH_CLIENT_ID`/`_SECRET` env or 1Password `op://Private/Tailscale OAuth k3s`. Called automatically by `reinstall-nodes.sh`; no-op with a WARN if creds absent. |
+| `scripts/provision-tpm-devid.sh <node>` | Generates a TPM-bound DevID key on the node, creates a CSR, signs it with the DevID CA (key retrieved from 1Password `ipc-cluster DevID CA key`), and installs cert+blobs at `/etc/spire/`. Called automatically by `reinstall-nodes.sh`; warns if 1Password not authenticated. Idempotent. |
 | `scripts/shutdown-cluster.sh` | Gracefully cordons all nodes, drains workers then control plane, shuts down workers first and ipc4 last |
 
 ## PXE Reinstall Workflow
@@ -97,8 +98,9 @@ with `kubectl get nodes -l node-role.kubernetes.io/etcd`.
 6. Clear stale SSH known_hosts on omen
 7. Remove stale Tailscale device; rename new one if it registered as `<node>-1`
 8. Rejoin k3s + install Pelagos — **server (ipc5/ipc6):** `bash scripts/join-server.sh <node>`; **worker (ipc7-9):** `bash scripts/upgrade-agents.sh <node>`
-9. `bash scripts/install-nut-clients.sh <node>` — restore NUT UPS monitoring
-10. `bash scripts/label-nodes.sh` — restore the node's `node-class` label (labels don't survive a fresh registration)
+9. `bash scripts/provision-tpm-devid.sh <node>` — provision TPM DevID cert (requires `op` authenticated)
+10. `bash scripts/install-nut-clients.sh <node>` — restore NUT UPS monitoring
+11. `bash scripts/label-nodes.sh` — restore the node's `node-class` label (labels don't survive a fresh registration)
 
 **After ipc4 reinstall** (wipes etcd — full cluster rebuild):
 - Install k3s, Pelagos, rejoin agents, bootstrap Flux (GitHub token in 1Password)
