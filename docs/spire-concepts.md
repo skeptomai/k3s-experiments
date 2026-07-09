@@ -655,23 +655,7 @@ server before accepting its bundle.
 
 #### Data Flow
 
-```
-SPIRE server
-  |  (trust bundle updated)
-  v
-sign plugin  --pushes bundle-->  signer-unix (signs with server TPM key)
-                                     |
-                                     v
-                                signer-http  --HTTP-->  [Kubernetes Service]
-                                                              |
-                              +-------------------------------+
-                              |  (each agent node)
-                              v
-                         verifier  (fetches + verifies signature)
-                              |
-                              v  (Unix socket)
-                         SPIRE agent  (gets verified trust bundle)
-```
+![TPM server bundle signing and verification flow](spire-server-bundle-signing.png)
 
 #### Why This Breaks the Circular Trust
 
