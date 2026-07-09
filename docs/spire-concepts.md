@@ -350,94 +350,208 @@ imperative Jobs, this is re-running those jobs, not a data migration.
 
 ---
 
-## TPM Attestation: Phased Implementation Plan
+## TPM Attestation: Implementation — What Was Built
 
-### Phase 1 — DevID CA
+All seven phases are complete. This section documents what was actually implemented,
+including the non-obvious technical details discovered during the process.
 
-Create an offline CA used exclusively for signing DevID certificates. This CA's cert
-becomes the `devid_ca_path` on the SPIRE server. It does not need to be online after
-provisioning; it only signs certs during node provisioning or reprovisioning.
+### Phase 1 — DevID CA (complete)
 
-Steps:
-- Generate CA key and self-signed cert (openssl, RSA 4096 or EC P-384)
-- Store the CA key offline (not on the cluster)
-- Store the CA cert in `config/tpm/devid-ca.pem` (committed to Git — public material only)
+An offline EC P-256 CA (20-year validity) was generated on omen and used exclusively to
+sign node DevID certificates.
 
-### Phase 2 — Manufacturer EK CA Bundle
+- **Private key**: stored in 1Password as `ipc-cluster DevID CA key` (Private vault,
+  notes field). Never written to disk longer than the signing operation; shredded
+  immediately after storage.
+- **Public cert**: `config/tpm/devid-ca.pem` — committed to Git (public material only).
+- **Signing**: the provisioning script retrieves the key via `op item get ... | tr -d '"'`
+  (the `op` CLI wraps field values in double quotes; stripping is required for the PEM
+  to be valid).
 
-Fetch the four manufacturer root/intermediate CA certs from their public PKI URLs and
-assemble them into a single bundle file (`config/tpm/endorsement-ca-bundle.pem`).
+### Phase 2 — Manufacturer EK CA Bundle (complete)
 
-| Node(s) | CA to fetch | URL |
-|---------|------------|-----|
-| ipc4, ipc5 | Nuvoton NPCTxxx ECC384 LeafCA 022111 | Nuvoton PKI |
-| ipc6 | NuvotonTPMRootCA2210 | Nuvoton PKI |
-| ipc7 | NuvotonTPMRootCA2211 | Nuvoton PKI |
-| ipc8, ipc9 | Infineon OPTIGA TPM 2.0 RSA CA 061 | `https://pki.infineon.com/` |
+Six CA certificates assembled into `config/tpm/endorsement-ca-bundle.pem`. All URLs
+were discovered from the AIA (Authority Information Access) extensions in the live EK
+certificates on each node via `tpm2_getekcertificate` + `openssl x509 -text`.
 
-The Infineon CA URL is embedded in the EK cert's AIA extension (already visible in the
-EK cert output). Nuvoton's equivalent must be looked up from their PKI portal.
+The bundle is two full chains, not four flat certs:
 
-### Phase 3 — Node Provisioning Script
+| Chain | Nodes | Certs |
+|-------|-------|-------|
+| Nuvoton ECC521 | ipc4, ipc5 | Root (NPCTxxx ECC521 RootCA) → Intermediate (NPCTxxx ECC384 LeafCA 022111) |
+| Nuvoton 2210 | ipc6 | Self-signed root (NuvotonTPMRootCA2210) |
+| Nuvoton 2211 | ipc7 | Self-signed root (NuvotonTPMRootCA2211) |
+| Infineon RSA | ipc8, ipc9 | Root (OPTIGA RSA Root CA 2) → Intermediate (OPTIGA TPM 2.0 RSA CA 061) |
 
-Write `scripts/provision-tpm-devid.sh` that runs on a single node and produces the
-three files the SPIRE agent needs. The script:
+The EK CA bundle is the proof that an EK cert was signed by a real manufacturer. Without
+it, SPIRE cannot verify that the TPM presenting the EK is a genuine hardware chip.
 
-1. Creates a TPM primary key under the Endorsement hierarchy:
-   `tpm2_createprimary -C e -g sha256 -G rsa -c /tmp/primary.ctx`
-2. Generates the DevID key under it:
-   `tpm2_create -C /tmp/primary.ctx -g sha256 -G rsa -r /etc/spire/devid.priv -u /etc/spire/devid.pub`
-3. Loads the key to get a handle and extracts the public key for the CSR:
-   `tpm2_load`, `tpm2_readpublic`
-4. Produces a CSR (using openssl with the TPM public key)
-5. Returns the CSR — signing happens off-node with the DevID CA key
-6. Writes the signed cert to `/etc/spire/devid.crt`
+### Phase 3 — Node Provisioning Script (complete)
 
-The script is idempotent: if blobs already exist and the cert is still valid, it exits
-cleanly. Re-provisioning (after node reinstall) regenerates everything.
+`scripts/provision-tpm-devid.sh` runs from omen, provisions one node end-to-end, and is
+idempotent (skips if a valid cert signed by our CA already exists with >30 days to expiry).
 
-The DevID CA signing step is intentionally separate from the provisioning script — the
-CA key is offline and signing is a deliberate human action, not automated.
+**What the script does:**
 
-### Phase 4 — SPIRE Server Config Update
+1. Installs `tpm2-openssl` on the node (`apt install tpm2-openssl`)
+2. Creates the SRK (Storage Root Key) primary under the **Owner hierarchy** (`-C o`)
+3. Creates the DevID child key under the SRK
+4. Loads the key and persists it to a temporary NV handle (`0x81010001`)
+5. Generates a CSR via the `tpm2` OpenSSL provider — the TPM signs the CSR internally
+6. Evicts the NV handle — SPIRE uses blob files, not handles
+7. Strips the 2-byte TPM2B wrapper from both blob files (see below)
+8. Scp's the CSR to omen; retrieves the DevID CA key from 1Password; signs the cert
+9. Installs the signed cert at `/etc/spire/devid.crt`; verifies it chains to the DevID CA
+10. Cleans up temporary files; leaves `/etc/spire/` with `devid.crt`, `devid.priv`,
+    `devid.pub`, `devid_pubkey.pem`
 
-Update `manifests/spire/server-config.yaml`:
-- Replace the `NodeAttestor "k8s_psat"` block with `NodeAttestor "tpm_devid"`
-- Add `devid_ca_path` pointing to the DevID CA cert (mounted from a ConfigMap or Secret)
-- Add `endorsement_ca_path` pointing to the EK CA bundle (same)
-- Remove the `k8s_psat`-specific RBAC (TokenReview permission) from `server-rbac.yaml`
+**Critical implementation details discovered during integration:**
 
-The server no longer needs to call the Kubernetes TokenReview API — attestation becomes
-fully TPM-driven with no Kubernetes API dependency.
+**Primary key hierarchy:** The primary must be under the **Owner hierarchy** (`-C o`),
+not the Endorsement hierarchy (`-C e`). SPIRE's `tpm_devid` plugin recreates the primary
+at startup using `SRKTemplateHighRSA()` from go-tpm-tools, which calls
+`tpm2.CreatePrimaryEx` against `tpm2.HandleOwner`. In the TPM, primary keys are
+deterministic — same parameters + same hierarchy = same key. If the provisioning script
+uses the Endorsement hierarchy but SPIRE uses the Owner hierarchy, the primaries are
+different keys and SPIRE cannot load the DevID child blobs.
 
-### Phase 5 — SPIRE Agent Config and DaemonSet Update
+**Primary key attributes** (must match SPIRE's `SRKTemplateHighRSA()` exactly):
+```
+-G rsa
+-a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt"
+```
+The symmetric cipher (AES-128-CFB) is implied by `restricted|decrypt` in tpm2-tools 5.7.
+Do NOT use `-G rsa2048:aes128cfb:null` — that compound form is not accepted.
 
-Update `manifests/spire/agent-config.yaml`:
-- Replace `NodeAttestor "k8s_psat"` with `NodeAttestor "tpm_devid"`
-- Set `devid_cert_path`, `devid_priv_path`, `devid_pub_path` to paths under `/etc/spire/`
+**DevID key signing scheme** must be `rsa:rsassa` (RSASSA-PKCS1-v1.5), not `rsa`
+(which defaults to `null` scheme). With a null scheme, go-tpm's `DecodePublic` returns a
+`Public` struct where `RSAParameters.Sign` is nil, causing a nil pointer dereference in
+the `tpm_devid` plugin.
 
-Update `manifests/spire/agent-daemonset.yaml`:
-- Add a hostPath volume for `/etc/spire` (where provisioning script writes the blobs)
-- Remove the projected service account token volume (no longer needed for node attestation)
-- Keep `hostPID: true` — still required for workload attestation
+**Blob format — stripping the TPM2B prefix:** `tpm2_create -u/-r` outputs blobs in
+`TPM2B_PUBLIC` / `TPM2B_PRIVATE` format (2-byte big-endian size + payload). SPIRE's
+go-tpm library expects the raw payload without that prefix:
+- `tpm2.DecodePublic(pubBytes)` decodes raw TPMT_PUBLIC directly
+- `tpm2.Load(... privateBlob)` packs the private blob via `U16Bytes()`, adding the
+  prefix itself — so the file must NOT already have one
 
-### Phase 6 — Deploy and Re-register
+The strip must happen **after** `tpm2_load` (which needs the full TPM2B wrappers to
+load the key), not before:
+```bash
+dd if=devid.pub  bs=1 skip=2 of=devid.pub.raw  && mv devid.pub.raw  devid.pub
+dd if=devid.priv bs=1 skip=2 of=devid.priv.raw && mv devid.priv.raw devid.priv
+```
 
-1. Apply updated server ConfigMap and roll the StatefulSet
-2. Clear existing registration entries from the SPIRE database
-3. Apply updated agent ConfigMap and roll the DaemonSet (agents re-attest via TPM)
-4. Re-run the registration jobs for experiments 11 and 21
-5. Verify: `spire-server entry show` lists correct entries; demo workloads receive SVIDs
+**CSR generation via tpm2-openssl:** Standard `openssl req -key` cannot use a TPM public
+key PEM as if it were a private key. Instead: install `tpm2-openssl`, persist the DevID
+key to a TPM NV handle, and generate the CSR through the TPM provider:
+```bash
+openssl req -provider tpm2 -provider default -key "handle:0x81010001" -new -out devid.csr ...
+```
+The private key signs the CSR data inside the TPM chip. After the CSR is fetched, evict
+the handle — SPIRE only needs the blob files.
 
-### Phase 7 — Automate Provisioning in Reinstall Flow
+### Phase 4 — SPIRE Server Config (complete)
 
-Add DevID provisioning to the node reinstall pipeline so that a freshly reinstalled node
-automatically gets its TPM DevID material before the SPIRE agent starts. The
-`reinstall-nodes.sh` script calls `provision-tpm-devid.sh` after the node rejoins k3s,
-then the CSR is signed and the cert is deployed before Flux reconciles the SPIRE agent.
+**`manifests/spire/server-config.yaml`:** `k8s_psat` attestor replaced with `tpm_devid`:
+```hcl
+NodeAttestor "tpm_devid" {
+  plugin_data {
+    devid_ca_path      = "/run/spire/tpm-ca/devid-ca.pem"
+    endorsement_ca_path = "/run/spire/tpm-ca/endorsement-ca-bundle.pem"
+  }
+}
+```
 
-This closes the operational loop: reinstall a node → it gets a fresh TPM DevID cert →
-SPIRE agent attests automatically on first start.
+**`manifests/spire/server-tpm-ca.yaml`:** new ConfigMap carrying both CA files, mounted
+into the StatefulSet at `/run/spire/tpm-ca/`.
+
+**`manifests/spire/server-rbac.yaml`:** the server ClusterRole was stripped of
+`tokenreviews`, `subjectaccessreviews`, `nodes`, and `pods`. With `tpm_devid`, the server
+does not call the Kubernetes API at all — attestation is purely TPM-driven. The Role
+(managing the `spire-bundle` ConfigMap) was kept.
+
+### Phase 5 — SPIRE Agent Config and DaemonSet (complete)
+
+**`manifests/spire/agent-config.yaml`:** `k8s_psat` replaced with `tpm_devid`:
+```hcl
+NodeAttestor "tpm_devid" {
+  plugin_data {
+    devid_cert_path = "/etc/spire/devid.crt"
+    devid_priv_path = "/etc/spire/devid.priv"
+    devid_pub_path  = "/etc/spire/devid.pub"
+    tpm_device_path = "/dev/tpmrm0"
+  }
+}
+```
+
+`tpm_device_path` is set explicitly. Without it, the plugin auto-detects, which failed
+inside the container even after the device was mounted.
+
+**`manifests/spire/agent-daemonset.yaml`:** two volume changes:
+- **Added**: `/dev/tpmrm0` as a `CharDevice` hostPath — the SPIRE agent must open the
+  TPM device directly to execute the Load command and credential activation challenge.
+  `/dev/tpmrm0` (the resource manager) is used rather than `/dev/tpm0` (the raw device)
+  because the resource manager handles concurrent access from multiple processes.
+- **Removed**: projected service account token volume (`spire-token`) — no longer needed
+  since node attestation is TPM-based, not PSAT-based.
+
+**Flux reconciliation:** any `kubectl apply` that races with Flux reconciliation can be
+silently reverted. Changes must be committed and pushed to Git before they will persist —
+`flux reconcile kustomization spire --with-source` forces an immediate reconcile.
+
+### Phase 6 — Deploy and Re-register (complete, 2026-07-09)
+
+**Server** rolled first. Log confirms:
+```
+Plugin loaded: plugin_name=tpm_devid plugin_type=NodeAttestor
+```
+
+**All 6 agents** attested successfully. Each node received a unique SPIFFE ID derived
+from the SHA-1 fingerprint of its DevID certificate:
+
+| Node | SPIFFE ID (agent) |
+|------|-------------------|
+| ipc4 | `spiffe://ipc.local/spire/agent/tpm_devid/42a1e85ad43b4c136b83573d0b4ac60b93306ee6` |
+| ipc5 | `spiffe://ipc.local/spire/agent/tpm_devid/78d5a22ca1d23e1fcf7e18258bcdfc341167eeac` |
+| ipc6 | `spiffe://ipc.local/spire/agent/tpm_devid/8cbaa975848b0c844f7a3197f6240c35ad060f58` |
+| ipc7 | `spiffe://ipc.local/spire/agent/tpm_devid/31dc39d59d115c652b1d46e9f5b8dd2deebb799e` |
+| ipc8 | `spiffe://ipc.local/spire/agent/tpm_devid/4acd537f6b1e99624917a59bce683559d04aa04e` |
+| ipc9 | `spiffe://ipc.local/spire/agent/tpm_devid/f5d3754a4cf4c0f65caeb3ae027e9f03d24c5019` |
+
+**Registration entries** updated: the old node alias entry (selector `k8s_psat:cluster:ipc`)
+was deleted and replaced with a new one:
+```
+SPIFFE ID: spiffe://ipc.local/k8s-node
+Parent:    spiffe://ipc.local/spire/server
+Selector:  tpm_devid:issuer:cn:ipc-cluster DevID CA
+-node flag set
+```
+
+The `issuer:cn` selector matches all nodes signed by our DevID CA without needing
+per-node entries. Workload entries (`demo-app`, `mtls-server`, etc.) were unchanged —
+they reference `spiffe://ipc.local/k8s-node` as their parent, which the new alias entry
+satisfies.
+
+**End-to-end verification:** the `spire-demo/demo-workload` pod received SVID
+`spiffe://ipc.local/demo-app` (1-hour TTL, signed by the SPIRE CA).
+
+### Phase 7 — Reinstall Automation (complete)
+
+`scripts/reinstall-nodes.sh` calls `provision-tpm-devid.sh` after a node rejoins k3s
+and is Ready. If `op` is not authenticated, the step warns but does not fail the reinstall.
+The operator can re-run `bash scripts/provision-tpm-devid.sh <node>` manually afterward.
+
+**Operational loop for a reinstalled node:**
+1. PXE reinstall completes
+2. Node rejoins k3s (`join-server.sh` or `upgrade-agents.sh`)
+3. `provision-tpm-devid.sh` generates a new TPM-bound DevID key, fetches CA key from
+   1Password, signs a new cert, installs at `/etc/spire/`
+4. Flux reconciles SPIRE agent DaemonSet — agent starts, loads DevID blobs, attests via TPM
+5. SPIRE server issues Node SVID matching `tpm_devid:issuer:cn:ipc-cluster DevID CA`
+6. Workloads on the node can receive SVIDs
+
+No manual SPIRE steps are needed after a node reinstall.
 
 ---
 
