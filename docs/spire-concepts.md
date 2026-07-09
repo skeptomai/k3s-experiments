@@ -605,13 +605,63 @@ external partners, but the mechanism is built in to SPIRE.
 
 ### The Trust Root and Security Boundary
 
-SPIRE's security model on this cluster roots trust in Kubernetes itself — the PSAT is
-issued and validated by the Kubernetes API server. Consequently:
+With `tpm_devid`, the server's trust in the agent is hardware-rooted: the agent proves
+possession of a TPM-bound key and that the key and EK live in the same physical chip.
+This is strong, asymmetric cryptographic proof.
 
-- If someone can create pods in the `spire` namespace or compromise the `spire-server`
-  ServiceAccount, they own the CA and can issue arbitrary SVIDs.
-- The `spire` namespace is the security boundary, not individual workloads.
-- This is the standard SPIRE deployment posture, documented in the experiment README.
+The agent's trust in the server is not symmetric. It is Kubernetes-rooted.
+
+**The bootstrap problem:** before the agent can attest, it needs to establish a TLS
+connection to the SPIRE server. To verify the server's TLS certificate it needs a trust
+anchor — the SPIRE CA cert — which arrives in the `spire-bundle` ConfigMap. But the
+ConfigMap is not itself cryptographically authenticated. The agent has no independent way
+to verify "this CA cert belongs to *the* SPIRE server I am supposed to talk to."
+
+What the agent actually knows at bootstrap:
+
+1. There is a CA cert at `/run/spire/bundle/bundle.crt`
+2. The server it can reach presents a TLS cert signed by that CA
+3. Those two facts are mutually consistent
+
+Consistency is not proof of legitimacy. A rogue SPIRE server could publish its own CA
+cert into the ConfigMap and present a cert signed by it. From the agent's perspective,
+both situations look identical — cert matches CA, TLS handshake succeeds, proceed to
+attest. The agent cannot detect the substitution.
+
+The circularity: the agent uses the bundle to authenticate the server, but the bundle
+itself arrived from an unauthenticated channel. Breaking this circularity requires an
+out-of-band trust anchor — something the agent knows before it ever contacts the server.
+
+**Current posture:** the ConfigMap write is protected by RBAC. Only the `spire-server`
+ServiceAccount can write `spire-bundle`. This is a policy control, not a cryptographic
+proof. If that policy is ever violated — through a compromised ServiceAccount, a
+misconfigured RBAC rule, or a cluster-admin mistake — the agent cannot detect it. The
+`spire` namespace is the security boundary, not individual workloads.
+
+### TPM-Based Server Attestation (the fix)
+
+The `spiffe/spire-server-attestor-tpm` project closes this gap by giving agents a
+cryptographic way to verify the server's identity before accepting its bundle.
+
+The approach:
+
+- The SPIRE server signs the trust bundle with a key held in its own TPM
+- The agent, during bootstrap, verifies that signature against the server's TPM public
+  key, which was enrolled out-of-band during provisioning
+- Only if the signature is valid does the agent accept the bundle and proceed to attest
+
+This makes both directions hardware-rooted:
+- **Agent → Server trust:** verified by TPM signature on the bundle before connection
+- **Server → Agent trust:** verified by `tpm_devid` credential activation challenge
+
+The server's TPM is already available: `spire-server-0` runs on ipc4, which has a
+Nuvoton NPCT75x TPM with a valid EK cert. The server could be provisioned with a DevID
+cert using the same `scripts/provision-tpm-devid.sh` script used for the agents.
+
+**Current state:** `spiffe/spire-server-attestor-tpm` was at v0.0.4 (April 2025) and
+described as development-phase. It is the right architectural direction but not yet
+production-ready. Implementing it would be the next step after the current `tpm_devid`
+work to achieve fully symmetric hardware-rooted trust.
 
 ### Vault Integration via JWT SVID
 
