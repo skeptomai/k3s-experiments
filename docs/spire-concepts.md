@@ -33,9 +33,13 @@ workloads on ipc7, and those workloads only connect to ipc7's agent socket.
 
 Each agent bootstraps its trust bundle via the `verify-bundle` init container (see TPM
 Server Attestation below), which fetches the bundle signed by the server's TPM key,
-verifies the signature, and writes the bundle to an emptyDir for the agent to read on
-startup. The server also maintains the `spire-bundle` ConfigMap via the `k8sbundle`
-notifier, but agents no longer bootstrap from it directly.
+verifies the signature, and writes the bundle to an emptyDir volume shared between the
+init container and the main container. Init containers and main containers never run
+simultaneously — Kubernetes enforces that all init containers exit before the main
+containers start — so the emptyDir is the handoff point: the init container writes the
+verified bundle and exits, then the agent starts and reads it. The server also maintains
+the `spire-bundle` ConfigMap via the `k8sbundle` notifier, but agents no longer bootstrap
+from it directly.
 
 ### Cluster Architecture
 
