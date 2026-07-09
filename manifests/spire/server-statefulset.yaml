@@ -42,6 +42,9 @@ spec:
               readOnly: true
             - name: spire-data
               mountPath: /run/spire/data
+            - name: spire-tpm-ca
+              mountPath: /run/spire/tpm-ca
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /live
@@ -58,6 +61,9 @@ spec:
         - name: spire-config
           configMap:
             name: spire-server
+        - name: spire-tpm-ca
+          configMap:
+            name: spire-tpm-ca
   volumeClaimTemplates:
     - metadata:
         name: spire-data

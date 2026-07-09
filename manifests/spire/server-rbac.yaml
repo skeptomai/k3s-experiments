@@ -4,21 +4,13 @@ metadata:
   name: spire-server
   namespace: spire
 ---
-# Lets the server validate k8s_psat node attestation tokens
+# tpm_devid attestation is fully TPM-driven; no Kubernetes API calls needed by
+# the server for node attestation. ClusterRole retained for future use.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: spire-server
-rules:
-  - apiGroups: [""]
-    resources: ["nodes", "pods"]
-    verbs: ["get"]
-  - apiGroups: ["authentication.k8s.io"]
-    resources: ["tokenreviews"]
-    verbs: ["create"]
-  - apiGroups: ["authorization.k8s.io"]
-    resources: ["subjectaccessreviews"]
-    verbs: ["create"]
+rules: []
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

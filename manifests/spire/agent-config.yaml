@@ -18,9 +18,11 @@ data:
     }
 
     plugins {
-      NodeAttestor "k8s_psat" {
+      NodeAttestor "tpm_devid" {
         plugin_data {
-          cluster = "ipc"
+          devid_cert_path = "/etc/spire/devid.crt"
+          devid_priv_path = "/etc/spire/devid.priv"
+          devid_pub_path  = "/etc/spire/devid.pub"
         }
       }
 

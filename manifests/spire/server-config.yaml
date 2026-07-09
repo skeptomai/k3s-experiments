@@ -21,13 +21,10 @@ data:
         }
       }
 
-      NodeAttestor "k8s_psat" {
+      NodeAttestor "tpm_devid" {
         plugin_data {
-          clusters = {
-            "ipc" = {
-              service_account_allow_list = ["spire:spire-agent"]
-            }
-          }
+          devid_ca_path = "/run/spire/tpm-ca/devid-ca.pem"
+          endorsement_ca_path = "/run/spire/tpm-ca/endorsement-ca-bundle.pem"
         }
       }
 

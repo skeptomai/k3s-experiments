@@ -4,6 +4,7 @@ resources:
   - namespace.yaml
   - server-rbac.yaml
   - server-config.yaml
+  - server-tpm-ca.yaml
   - server-statefulset.yaml
   - agent-rbac.yaml
   - agent-config.yaml
