@@ -292,13 +292,45 @@ not ship one by default, but the pattern is well-established. The SPIRE Controll
 Manager and spiffe-helper projects both support variations of this. This cluster does not
 currently run a webhook, so socket mounts must be added to pod specs manually.
 
+**Service account:**
+
+Every pod runs under a Kubernetes service account, declared in the pod spec via
+`serviceAccountName`. If not specified, Kubernetes assigns the `default` service account
+for the namespace. The service account must exist as a `ServiceAccount` resource in the
+same namespace — Kubernetes then automatically mounts a signed JWT for it into the pod at
+startup. The service account is how Kubernetes RBAC controls what the pod can do with the
+Kubernetes API.
+
+For SPIRE, the service account is also an identity anchor. When the agent resolves a
+connecting process to a pod via the kubelet API, one of the fields returned is
+`serviceAccountName`. SPIRE uses this — alongside the namespace — as the selector that
+determines which registration entry applies and therefore which SPIFFE ID to issue.
+
 **Registration entry:**
 
 The pod spec change gives the workload access to the socket, but the SPIRE server also
 needs a registration entry that maps the pod's namespace and service account to a SPIFFE
-ID. Without a matching entry, the agent accepts the connection but returns
-`PermissionDenied: no identity issued`. Entries are currently managed imperatively via
-`spire-server entry create` (see Registration Entries below).
+ID. Three things must agree for a workload to receive an SVID:
+
+```
+ServiceAccount resource:  name: mtls-client-sa   (namespace: mtls-demo)
+           ↕
+Pod spec:                 serviceAccountName: mtls-client-sa
+           ↕
+SPIRE entry:              k8s:ns:mtls-demo + k8s:sa:mtls-client-sa → spiffe://ipc.local/mtls-client
+```
+
+If any one of these disagrees — wrong namespace, wrong service account name, entry not
+yet created — the workload gets `PermissionDenied: no identity issued`. The agent gives
+no specific indication of which piece is missing; it simply sees a pod whose metadata
+matches no entry.
+
+The service account and pod spec live in Git and are managed by Flux. The registration
+entry currently does not — it lives in SQLite on the NFS PVC, created imperatively via
+`spire-server entry create`. This is the GitOps gap: if the cluster is rebuilt, Flux
+restores the pod and service account automatically, but the SPIRE entry is gone and the
+workload silently fails to get an SVID. See Registration Entries below for the full
+discussion and the ClusterSPIFFEID alternative that closes this gap.
 
 ### Pelagos Compatibility Fixes
 
