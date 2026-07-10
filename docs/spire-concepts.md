@@ -71,11 +71,29 @@ Here is the full chain as implemented on this cluster:
 
 **0. Agent trusts the server (TPM-signed bundle)**
 Before the SPIRE agent starts, the `verify-bundle` init container fetches the trust bundle
-JWT from the `spire-bundle-signing` service, verifies the RS256 signature against
-`/etc/spire/server-bundle-signing.pub` — the server's TPM public key written to the node
-during physical provisioning — and only writes the bundle to disk if the signature is
-valid. The agent will not start if this check fails. This means the agent's trust in the
-server is rooted in the server's hardware TPM, not in Kubernetes infrastructure.
+JWT from `spire-bundle-signing` — a ClusterIP Service that exposes an HTTP endpoint on
+the SPIRE server pod (a busybox httpd sidecar on port 8181, serving the file that the
+`signer-unix` sidecar writes after signing with the server's TPM key). The init container
+verifies the RS256 signature on that JWT against `/etc/spire/server-bundle-signing.pub`
+and only writes the bundle to disk if the signature is valid. The agent will not start if
+this check fails.
+
+The server's TPM public key lives in a file on the agent node rather than being fetched
+from the TPM at runtime for two reasons. First, TPMs are local hardware — the server's
+TPM is physically on ipc4 and there is no network protocol for reading a remote TPM's
+public key; each TPM is only accessible to the machine it is soldered to. Second, and
+more importantly, fetching the key through any Kubernetes channel (ConfigMap, Secret,
+API) would defeat the purpose entirely: the whole point is that the agent needs a trust
+anchor that is independent of Kubernetes infrastructure, so that a compromised control
+plane cannot substitute a rogue server's key. A key that arrives via Kubernetes can be
+swapped by anyone who controls Kubernetes.
+
+Writing the key to `/etc/spire/server-bundle-signing.pub` during physical provisioning
+(via `provision-tpm-devid.sh`, running from omen over SSH before SPIRE starts) is what
+makes it out-of-band. It arrives through the same direct-SSH channel as the DevID
+material — a channel that SPIRE cannot influence and that a Kubernetes compromise cannot
+reach. This means the agent's trust in the server is rooted in the server's hardware TPM,
+not in Kubernetes infrastructure.
 
 **1. Server trusts the agent (TPM DevID credential activation)**
 DevID (IEEE 802.1AR Secure Device Identity) is the standard that defines a hardware-bound
