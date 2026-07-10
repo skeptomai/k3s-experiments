@@ -1,35 +1,5 @@
 # SPIRE/SPIFFE: Concepts, Configuration, and Infrastructure
 
-## What Is Running on This Cluster
-
-**Trust domain:** `ipc.local`
-
-**SPIRE Server** — StatefulSet (1 replica) on the cluster. Two things persist in SQLite
-on a 1Gi PVC provisioned by the `nfs-subdir-external-provisioner` StorageClass, backed
-by nazgul (`192.168.89.2`) at `/mnt/primary_storage/k8s-nfs`:
-
-- **CA keys** — the private key material the server uses to sign SVIDs (Secure Verifiable
-  Identity Documents), the short-lived certificates issued to workloads as proof of
-  identity.
-- **Registration entries** — the policy database that maps Kubernetes pod attributes
-  (namespace, service account) to SPIFFE IDs. When a workload connects to the Workload
-  API, the agent matches the pod's observed metadata against these entries to determine
-  which identity to issue. See the Registration Entries section for a full explanation.
-
-Listens on gRPC port 8081 via a headless service. Flux manages it from `manifests/spire/`.
-
-**SPIRE Agent** — DaemonSet on all 6 nodes. Runs with `hostPID: true` (required for
-workload attestation — see Workload Attestation). Exposes the Workload API at
-`/run/spire/sockets/agent.sock` on the node's host filesystem via a `hostPath` volume,
-so any pod on the same node that mounts that path can reach it. Bootstraps its trust
-bundle via a `verify-bundle` init container that fetches the server's TPM-signed bundle
-before the agent starts (see TPM Server Attestation). Attests to the SPIRE server via
-TPM DevID (see Node Attestation).
-
-### Cluster Architecture
-
-![SPIRE cluster architecture — nodes, agents, server, TPMs, and workloads](spire-architecture.png)
-
 ---
 
 ## SPIFFE and SPIRE — the Concepts
@@ -153,6 +123,110 @@ No single layer alone is sufficient. The TPM proves hardware identity but not wh
 workload. The Kubernetes selectors prove pod identity but only as strongly as Kubernetes
 policy. The registration entry ties the two together under explicit operator authorization.
 An SVID that reaches a workload means all four layers held simultaneously.
+
+---
+
+## SVIDs — the Two Forms
+
+**SVID** = SPIFFE Verifiable Identity Document. Two formats:
+
+### X.509 SVID
+
+A standard X.509 certificate with one key addition: the SPIFFE ID is encoded in the
+certificate's **Subject Alternative Name (SAN)** as a URI
+(`spiffe://ipc.local/demo-app`). Inspect with:
+
+```
+openssl x509 -in svid.pem -text -noout | grep URI
+```
+
+Properties:
+
+- **Short-lived** (default TTL: 1 hour). The agent rotates them automatically before
+  expiry, typically at the 50% mark.
+- Carries the full chain: leaf cert + intermediate(s) up to the trust bundle.
+- Used for **mTLS** — both sides present their SVID as the TLS client/server cert, and
+  verify the peer's cert against the trust bundle. This is what experiment 21
+  demonstrates.
+- Opaque to network intermediaries (the identity is in the cert, not the payload).
+
+### JWT SVID
+
+A signed JWT with the SPIFFE ID in the `sub` claim and an `aud` (audience) claim.
+
+Properties:
+
+- Also short-lived. **Not** automatically rotated — the workload must re-fetch when it
+  needs a fresh one.
+- Used when mTLS is not possible: HTTP APIs where identity must be passed in a header
+  (`Authorization: Bearer <jwt>`), or when a network intermediary (load balancer, API
+  gateway) terminates TLS before reaching the workload.
+- The receiving service verifies the JWT signature against the trust bundle's public key,
+  not by doing a TLS handshake.
+- Fetch with: `spire-agent api fetch jwt -audience <target-service> -socketPath ...`
+- The **audience field matters**: a JWT fetched for audience `api-gateway` won't be
+  accepted by a verifier expecting `payments-service`. This prevents token replay across
+  services.
+
+### When to Use Which
+
+| Scenario | Format |
+|----------|--------|
+| Service-to-service where you control both ends | X.509 (mTLS) |
+| HTTP API, identity passed in header | JWT |
+| Identity through a TLS-terminating proxy | JWT |
+| Authenticating to Vault (JWT auth method) | JWT |
+| Envoy/service mesh transparent mTLS | X.509 |
+
+---
+
+## The Trust Bundle
+
+The trust bundle is the SPIRE CA's root certificate(s). Everything signed by SPIRE is
+verifiable against it. On this cluster:
+
+- The server writes it to the `spire-bundle` ConfigMap in the `spire` namespace (via the
+  `k8s_bundle` notifier) as a reference copy, but agents no longer bootstrap from it
+  directly — they use the TPM-verified bundle written by the `verify-bundle` init container.
+- Workloads receive it alongside their SVID when calling the Workload API — so they can
+  verify peers without any pre-shared secrets or manual cert distribution.
+
+**Trust bundle rotation:** If the server's CA rotates (either on schedule or forced), it
+publishes the new root alongside the old one during a transition window. SVIDs issued
+under the old CA remain valid until expiry; verifiers must accept both roots during the
+overlap. This is automatic in SPIRE.
+
+---
+
+## What Is Running on This Cluster
+
+**Trust domain:** `ipc.local`
+
+**SPIRE Server** — StatefulSet (1 replica) on the cluster. Two things persist in SQLite
+on a 1Gi PVC provisioned by the `nfs-subdir-external-provisioner` StorageClass, backed
+by nazgul (`192.168.89.2`) at `/mnt/primary_storage/k8s-nfs`:
+
+- **CA keys** — the private key material the server uses to sign SVIDs (Secure Verifiable
+  Identity Documents), the short-lived certificates issued to workloads as proof of
+  identity.
+- **Registration entries** — the policy database that maps Kubernetes pod attributes
+  (namespace, service account) to SPIFFE IDs. When a workload connects to the Workload
+  API, the agent matches the pod's observed metadata against these entries to determine
+  which identity to issue. See the Registration Entries section for a full explanation.
+
+Listens on gRPC port 8081 via a headless service. Flux manages it from `manifests/spire/`.
+
+**SPIRE Agent** — DaemonSet on all 6 nodes. Runs with `hostPID: true` (required for
+workload attestation — see Workload Attestation). Exposes the Workload API at
+`/run/spire/sockets/agent.sock` on the node's host filesystem via a `hostPath` volume,
+so any pod on the same node that mounts that path can reach it. Bootstraps its trust
+bundle via a `verify-bundle` init container that fetches the server's TPM-signed bundle
+before the agent starts (see TPM Server Attestation). Attests to the SPIRE server via
+TPM DevID (see Node Attestation).
+
+### Cluster Architecture
+
+![SPIRE cluster architecture — nodes, agents, server, TPMs, and workloads](spire-architecture.png)
 
 ---
 
@@ -450,108 +524,6 @@ The **SPIRE Controller Manager** provides a `ClusterSPIFFEID` CRD. Entries are d
 as Kubernetes resources in Git; the controller reconciles them into SPIRE continuously.
 This closes the GitOps gap. Architected in `docs/spire-trust-chain-clusterspiffeid.mmd`
 but not yet deployed.
-
----
-
-## SVIDs — the Two Forms
-
-**SVID** = SPIFFE Verifiable Identity Document. Two formats:
-
-### X.509 SVID
-
-A standard X.509 certificate with one key addition: the SPIFFE ID is encoded in the
-certificate's **Subject Alternative Name (SAN)** as a URI
-(`spiffe://ipc.local/demo-app`). Inspect with:
-
-```
-openssl x509 -in svid.pem -text -noout | grep URI
-```
-
-Properties:
-
-- **Short-lived** (default TTL: 1 hour). The agent rotates them automatically before
-  expiry, typically at the 50% mark.
-- Carries the full chain: leaf cert + intermediate(s) up to the trust bundle.
-- Used for **mTLS** — both sides present their SVID as the TLS client/server cert, and
-  verify the peer's cert against the trust bundle. This is what experiment 21
-  demonstrates.
-- Opaque to network intermediaries (the identity is in the cert, not the payload).
-
-### JWT SVID
-
-A signed JWT with the SPIFFE ID in the `sub` claim and an `aud` (audience) claim.
-
-Properties:
-
-- Also short-lived. **Not** automatically rotated — the workload must re-fetch when it
-  needs a fresh one.
-- Used when mTLS is not possible: HTTP APIs where identity must be passed in a header
-  (`Authorization: Bearer <jwt>`), or when a network intermediary (load balancer, API
-  gateway) terminates TLS before reaching the workload.
-- The receiving service verifies the JWT signature against the trust bundle's public key,
-  not by doing a TLS handshake.
-- Fetch with: `spire-agent api fetch jwt -audience <target-service> -socketPath ...`
-- The **audience field matters**: a JWT fetched for audience `api-gateway` won't be
-  accepted by a verifier expecting `payments-service`. This prevents token replay across
-  services.
-
-### When to Use Which
-
-| Scenario | Format |
-|----------|--------|
-| Service-to-service where you control both ends | X.509 (mTLS) |
-| HTTP API, identity passed in header | JWT |
-| Identity through a TLS-terminating proxy | JWT |
-| Authenticating to Vault (JWT auth method) | JWT |
-| Envoy/service mesh transparent mTLS | X.509 |
-
----
-
-## The Trust Bundle
-
-The trust bundle is the SPIRE CA's root certificate(s). Everything signed by SPIRE is
-verifiable against it. On this cluster:
-
-- The server writes it to the `spire-bundle` ConfigMap in the `spire` namespace (via the
-  `k8s_bundle` notifier) as a reference copy, but agents no longer bootstrap from it
-  directly — they use the TPM-verified bundle written by the `verify-bundle` init container.
-- Workloads receive it alongside their SVID when calling the Workload API — so they can
-  verify peers without any pre-shared secrets or manual cert distribution.
-
-**Trust bundle rotation:** If the server's CA rotates (either on schedule or forced), it
-publishes the new root alongside the old one during a transition window. SVIDs issued
-under the old CA remain valid until expiry; verifiers must accept both roots during the
-overlap. This is automatic in SPIRE.
-
----
-
-## Experiments Running on This Cluster
-
-### Experiment 11: Workload SVID Fetch
-
-Namespace `spire-demo`, service account `demo-sa`. A demo pod fetches its X.509 SVID via
-the Workload API and prints the SPIFFE ID and cert details using `openssl`. Proves end-to-end
-attestation works.
-
-Registration entries created by an imperative Job:
-
-| SPIFFE ID | Parent | Selectors |
-|-----------|--------|-----------|
-| `spiffe://ipc.local/k8s-node` | `spiffe://ipc.local/spire/server` | `tpm_devid:issuer:cn:ipc-cluster DevID CA` (active node alias) |
-| `spiffe://ipc.local/k8s-node` | `spiffe://ipc.local/spire/server` | `k8s_psat:cluster:ipc` (legacy — exists in DB, unused) |
-| `spiffe://ipc.local/demo-app` | `spiffe://ipc.local/k8s-node` | `k8s:ns:spire-demo`, `k8s:sa:demo-sa` |
-
-### Experiment 21: mTLS Between Two Workloads
-
-Namespace `mtls-demo`. An `mtls-server` and `mtls-client` each receive unique X.509 SVIDs
-from SPIRE. The server runs `openssl s_server` requiring client cert (`-Verify 1`); the
-client runs `openssl s_client` presenting its SVID. Both sides verify against the SPIRE
-trust bundle. Zero pre-shared secrets.
-
-| SPIFFE ID | Workload |
-|-----------|----------|
-| `spiffe://ipc.local/mtls-server` | `mtls-server` Deployment (`mtls-server-sa`) |
-| `spiffe://ipc.local/mtls-client` | `mtls-client` Pod (`mtls-client-sa`) |
 
 ---
 
@@ -913,6 +885,136 @@ No manual SPIRE steps are needed after a node reinstall.
 
 ---
 
+## TPM Server Attestation
+
+The `spiffe/spire-server-attestor-tpm` project (v0.0.4, April 2025) closes this gap.
+It provides four binaries that together give agents a cryptographic way to verify the
+server before accepting its bundle.
+
+### Components
+
+| Binary | Role | Runs on |
+|--------|------|---------|
+| `spire-server-attestor-tpm-sign` | SPIRE `BundlePublisher` plugin; receives the trust bundle from the server and pushes it to the signer | SPIRE server pod (hostPath binary) |
+| `spire-server-attestor-tpm-signer-unix` | Root daemon with TPM access; signs the bundle using the server's TPM key; writes signed JWT to disk | SPIRE server pod (hostPath binary, `/dev/tpmrm0` mounted) |
+| `spire-server-attestor-tpm-signer-http` | **Not used on this cluster.** Despite its name, this is a software-key signing alternative to `signer-unix` — it signs JWTs using a PEM RSA private key, not the TPM. It is not an HTTP frontend for `signer-unix`. Using it here would replace hardware attestation with a software key. | — |
+| `spire-server-attestor-tpm-verifier` | **Not used on this cluster.** Agent-side daemon intended for systemd deployments; replaced here by the `verify-bundle` init container. | — |
+
+The project ships all four binaries. Two are appropriate for this cluster's Kubernetes/TPM
+deployment; two are not:
+
+- **`sign` + `signer-unix`**: use these. They provide the TPM-backed signing chain.
+- **`signer-http`**: skip. It is for deployments *without* a TPM, where a software key
+  is acceptable. Deploying it alongside `signer-unix` would serve a separately signed
+  (software-keyed) bundle that agents could not verify against the TPM public key anyway.
+- **`verifier`**: skip. Designed as a persistent daemon for systemd-managed agents.
+  Replaced here by the `verify-bundle` init container, which is better suited to the
+  Kubernetes pod lifecycle (runs once, exits, agent starts).
+
+The HTTP serving role that `signer-http` would fill in a non-TPM deployment is handled
+here by a `busybox httpd` sidecar — one line, no config, serves the file that
+`signer-unix` writes.
+
+### Data Flow
+
+![TPM server bundle signing and verification flow](spire-server-bundle-signing.png)
+
+### Why This Breaks the Circular Trust
+
+The verifier must verify the HTTP bundle before the SPIRE agent accepts it. The
+verification requires the server's TPM public key. That public key is NOT fetched from
+Kubernetes — it is written to `/etc/spire/server-bundle-signing.pub` on each agent node
+during physical provisioning (by `scripts/provision-tpm-devid.sh`), before any SPIRE
+component starts.
+
+This is the out-of-band anchor. An attacker who compromises the Kubernetes control plane
+and rewrites the `spire-bundle` ConfigMap or the signer-http response still cannot
+produce a valid signature over the substituted bundle because:
+
+- Producing the signature requires the server's TPM private key
+- That private key never leaves ipc4's TPM chip
+- The verifier checks the signature before the SPIRE agent accepts anything
+- Signature check fails → agent rejects the bundle → does not connect to the rogue server
+
+The server's TPM public key on the agent nodes is the cryptographic root of the entire
+bootstrap chain. It is distributed through the same physical provisioning channel as the
+agent's own DevID material, not through Kubernetes.
+
+### Server TPM Key (separate from DevID)
+
+A dedicated **bundle-signing key** is provisioned on ipc4's TPM, separate from the
+agent's DevID key. Key separation is important: the DevID key is used for SPIRE agent
+attestation; the bundle-signing key is used only to authenticate the trust bundle to
+agents. Different purposes, different keys, both TPM-bound.
+
+The bundle-signing key uses TPM handle `0x81008006` (the handle recommended by the
+project). It is created under the Owner hierarchy (same as DevID keys) with RSA 2048 and
+`rsassa` signing scheme.
+
+### Integration for This Cluster
+
+Because our SPIRE server and agents run as Kubernetes pods rather than systemd services,
+the components are adapted as pod sidecars:
+
+- `signer-unix` runs as a sidecar container in the `spire-server` StatefulSet pod with
+  `/dev/tpmrm0` mounted. The `sign` and `signer-unix` binaries are hostPath volumes from
+  `/usr/local/bin/` on ipc4. `signer-http` is NOT used — see the Components table above.
+- `signer-unix` writes the signed JWT to `/var/spire/signed-bundle/spiffetrustbundle.token`
+  on a shared emptyDir. A `bundle-http` sidecar (`busybox:1.36`) serves that directory
+  over HTTP with `httpd -f -p 8181 -h /var/spire/signed-bundle` — no config file needed.
+  This is exposed as the `spire-bundle-signing` ClusterIP Service on port 80.
+- Instead of the `verifier` binary, a `verify-bundle` **init container** (`python:3.12`)
+  runs at agent pod startup. It fetches the signed JWT from the `spire-bundle-signing`
+  ClusterIP Service, verifies the RS256 signature using `openssl dgst -sha256 -verify`
+  against `/etc/spire/server-bundle-signing.pub`, extracts the `spiffetb` payload, and
+  writes it to `/run/spire/verified-bundle/bundle.crt` on an emptyDir volume shared with
+  the main container. The agent pod does not start until this init container exits 0.
+- The SPIRE agent uses `trust_bundle_path = "/run/spire/verified-bundle/bundle.crt"`
+  (the emptyDir written by the init container) instead of the `spire-bundle` ConfigMap.
+- `scripts/provision-tpm-devid.sh` also writes `/etc/spire/server-bundle-signing.pub`
+  on every agent node.
+
+### Resulting Security Posture
+
+| Direction | Before (k8s_psat era) | After tpm_devid | After server attestation |
+|-----------|----------------------|-----------------|--------------------------|
+| Server trusts agent | Kubernetes TokenReview (policy) | TPM credential activation (hardware) | TPM credential activation (hardware) |
+| Agent trusts server | ConfigMap (unauthenticated) | ConfigMap (unauthenticated) | TPM signature on bundle (hardware) |
+| Attacker must compromise | RBAC policy | Physical TPM on agent node | Physical TPM on both ipc4 AND agent node |
+| Can agent detect rogue server? | No | No | Yes — signature check fails |
+
+---
+
+## Experiments Running on This Cluster
+
+### Experiment 11: Workload SVID Fetch
+
+Namespace `spire-demo`, service account `demo-sa`. A demo pod fetches its X.509 SVID via
+the Workload API and prints the SPIFFE ID and cert details using `openssl`. Proves end-to-end
+attestation works.
+
+Registration entries created by an imperative Job:
+
+| SPIFFE ID | Parent | Selectors |
+|-----------|--------|-----------|
+| `spiffe://ipc.local/k8s-node` | `spiffe://ipc.local/spire/server` | `tpm_devid:issuer:cn:ipc-cluster DevID CA` (active node alias) |
+| `spiffe://ipc.local/k8s-node` | `spiffe://ipc.local/spire/server` | `k8s_psat:cluster:ipc` (legacy — exists in DB, unused) |
+| `spiffe://ipc.local/demo-app` | `spiffe://ipc.local/k8s-node` | `k8s:ns:spire-demo`, `k8s:sa:demo-sa` |
+
+### Experiment 21: mTLS Between Two Workloads
+
+Namespace `mtls-demo`. An `mtls-server` and `mtls-client` each receive unique X.509 SVIDs
+from SPIRE. The server runs `openssl s_server` requiring client cert (`-Verify 1`); the
+client runs `openssl s_client` presenting its SVID. Both sides verify against the SPIRE
+trust bundle. Zero pre-shared secrets.
+
+| SPIFFE ID | Workload |
+|-----------|----------|
+| `spiffe://ipc.local/mtls-server` | `mtls-server` Deployment (`mtls-server-sa`) |
+| `spiffe://ipc.local/mtls-client` | `mtls-client` Pod (`mtls-client-sa`) |
+
+---
+
 ## Advanced Topics and Production Considerations
 
 ### SVID Rotation for Long-Running Workloads
@@ -983,104 +1085,6 @@ ServiceAccount can write `spire-bundle`. This is a policy control, not a cryptog
 proof. If that policy is ever violated — through a compromised ServiceAccount, a
 misconfigured RBAC rule, or a cluster-admin mistake — the agent cannot detect it. The
 `spire` namespace is the security boundary, not individual workloads.
-
-### TPM-Based Server Attestation (the fix — implemented 2026-07-09)
-
-The `spiffe/spire-server-attestor-tpm` project (v0.0.4, April 2025) closes this gap.
-It provides four binaries that together give agents a cryptographic way to verify the
-server before accepting its bundle.
-
-#### Components
-
-| Binary | Role | Runs on |
-|--------|------|---------|
-| `spire-server-attestor-tpm-sign` | SPIRE `BundlePublisher` plugin; receives the trust bundle from the server and pushes it to the signer | SPIRE server pod (hostPath binary) |
-| `spire-server-attestor-tpm-signer-unix` | Root daemon with TPM access; signs the bundle using the server's TPM key; writes signed JWT to disk | SPIRE server pod (hostPath binary, `/dev/tpmrm0` mounted) |
-| `spire-server-attestor-tpm-signer-http` | **Not used on this cluster.** Despite its name, this is a software-key signing alternative to `signer-unix` — it signs JWTs using a PEM RSA private key, not the TPM. It is not an HTTP frontend for `signer-unix`. Using it here would replace hardware attestation with a software key. | — |
-| `spire-server-attestor-tpm-verifier` | **Not used on this cluster.** Agent-side daemon intended for systemd deployments; replaced here by the `verify-bundle` init container. | — |
-
-The project ships all four binaries. Two are appropriate for this cluster's Kubernetes/TPM
-deployment; two are not:
-
-- **`sign` + `signer-unix`**: use these. They provide the TPM-backed signing chain.
-- **`signer-http`**: skip. It is for deployments *without* a TPM, where a software key
-  is acceptable. Deploying it alongside `signer-unix` would serve a separately signed
-  (software-keyed) bundle that agents could not verify against the TPM public key anyway.
-- **`verifier`**: skip. Designed as a persistent daemon for systemd-managed agents.
-  Replaced here by the `verify-bundle` init container, which is better suited to the
-  Kubernetes pod lifecycle (runs once, exits, agent starts).
-
-The HTTP serving role that `signer-http` would fill in a non-TPM deployment is handled
-here by a `busybox httpd` sidecar — one line, no config, serves the file that
-`signer-unix` writes.
-
-#### Data Flow
-
-![TPM server bundle signing and verification flow](spire-server-bundle-signing.png)
-
-#### Why This Breaks the Circular Trust
-
-The verifier must verify the HTTP bundle before the SPIRE agent accepts it. The
-verification requires the server's TPM public key. That public key is NOT fetched from
-Kubernetes — it is written to `/etc/spire/server-bundle-signing.pub` on each agent node
-during physical provisioning (by `scripts/provision-tpm-devid.sh`), before any SPIRE
-component starts.
-
-This is the out-of-band anchor. An attacker who compromises the Kubernetes control plane
-and rewrites the `spire-bundle` ConfigMap or the signer-http response still cannot
-produce a valid signature over the substituted bundle because:
-
-- Producing the signature requires the server's TPM private key
-- That private key never leaves ipc4's TPM chip
-- The verifier checks the signature before the SPIRE agent accepts anything
-- Signature check fails → agent rejects the bundle → does not connect to the rogue server
-
-The server's TPM public key on the agent nodes is the cryptographic root of the entire
-bootstrap chain. It is distributed through the same physical provisioning channel as the
-agent's own DevID material, not through Kubernetes.
-
-#### Server TPM Key (separate from DevID)
-
-A dedicated **bundle-signing key** is provisioned on ipc4's TPM, separate from the
-agent's DevID key. Key separation is important: the DevID key is used for SPIRE agent
-attestation; the bundle-signing key is used only to authenticate the trust bundle to
-agents. Different purposes, different keys, both TPM-bound.
-
-The bundle-signing key uses TPM handle `0x81008006` (the handle recommended by the
-project). It is created under the Owner hierarchy (same as DevID keys) with RSA 2048 and
-`rsassa` signing scheme.
-
-#### Integration for This Cluster
-
-Because our SPIRE server and agents run as Kubernetes pods rather than systemd services,
-the components are adapted as pod sidecars:
-
-- `signer-unix` runs as a sidecar container in the `spire-server` StatefulSet pod with
-  `/dev/tpmrm0` mounted. The `sign` and `signer-unix` binaries are hostPath volumes from
-  `/usr/local/bin/` on ipc4. `signer-http` is NOT used — see the Components table above.
-- `signer-unix` writes the signed JWT to `/var/spire/signed-bundle/spiffetrustbundle.token`
-  on a shared emptyDir. A `bundle-http` sidecar (`busybox:1.36`) serves that directory
-  over HTTP with `httpd -f -p 8181 -h /var/spire/signed-bundle` — no config file needed.
-  This is exposed as the `spire-bundle-signing` ClusterIP Service on port 80.
-- Instead of the `verifier` binary, a `verify-bundle` **init container** (`python:3.12`)
-  runs at agent pod startup. It fetches the signed JWT from the `spire-bundle-signing`
-  ClusterIP Service, verifies the RS256 signature using `openssl dgst -sha256 -verify`
-  against `/etc/spire/server-bundle-signing.pub`, extracts the `spiffetb` payload, and
-  writes it to `/run/spire/verified-bundle/bundle.crt` on an emptyDir volume shared with
-  the main container. The agent pod does not start until this init container exits 0.
-- The SPIRE agent uses `trust_bundle_path = "/run/spire/verified-bundle/bundle.crt"`
-  (the emptyDir written by the init container) instead of the `spire-bundle` ConfigMap.
-- `scripts/provision-tpm-devid.sh` also writes `/etc/spire/server-bundle-signing.pub`
-  on every agent node.
-
-#### Resulting Security Posture
-
-| Direction | Before (k8s_psat era) | After tpm_devid | After server attestation |
-|-----------|----------------------|-----------------|--------------------------|
-| Server trusts agent | Kubernetes TokenReview (policy) | TPM credential activation (hardware) | TPM credential activation (hardware) |
-| Agent trusts server | ConfigMap (unauthenticated) | ConfigMap (unauthenticated) | TPM signature on bundle (hardware) |
-| Attacker must compromise | RBAC policy | Physical TPM on agent node | Physical TPM on both ipc4 AND agent node |
-| Can agent detect rogue server? | No | No | Yes — signature check fails |
 
 ### Vault Integration via JWT SVID
 
