@@ -60,13 +60,14 @@ administrator during enrollment (not at manufacturing — it is specific to this
 indelible), so the private key never leaves the chip, paired with a certificate signed by
 an authority that vouches for which device the key belongs to. The agent sends its DevID certificate (signed by the cluster DevID CA) and
 proves it holds the corresponding private key by signing a server-issued nonce. The server
-then performs a credential activation challenge using the node's EK (Endorsement Key)
-public key. The EK is a key pair burned into the TPM at manufacturing time; the
-manufacturer signs an EK certificate and stores it in the TPM's non-volatile memory,
-making the EK the hardware root of trust for that physical chip. The credential activation
-challenge encrypts a secret to the EK public key such that only the TPM holding that EK
-can decrypt it, and only if the DevID key is also loaded in that same TPM at the same
-time. The agent's TPM decrypts and returns the secret. Both proofs together — key
+then performs a credential activation challenge using the attesting agent node's EK
+(Endorsement Key) public key. The EK is a key pair burned into that agent node's TPM at
+manufacturing time; the manufacturer signs an EK certificate and stores it in that TPM's
+non-volatile memory, making the EK the hardware root of trust for that specific physical
+chip. The credential activation challenge encrypts a secret to the agent node's EK public
+key such that only the agent node's TPM holding that EK can decrypt it, and only if the
+DevID key is also loaded in that same TPM at the same time. The agent's TPM decrypts and
+returns the secret. Both proofs together — key
 possession and TPM residency — satisfy the server that the agent is running on a real,
 enrolled node.
 
