@@ -81,10 +81,11 @@ observation, from outside the workload.
 **3. Server issues an SVID to the workload via the agent**
 The agent presents the observed workload identity to the server. If it matches a
 registration entry, the server signs an SVID and returns it to the agent, which hands it
-to the waiting workload process. The workload requested either an X.509 SVID or a JWT
-SVID from the Workload API — the server signs whichever form was asked for; it does not
-choose the format unilaterally. X.509 and JWT are the only two SVID formats defined by
-the SPIFFE standard. An X.509 SVID is delivered as a PEM-encoded certificate and
+to the waiting workload process. The workload requests one or both SVID formats from the Workload API — X.509, JWT, or
+both in sequence — and the server signs whichever forms were asked for. A workload can
+hold both simultaneously, using X.509 for mTLS with internal peers and JWT for services
+that expect a Bearer token. X.509 and JWT are the only two SVID formats defined by the
+SPIFFE standard. An X.509 SVID is delivered as a PEM-encoded certificate and
 private key pair, identical in format to any other TLS certificate — the sole distinction
 is that the SPIFFE ID is encoded in the Subject Alternative Name extension as a URI
 (`spiffe://ipc.local/mtls-client`).
