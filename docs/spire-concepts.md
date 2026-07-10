@@ -12,7 +12,7 @@ Listens on gRPC port 8081 via a headless service. Flux manages it from `manifest
 **SPIRE Agent** — DaemonSet on all 6 nodes.
 
 `hostPID: true` is required for workload attestation. When a workload calls the Workload
-API socket, the agent reads `SO_PEERCRED` from the Unix domain socket connection, which
+API socket, the agent calls `getsockopt(SO_PEERCRED)` on the Unix domain socket connection, which
 gives it the calling process's PID. Under normal Kubernetes pod isolation, PIDs are
 namespaced — each pod sees its own PID 1 and the host processes are invisible. With
 `hostPID: true` the agent's container shares the host PID namespace, so `SO_PEERCRED`
@@ -113,8 +113,8 @@ possession and TPM residency — satisfy the server that the agent is running on
 enrolled node.
 
 **2. Agent attests the workload (SO_PEERCRED + kubelet)**
-When a workload process connects to `agent.sock`, the agent reads `SO_PEERCRED` from the
-Unix socket to get the caller's host PID, walks `/proc/<pid>/cgroup` to extract the
+When a workload process connects to `agent.sock`, the agent calls
+`getsockopt(SO_PEERCRED)` on the Unix socket to get the caller's host PID, walks `/proc/<pid>/cgroup` to extract the
 container ID, and calls the kubelet API to get the pod's namespace, service account, and
 labels. The workload never claims its own identity — the agent determines it by
 observation, from outside the workload.
@@ -189,9 +189,9 @@ The flow for this cluster (`k8s` workload attestor):
 The workload process opens a connection to `/run/spire/sockets/agent.sock`, a Unix domain
 socket on the node filesystem, mounted into the workload pod via a hostPath volume.
 
-**2. Agent reads SO_PEERCRED → host PID.**
+**2. Agent calls `getsockopt(SO_PEERCRED)` → host PID.**
 Unix domain sockets have a kernel feature called `SO_PEERCRED`. When the agent calls
-`getsockopt` with that option on the connected socket, the kernel returns the PID, UID,
+`getsockopt(SO_PEERCRED)` on the connected socket, the kernel returns the PID, UID,
 and GID of the process on the other end. This is trustworthy because it comes from the
 kernel — the connecting process cannot forge it. The result is the *host* PID (e.g.
 `48721`), which is why `hostPID: true` is required on the agent DaemonSet: without it,
