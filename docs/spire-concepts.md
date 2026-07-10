@@ -22,14 +22,25 @@ API to get the pod's namespace, service account, and labels. Without `hostPID: t
 `SO_PEERCRED` returns PID 0 and the entire workload attestation chain breaks.
 
 The Workload API socket at `/run/spire/sockets/agent.sock` is a Unix domain socket
-created by the agent inside the container. The DaemonSet mounts
-`/run/spire/sockets` as a `hostPath` volume with `DirectoryOrCreate`, which means the
+created by the agent on the **host filesystem**, not inside the container. The DaemonSet
+mounts `/run/spire/sockets` as a `hostPath` volume with `DirectoryOrCreate` — the
 directory is created on the node's filesystem if it doesn't exist, and the socket file
-lives there rather than inside the container's ephemeral overlay filesystem. Any pod on
-the same node that mounts `/run/spire/sockets` as a hostPath gets access to the same
-socket — this is how workload containers reach the agent without any service discovery or
-network routing. The socket is node-local by design: the agent on ipc7 only knows about
-workloads on ipc7, and those workloads only connect to ipc7's agent socket.
+lives there rather than inside the container's ephemeral overlay filesystem. The socket
+exists on the host independently of any workload pod; a workload pod that mounts the same
+hostPath simply gets access to a socket that the agent already created before the workload
+started.
+
+The socket being present does not mean the agent is ready to serve SVIDs. Before it can
+issue anything the agent must: pass the `verify-bundle` init container, connect to the
+SPIRE server, complete TPM DevID attestation, and sync registration entries. A workload
+that connects to the socket during that startup window will receive an error rather than
+an SVID. On a healthy node this window is a few seconds; on a fresh node join it can be
+longer while attestation completes.
+
+Any pod on the same node that mounts `/run/spire/sockets` as a hostPath gets access to
+the same socket — this is how workload containers reach the agent without any service
+discovery or network routing. The socket is node-local by design: the agent on ipc7 only
+knows about workloads on ipc7, and those workloads only connect to ipc7's agent socket.
 
 Each agent bootstraps its trust bundle via the `verify-bundle` init container (see TPM
 Server Attestation below), which fetches the bundle signed by the server's TPM key,
@@ -195,8 +206,16 @@ Unix domain sockets have a kernel feature called `SO_PEERCRED`. When the agent c
 and GID of the process on the other end. This is trustworthy because it comes from the
 kernel — the connecting process cannot forge it. The result is the *host* PID (e.g.
 `48721`), which is why `hostPID: true` is required on the agent DaemonSet: without it,
-PIDs are namespaced inside the pod and `SO_PEERCRED` returns a PID that is meaningless
-outside that namespace.
+PIDs are namespaced inside the pod and `getsockopt(SO_PEERCRED)` returns a PID that is
+meaningful only within that pod's PID namespace and cannot be looked up in the host's
+`/proc`.
+
+`hostPID: true` is a requirement of this specific implementation of the `k8s` attestor —
+it uses host PIDs to walk `/proc` and identify containers. It is not a fundamental
+requirement of the observation-based approach in general. A different implementation that
+could map a Unix socket peer to a container ID through a namespace-aware kernel interface
+would not need `hostPID: true` and would still require no modification to the workload.
+The workload is unaware of SPIRE in either case — it simply opens a socket connection.
 
 **3. Agent reads `/proc/<pid>/cgroup` → container ID.**
 The cgroup path for a containerized process encodes the container ID, in a form like:
@@ -222,6 +241,10 @@ an SVID for that SPIFFE ID.
 The chain is: *which process connected* (kernel) → *which container holds that process*
 (procfs) → *which pod owns that container* (kubelet) → *which SPIFFE ID applies*
 (registration entries). Each step is derived from a source the workload cannot influence.
+The workload requires no modification — no SDK, no sidecar, no injected token — because
+identity is determined entirely by observation from outside the workload process. This
+property holds for any observation-based attestor, not just this specific `/proc`-based
+implementation.
 
 ### Pelagos Compatibility Fixes
 
