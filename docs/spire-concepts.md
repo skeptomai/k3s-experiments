@@ -47,8 +47,11 @@ Writing the key to `/etc/spire/server-bundle-signing.pub` during physical provis
 (via `provision-tpm-devid.sh`, running from the out-of-band admin host over SSH before SPIRE starts) is what
 makes it out-of-band. It arrives through the same direct-SSH channel as the DevID
 material — a channel that SPIRE cannot influence and that a Kubernetes compromise cannot
-reach. This means the agent's trust in the server is rooted in the server's hardware TPM,
-not in Kubernetes infrastructure.
+reach. This means the agent's trust in the server is rooted in two things held together: the
+server's hardware TPM (which guarantees the private key never leaves ipc4's chip) and the
+provisioner's ability to deliver the matching public key to each agent node with integrity
+(which guarantees no substitution occurred during the out-of-band provisioning step).
+Both must hold. The trust root is not in Kubernetes infrastructure.
 
 **1. Server trusts the agent (TPM DevID credential activation)**
 DevID (IEEE 802.1AR Secure Device Identity) is the standard that defines a hardware-bound
