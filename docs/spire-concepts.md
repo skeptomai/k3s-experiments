@@ -150,6 +150,36 @@ Steps 0–3 are handled entirely by SPIRE. Steps 4–5 are between the workload 
 it is talking to; SPIRE's job is to get a cryptographically-grounded identity into the
 workload's hands without the workload needing to manage secrets itself.
 
+### What an SVID Actually Proves
+
+When a workload successfully receives an SVID, the credential embodies a four-layer
+combined claim:
+
+1. **The node is genuine and enrolled** — TPM credential activation proved, through a
+   hardware challenge that requires physical possession of the TPM chip, that the agent
+   is running on a real node that was enrolled by the cluster administrator. This is
+   hardware proof; it cannot be forged in software.
+
+2. **The agent has attested to the SPIRE server** — the server accepted the agent's TPM
+   DevID credential and issued it a Node SVID. The agent is now an authorized member of
+   the cluster's trust domain.
+
+3. **The pod is running in a specific namespace under a specific service account** — the
+   agent observed this directly via `getsockopt(SO_PEERCRED)` → `/proc` → kubelet API.
+   These are Kubernetes-enforced properties: the namespace is set by the API server at
+   admission, the service account token is issued by the API server at scheduling time,
+   and neither can be changed by the pod itself after it starts.
+
+4. **A registration entry explicitly authorizes this combination** — the cluster operator
+   declared in advance that a pod in this namespace with this service account should
+   receive this specific SPIFFE ID. The agent matched the observed pod metadata against
+   that policy before issuing anything.
+
+No single layer alone is sufficient. The TPM proves hardware identity but not which
+workload. The Kubernetes selectors prove pod identity but only as strongly as Kubernetes
+policy. The registration entry ties the two together under explicit operator authorization.
+An SVID that reaches a workload means all four layers held simultaneously.
+
 ---
 
 ## Node Attestation
