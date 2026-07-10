@@ -314,9 +314,9 @@ ID. Three things must agree for a workload to receive an SVID:
 
 ```
 ServiceAccount resource:  name: mtls-client-sa   (namespace: mtls-demo)
-           ↕
+            ^
 Pod spec:                 serviceAccountName: mtls-client-sa
-           ↕
+            ^
 SPIRE entry:              k8s:ns:mtls-demo + k8s:sa:mtls-client-sa → spiffe://ipc.local/mtls-client
 ```
 
