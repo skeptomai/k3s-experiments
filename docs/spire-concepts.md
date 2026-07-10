@@ -145,9 +145,16 @@ workload's hands without the workload needing to manage secrets itself.
 
 The agent can't just claim "I'm a legitimate node" — the server needs proof. **Node
 attestation** is how the agent proves to the server that it's running on a real,
-authorized Kubernetes node.
+authorized Kubernetes node. This cluster uses **TPM DevID** attestation, documented
+in the sections below.
 
-This cluster uses **k8s_psat** (Kubernetes Projected Service Account Token):
+### k8s_psat (Kubernetes Projected Service Account Token) — background only
+
+This cluster originally used k8s_psat before being upgraded to TPM DevID. The description
+below is retained as conceptual background; it is not the active mechanism. The k8s_psat
+registration entry still exists in the server database but is unused.
+
+The k8s_psat flow:
 
 1. Kubernetes issues a short-lived projected SAT to the agent pod (audience:
    `spire-server`, expiry: 7200s). This token is in the pod's filesystem at
@@ -159,13 +166,9 @@ This cluster uses **k8s_psat** (Kubernetes Projected Service Account Token):
    **Node SVID** with SPIFFE ID `spiffe://ipc.local/k8s-node`.
 
 From that point on, the agent authenticates to the server using the Node SVID (mTLS on
-the gRPC channel). The PSAT is only used once for initial bootstrapping.
-
-> **Note:** this cluster has been upgraded to TPM DevID node attestation (`tpm_devid`).
-> The k8s_psat description above is retained as conceptual background only — all six
-> nodes have TPM 2.0 chips and the actual implementation uses hardware attestation,
-> documented in the TPM Attestation sections below. The k8s_psat registration entry
-> still exists in the server database alongside the tpm_devid entry but is not used.
+the gRPC channel). The PSAT is only used once for initial bootstrapping. The trust root
+is "Kubernetes itself validated this token" — which means a compromised Kubernetes
+control plane breaks node attestation. TPM DevID removes this dependency.
 
 ### TPM DevID Node Attestation Flow
 
