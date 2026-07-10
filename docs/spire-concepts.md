@@ -18,48 +18,13 @@ by nazgul (`192.168.89.2`) at `/mnt/primary_storage/k8s-nfs`:
 
 Listens on gRPC port 8081 via a headless service. Flux manages it from `manifests/spire/`.
 
-**SPIRE Agent** — DaemonSet on all 6 nodes.
-
-`hostPID: true` is required for workload attestation. When a workload calls the Workload
-API socket, the agent calls `getsockopt(SO_PEERCRED)` on the Unix domain socket connection, which
-gives it the calling process's PID. Under normal Kubernetes pod isolation, PIDs are
-namespaced — each pod sees its own PID 1 and the host processes are invisible. With
-`hostPID: true` the agent's container shares the host PID namespace, so `SO_PEERCRED`
-returns the *host* PID of the calling process. The agent then reads
-`/proc/<host-pid>/cgroup` to extract the container ID, and from there calls the kubelet
-API to get the pod's namespace, service account, and labels. Without `hostPID: true`,
-`SO_PEERCRED` returns PID 0 and the entire workload attestation chain breaks.
-
-The Workload API socket at `/run/spire/sockets/agent.sock` is a Unix domain socket
-created by the agent on the **host filesystem**, not inside the container. The DaemonSet
-mounts `/run/spire/sockets` as a `hostPath` volume with `DirectoryOrCreate` — the
-directory is created on the node's filesystem if it doesn't exist, and the socket file
-lives there rather than inside the container's ephemeral overlay filesystem. The socket
-exists on the host independently of any workload pod; a workload pod that mounts the same
-hostPath simply gets access to a socket that the agent already created before the workload
-started.
-
-The socket being present does not mean the agent is ready to serve SVIDs. Before it can
-issue anything the agent must: pass the `verify-bundle` init container, connect to the
-SPIRE server, complete TPM DevID attestation, and sync registration entries. A workload
-that connects to the socket during that startup window will receive an error rather than
-an SVID. On a healthy node this window is a few seconds; on a fresh node join it can be
-longer while attestation completes.
-
-Any pod on the same node that mounts `/run/spire/sockets` as a hostPath gets access to
-the same socket — this is how workload containers reach the agent without any service
-discovery or network routing. The socket is node-local by design: the agent on ipc7 only
-knows about workloads on ipc7, and those workloads only connect to ipc7's agent socket.
-
-Each agent bootstraps its trust bundle via the `verify-bundle` init container (see TPM
-Server Attestation below), which fetches the bundle signed by the server's TPM key,
-verifies the signature, and writes the bundle to an emptyDir volume shared between the
-init container and the main container. Init containers and main containers never run
-simultaneously — Kubernetes enforces that all init containers exit before the main
-containers start — so the emptyDir is the handoff point: the init container writes the
-verified bundle and exits, then the agent starts and reads it. The server also maintains
-the `spire-bundle` ConfigMap via the `k8sbundle` notifier, but agents no longer bootstrap
-from it directly.
+**SPIRE Agent** — DaemonSet on all 6 nodes. Runs with `hostPID: true` (required for
+workload attestation — see Workload Attestation). Exposes the Workload API at
+`/run/spire/sockets/agent.sock` on the node's host filesystem via a `hostPath` volume,
+so any pod on the same node that mounts that path can reach it. Bootstraps its trust
+bundle via a `verify-bundle` init container that fetches the server's TPM-signed bundle
+before the agent starts (see TPM Server Attestation). Attests to the SPIRE server via
+TPM DevID (see Node Attestation).
 
 ### Cluster Architecture
 
@@ -285,6 +250,21 @@ identity is determined entirely by observation from outside the workload process
 property holds for any observation-based attestor, not just this specific `/proc`-based
 implementation.
 
+### Workload Attestation Flow
+
+![Workload attestation flow](spire-workload-attestation-flow.png)
+
+### Pelagos Compatibility Fixes
+
+Two Pelagos bugs affected SPIRE workload attestation on this cluster:
+
+| Bug | Symptom | Fixed |
+|-----|---------|-------|
+| `hostPID: true` ignored (#299) | SO_PEERCRED returned PID 0; server rejected | v0.65.7 |
+| 32-char container IDs (#301) | SPIRE regex expected 64-char hex; attestation failed | v0.65.8 |
+
+Both are fixed in the running version (v0.65.47).
+
 ### Workload Configuration
 
 A workload does not automatically get access to the Workload API socket — the pod spec
@@ -370,21 +350,6 @@ entry currently does not — it lives in SQLite on the NFS PVC, created imperati
 restores the pod and service account automatically, but the SPIRE entry is gone and the
 workload silently fails to get an SVID. See Registration Entries below for the full
 discussion and the ClusterSPIFFEID alternative that closes this gap.
-
-### Pelagos Compatibility Fixes
-
-Two Pelagos bugs affected SPIRE workload attestation on this cluster:
-
-| Bug | Symptom | Fixed |
-|-----|---------|-------|
-| `hostPID: true` ignored (#299) | SO_PEERCRED returned PID 0; server rejected | v0.65.7 |
-| 32-char container IDs (#301) | SPIRE regex expected 64-char hex; attestation failed | v0.65.8 |
-
-Both are fixed in the running version (v0.65.47).
-
-### Workload Attestation Flow
-
-![Workload attestation flow](spire-workload-attestation-flow.png)
 
 ---
 
@@ -948,7 +913,7 @@ No manual SPIRE steps are needed after a node reinstall.
 
 ---
 
-## Topics Not Asked About That Matter
+## Advanced Topics and Production Considerations
 
 ### SVID Rotation for Long-Running Workloads
 
