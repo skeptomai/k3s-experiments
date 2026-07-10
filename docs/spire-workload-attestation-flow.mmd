@@ -1,20 +1,21 @@
 flowchart LR
     subgraph k8s["Kubernetes Control Plane"]
         APISERVER["API Server"]
-        KUBELET["Kubelet"]
+        KUBELET["Kubelet\n/pods endpoint"]
     end
 
     subgraph workload_creation["Workload Creation"]
         MANIFEST["kubectl apply\nPod manifest\nns: spire-demo\nsa: demo-sa"]
         POD["Pod scheduled\n+ started"]
-        SOCK_MOUNT["agent.sock mounted\nvia hostPath"]
+        SOCK_MOUNT["agent.sock\nmounted via hostPath\n/run/spire/sockets/"]
     end
 
-    subgraph node_tcb["SPIRE Agent (on the same node)"]
-        PEERCRED["SO_PEERCRED\nread PID from socket call"]
-        CGROUP["Resolve PID →\n/proc/pid/cgroup\n+ kubelet API"]
-        MATCH["Match pod metadata\nagainst registration entries\nns=spire-demo, sa=demo-sa"]
-        ISSUE["Issue X.509 SVID\nspiffe://ipc.local/demo-app"]
+    subgraph node_tcb["SPIRE Agent (same node — hostPID: true)"]
+        PEERCRED["① SO_PEERCRED\nkernel returns host PID\nof connecting process\n(cannot be forged)"]
+        CGROUP["② /proc/&lt;pid&gt;/cgroup\nparse container ID\nfrom cgroup path\n0::/kubepods/.../&lt;container-id&gt;"]
+        KUBELET_CALL["③ kubelet /pods API\ncontainer ID →\npod namespace + service account\n+ labels + annotations"]
+        MATCH["④ match pod metadata\nagainst registration entries\nns=spire-demo, sa=demo-sa"]
+        ISSUE["⑤ issue X.509 SVID\nspiffe://ipc.local/demo-app\n(workload never self-identified)"]
     end
 
     subgraph spire_server["SPIRE Server"]
@@ -22,9 +23,9 @@ flowchart LR
     end
 
     subgraph workload_runtime["Workload (running)"]
-        CALL["Call Workload API\n/run/spire/sockets/agent.sock"]
-        SVID["Receive X.509 SVID\nspiffe://ipc.local/demo-app"]
-        USE["Use SVID for\nmTLS / auth"]
+        CALL["connect to\n/run/spire/sockets/agent.sock"]
+        SVID["receive X.509 SVID\nspiffe://ipc.local/demo-app"]
+        USE["use SVID for\nmTLS / Vault auth / etc."]
     end
 
     MANIFEST -->|"admitted + scheduled"| APISERVER
@@ -34,9 +35,11 @@ flowchart LR
     SOCK_MOUNT -->|"socket available to"| CALL
 
     CALL -->|"connect"| PEERCRED
-    PEERCRED -->|"PID lookup"| CGROUP
-    CGROUP -->|"queries"| KUBELET
-    CGROUP -->|"pod identity confirmed"| MATCH
+    PEERCRED -->|"host PID"| CGROUP
+    CGROUP -->|"container ID"| KUBELET_CALL
+    KUBELET_CALL -->|"queries"| KUBELET
+    KUBELET -->|"pod namespace +\nservice account"| KUBELET_CALL
+    KUBELET_CALL -->|"pod identity"| MATCH
     MATCH -->|"looks up"| REG
     REG -->|"entry found"| ISSUE
     ISSUE -->|"SVID delivered"| SVID
@@ -47,6 +50,7 @@ flowchart LR
     style REG fill:#1a6b8a,color:#fff
     style PEERCRED fill:#1a6b8a,color:#fff
     style CGROUP fill:#1a6b8a,color:#fff
+    style KUBELET_CALL fill:#1a6b8a,color:#fff
     style MATCH fill:#1a6b8a,color:#fff
     style ISSUE fill:#1a6b8a,color:#fff
     style MANIFEST fill:#2c3e50,color:#fff

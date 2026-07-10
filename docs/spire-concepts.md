@@ -162,23 +162,48 @@ trust root is "Kubernetes itself validated this token."
 
 After a node is attested, the agent needs to verify that a calling workload is what it
 claims to be before issuing an SVID. This happens entirely on-node; no server round-trip
-is needed.
+is needed. Critically, **the workload never gets to assert its own identity** — the agent
+determines it entirely by observation from outside the workload process.
 
 The flow for this cluster (`k8s` workload attestor):
 
-1. Workload connects to `/run/spire/sockets/agent.sock` (a Unix domain socket).
-2. The agent reads **SO_PEERCRED** from the socket — this gives the calling process's
-   PID. This is why `hostPID: true` is required; without it, PIDs are namespaced and
-   SO_PEERCRED returns 0.
-3. The agent reads `/proc/<pid>/cgroup` to extract the container ID.
-4. The agent calls the **kubelet API** (using `MY_NODE_NAME`) to get pod metadata for
-   that container: namespace, service account, pod name, labels, etc.
-5. The agent compares that metadata against its **registration entries** (synced from the
-   server).
-6. If a match is found, the agent issues an SVID for the matching SPIFFE ID.
+**1. Workload connects to the agent socket.**
+The workload process opens a connection to `/run/spire/sockets/agent.sock`, a Unix domain
+socket on the node filesystem, mounted into the workload pod via a hostPath volume.
 
-`use_new_container_locator: true` in the agent config causes the agent to try mountinfo
-first (more reliable with cgroupv2) before falling back to the cgroup path.
+**2. Agent reads SO_PEERCRED → host PID.**
+Unix domain sockets have a kernel feature called `SO_PEERCRED`. When the agent calls
+`getsockopt` with that option on the connected socket, the kernel returns the PID, UID,
+and GID of the process on the other end. This is trustworthy because it comes from the
+kernel — the connecting process cannot forge it. The result is the *host* PID (e.g.
+`48721`), which is why `hostPID: true` is required on the agent DaemonSet: without it,
+PIDs are namespaced inside the pod and `SO_PEERCRED` returns a PID that is meaningless
+outside that namespace.
+
+**3. Agent reads `/proc/<pid>/cgroup` → container ID.**
+The cgroup path for a containerized process encodes the container ID, in a form like:
+```
+0::/kubepods/besteffort/pod<pod-uid>/<container-id>
+```
+The agent parses this to extract the container ID. (`use_new_container_locator: true` in
+the agent config tries mountinfo first, which is more reliable under cgroupv2, before
+falling back to the cgroup path.)
+
+**4. Agent calls kubelet API → pod metadata.**
+The agent calls the local kubelet's `/pods` endpoint (this is why the agent needs
+`nodes/proxy` RBAC) asking: "which pod contains a container with this ID?" The kubelet
+returns the full pod record: namespace, pod name, service account, labels, and
+annotations. The agent now has everything Kubernetes knows about who made the connection.
+
+**5. Agent matches pod metadata against registration entries.**
+The agent compares the pod's namespace and service account against its registration
+entries (synced from the SPIRE server). If an entry matches — for example,
+`ns=mtls-demo, sa=mtls-client-sa → spiffe://ipc.local/mtls-client` — the agent issues
+an SVID for that SPIFFE ID.
+
+The chain is: *which process connected* (kernel) → *which container holds that process*
+(procfs) → *which pod owns that container* (kubelet) → *which SPIFFE ID applies*
+(registration entries). Each step is derived from a source the workload cannot influence.
 
 ### Pelagos Compatibility Fixes
 
