@@ -319,21 +319,94 @@ Both are fixed in the running version (v0.65.47).
 
 ## Registration Entries
 
-Registration entries are the policy database — they tell the server (and thus agents)
-which workloads should receive which SPIFFE IDs. Each entry has:
+A registration entry is the answer to the question: "which workloads on this cluster
+should receive a SPIFFE identity, and what identity should they get?" Without a
+registration entry, a workload can connect to the Workload API socket and the agent can
+fully identify it — but then has nothing to match it against, so it returns
+`PermissionDenied: no identity issued`. The entry is the policy that bridges observation
+(what the agent sees) to identity (what SVID to issue).
 
-- **SPIFFE ID**: the identity to issue (`spiffe://ipc.local/demo-app`)
-- **Parent ID**: who must attest the caller first (`spiffe://ipc.local/k8s-node` —
-  meaning "the workload must be on an attested node")
-- **Selectors**: the conditions that must all match (`k8s:ns:spire-demo`,
-  `k8s:sa:demo-sa`)
+Each entry has three fields:
 
-### Current Pattern: Imperative Registration
+**SPIFFE ID** — the identity to issue if this entry matches. For example,
+`spiffe://ipc.local/mtls-client`. This becomes the Subject Alternative Name in an X.509
+SVID or the `sub` claim in a JWT SVID.
 
-A Kubernetes Job runs `kubectl exec` into the server pod and calls
-`spire-server entry create`. This works but has a GitOps gap — entries live in SQLite on
-the NFS PVC, not in Git. If the PVC is lost or the cluster is rebuilt, entries must be
-re-registered.
+**Parent ID** — who must have already attested the caller before this entry applies.
+For workloads, this is always a node alias (`spiffe://ipc.local/k8s-node`), meaning "the
+workload must be running on a node whose agent has already attested to the server." This
+creates a two-level hierarchy: nodes attest first, then workloads on those nodes can
+receive identities. You could not issue an SVID to a workload on a rogue node that never
+attested, because the parent requirement would not be satisfied.
+
+**Selectors** — the conditions that must all match for the entry to apply. For the `k8s`
+workload attestor these are Kubernetes-native attributes the agent observed:
+- `k8s:ns:<namespace>` — the pod's namespace
+- `k8s:sa:<service-account>` — the pod's service account
+- `k8s:pod-label:<key>:<value>` — a pod label (optional, for finer-grained policy)
+
+All selectors in an entry must match simultaneously. An entry with
+`k8s:ns:mtls-demo` and `k8s:sa:mtls-client-sa` only matches a pod that is in the
+`mtls-demo` namespace AND uses the `mtls-client-sa` service account. A pod in `mtls-demo`
+using a different service account gets nothing.
+
+**Node alias entries** — there is a special class of entry where the SPIFFE ID represents
+a node rather than a workload. On this cluster:
+```
+SPIFFE ID:  spiffe://ipc.local/k8s-node
+Parent:     spiffe://ipc.local/spire/server
+Selector:   tpm_devid:issuer:cn:ipc-cluster DevID CA
+```
+This entry says: any agent that attests via `tpm_devid` with a cert signed by our DevID
+CA receives the node alias `spiffe://ipc.local/k8s-node`. Workload entries then use that
+alias as their Parent ID. This indirection means you don't need a separate workload entry
+per node — any workload on any attested node can match, because they all share the same
+node alias as their parent.
+
+**What the agent does with entries** — the server syncs the full set of registration
+entries to every agent. When a workload connects, the agent evaluates all entries whose
+Parent ID matches the node's own SPIFFE ID, checks the selectors against the observed pod
+metadata, and issues an SVID for each entry that matches. One workload pod can match
+multiple entries and receive multiple SVIDs.
+
+### How to Create and View Entries
+
+Entries are managed via the SPIRE server CLI:
+
+```bash
+# View all entries
+kubectl exec -n spire spire-server-0 -c spire-server -- \
+  /opt/spire/bin/spire-server entry show
+
+# Create a workload entry
+kubectl exec -n spire spire-server-0 -c spire-server -- \
+  /opt/spire/bin/spire-server entry create \
+  -spiffeID spiffe://ipc.local/my-app \
+  -parentID spiffe://ipc.local/k8s-node \
+  -selector k8s:ns:my-namespace \
+  -selector k8s:sa:my-service-account
+```
+
+### Current Entries on This Cluster
+
+| SPIFFE ID | Parent | Selectors | Notes |
+|-----------|--------|-----------|-------|
+| `spiffe://ipc.local/k8s-node` | `spire/server` | `tpm_devid:issuer:cn:ipc-cluster DevID CA` | Node alias (active) |
+| `spiffe://ipc.local/k8s-node` | `spire/server` | `k8s_psat:cluster:ipc` | Node alias (legacy, unused) |
+| `spiffe://ipc.local/demo-app` | `k8s-node` | `k8s:ns:spire-demo`, `k8s:sa:demo-sa` | Experiment 11 |
+| `spiffe://ipc.local/mtls-server` | `k8s-node` | `k8s:ns:mtls-demo`, `k8s:sa:mtls-server-sa` | Experiment 21 |
+| `spiffe://ipc.local/mtls-client` | `k8s-node` | `k8s:ns:mtls-demo`, `k8s:sa:mtls-client-sa` | Experiment 21 |
+| `spiffe://ipc.local/envoy-server` | `k8s-node` | `k8s:ns:envoy-demo`, `k8s:sa:envoy-server-sa` | Experiment 24 |
+| `spiffe://ipc.local/envoy-client` | `k8s-node` | `k8s:ns:envoy-demo`, `k8s:sa:envoy-client-sa` | Experiment 24 |
+| `spiffe://ipc.local/sidecar-server` | `k8s-node` | `k8s:ns:sidecar-demo`, `k8s:sa:sidecar-server-sa` | Experiment 24 |
+| `spiffe://ipc.local/sidecar-client` | `k8s-node` | `k8s:ns:sidecar-demo`, `k8s:sa:sidecar-client-sa` | Experiment 24 |
+
+### GitOps Gap
+
+Entries live in SQLite on the NFS PVC, not in Git. If the PVC is lost or the cluster
+is rebuilt, all entries must be re-created manually. The current workaround is to keep
+the `spire-server entry create` commands in the experiment manifests as Jobs so they
+can be re-run.
 
 ### GitOps Alternative: ClusterSPIFFEID
 
