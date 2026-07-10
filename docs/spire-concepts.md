@@ -327,8 +327,8 @@ The trust bundle is the SPIRE CA's root certificate(s). Everything signed by SPI
 verifiable against it. On this cluster:
 
 - The server writes it to the `spire-bundle` ConfigMap in the `spire` namespace (via the
-  `k8s_bundle` notifier).
-- Agents mount it at startup to bootstrap their TLS connection to the server.
+  `k8s_bundle` notifier) as a reference copy, but agents no longer bootstrap from it
+  directly — they use the TPM-verified bundle written by the `verify-bundle` init container.
 - Workloads receive it alongside their SVID when calling the Workload API — so they can
   verify peers without any pre-shared secrets or manual cert distribution.
 
@@ -351,7 +351,8 @@ Registration entries created by an imperative Job:
 
 | SPIFFE ID | Parent | Selectors |
 |-----------|--------|-----------|
-| `spiffe://ipc.local/k8s-node` | `spiffe://ipc.local/spire/server` | `k8s_psat:cluster:ipc` (node entry) |
+| `spiffe://ipc.local/k8s-node` | `spiffe://ipc.local/spire/server` | `tpm_devid:issuer:cn:ipc-cluster DevID CA` (active node alias) |
+| `spiffe://ipc.local/k8s-node` | `spiffe://ipc.local/spire/server` | `k8s_psat:cluster:ipc` (legacy — exists in DB, unused) |
 | `spiffe://ipc.local/demo-app` | `spiffe://ipc.local/k8s-node` | `k8s:ns:spire-demo`, `k8s:sa:demo-sa` |
 
 ### Experiment 21: mTLS Between Two Workloads
@@ -868,15 +869,23 @@ project). It is created under the Owner hierarchy (same as DevID keys) with RSA 
 Because our SPIRE server and agents run as Kubernetes pods rather than systemd services,
 the components are adapted as pod sidecars:
 
-- `signer-unix` and `signer-http` run as sidecar containers in the `spire-server`
-  StatefulSet pod. `signer-unix` has `/dev/tpmrm0` mounted.
-- The `sign` plugin binary is a hostPath volume mounted from `/usr/local/bin/spire-server-attestor-tpm-sign` on ipc4 (the server node). Similarly, the `signer-unix` binary is mounted from `/usr/local/bin/spire-server-attestor-tpm-signer-unix`.
-- The HTTP endpoint is exposed as a ClusterIP Kubernetes Service.
-- Instead of the `verifier` binary, a `verify-bundle` **init container** (`docker.io/library/python:3.12`) runs the verification at agent pod startup. It fetches the signed JWT from the `spire-bundle-signing` ClusterIP Service (the nginx sidecar), verifies the RS256 signature using `openssl dgst -sha256 -verify` against `/etc/spire/server-bundle-signing.pub`, extracts the `spiffetb` payload, and writes it to `/run/spire/verified-bundle/bundle.crt` on a shared `emptyDir` volume. The agent pod does not start until this init container exits 0.
-- The SPIRE agent uses `trust_bundle_path = "/run/spire/verified-bundle/bundle.crt"` (the emptyDir written by the init container) instead of the unauthenticated `spire-bundle` ConfigMap.
-- The `bundle-http` sidecar in the server pod is **nginx:alpine** (not the dedicated `signer-http` binary from the project). nginx serves `/var/spire/signed-bundle/` on port 8181; the ConfigMap `spire-signer-unix-config` contains both the signer-unix config and an nginx vhost config with `Cache-Control: no-store`.
-- `scripts/provision-tpm-devid.sh` is extended to also write
-  `/etc/spire/server-bundle-signing.pub` on every agent node.
+- `signer-unix` runs as a sidecar container in the `spire-server` StatefulSet pod with
+  `/dev/tpmrm0` mounted. The `sign` and `signer-unix` binaries are hostPath volumes from
+  `/usr/local/bin/` on ipc4. `signer-http` is NOT used — see the Components table above.
+- `signer-unix` writes the signed JWT to `/var/spire/signed-bundle/spiffetrustbundle.token`
+  on a shared emptyDir. A `bundle-http` sidecar (`busybox:1.36`) serves that directory
+  over HTTP with `httpd -f -p 8181 -h /var/spire/signed-bundle` — no config file needed.
+  This is exposed as the `spire-bundle-signing` ClusterIP Service on port 80.
+- Instead of the `verifier` binary, a `verify-bundle` **init container** (`python:3.12`)
+  runs at agent pod startup. It fetches the signed JWT from the `spire-bundle-signing`
+  ClusterIP Service, verifies the RS256 signature using `openssl dgst -sha256 -verify`
+  against `/etc/spire/server-bundle-signing.pub`, extracts the `spiffetb` payload, and
+  writes it to `/run/spire/verified-bundle/bundle.crt` on an emptyDir volume shared with
+  the main container. The agent pod does not start until this init container exits 0.
+- The SPIRE agent uses `trust_bundle_path = "/run/spire/verified-bundle/bundle.crt"`
+  (the emptyDir written by the init container) instead of the `spire-bundle` ConfigMap.
+- `scripts/provision-tpm-devid.sh` also writes `/etc/spire/server-bundle-signing.pub`
+  on every agent node.
 
 #### Resulting Security Posture
 
@@ -912,7 +921,7 @@ This replaces Vault's Kubernetes auth method with a stronger, SPIFFE-native iden
 | `manifests/spire/agent-config.yaml` | SPIRE Agent ConfigMap (server address, attestors, socket path) |
 | `manifests/spire/server-statefulset.yaml` | Server StatefulSet + headless service |
 | `manifests/spire/agent-daemonset.yaml` | Agent DaemonSet (hostPID, tolerations, socket hostPath) |
-| `manifests/spire/server-rbac.yaml` | Server SA, ClusterRole (TokenReview, nodes, pods) |
+| `manifests/spire/server-rbac.yaml` | Server SA, ClusterRole (ConfigMap write for spire-bundle only; TokenReview/nodes/pods removed when switching to tpm_devid) |
 | `manifests/spire/agent-rbac.yaml` | Agent SA, ClusterRole (pods, nodes, nodes/proxy) |
 | `clusters/ipc/spire.yaml` | Flux Kustomization (path: ./manifests/spire, interval: 10m) |
 | `experiments/11-spire/` | Workload SVID fetch demo |
