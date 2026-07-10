@@ -189,6 +189,35 @@ Properties:
 | Authenticating to Vault (JWT auth method) | JWT |
 | Envoy/service mesh transparent mTLS | X.509 |
 
+**Why this cluster uses X.509:**
+The experiments here (`mtls-demo`, `envoy-demo`) use mTLS — both sides of each
+connection are SPIRE-attested Kubernetes workloads that can participate in a full TLS
+handshake. X.509 is the right choice: identity travels in the certificate, rotation is
+automatic, and no application-level token handling is needed.
+
+**When you would use JWT instead (or in addition):**
+JWT becomes necessary when one end of the connection cannot participate in mTLS — either
+because it doesn't support client certificate authentication, or because TLS is terminated
+by an intermediary before reaching the workload. Common cases:
+
+- **Vault authentication** — Vault's JWT auth method expects a Bearer token, not a
+  client cert. A workload that needs to fetch secrets from Vault calls the Workload API
+  to get a JWT SVID with audience `vault`, presents it to Vault, and receives a Vault
+  token in return.
+- **REST APIs behind an API gateway** — the gateway terminates TLS; the workload's
+  X.509 identity never reaches the backend. The workload instead fetches a JWT SVID and
+  sends it as an `Authorization: Bearer` header that the gateway or backend can validate.
+- **External or third-party services** — services outside the cluster that accept JWTs
+  but have no SPIFFE awareness.
+
+**Using both simultaneously:**
+A workload at the boundary between these two worlds can hold both at once. For example:
+it participates in mTLS with internal peers (X.509, rotated automatically by the agent)
+while also authenticating to Vault and calling external REST APIs (JWT, re-fetched by the
+application when needed). The Workload API issues whichever form is requested; there is
+no restriction on fetching both. The same SPIRE trust bundle verifies both forms — its
+CA cert validates X.509 chains, its public key verifies JWT signatures.
+
 ---
 
 ## The Trust Bundle
