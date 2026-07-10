@@ -55,8 +55,8 @@ Both must hold. The trust root is not in Kubernetes infrastructure.
 
 **1. Server trusts the agent (TPM DevID credential activation)**
 DevID (IEEE 802.1AR Secure Device Identity) is the standard that defines a hardware-bound
-device credential: a key pair generated inside the TPM by the local administrator during
-enrollment (not at manufacturing — it is specific to this cluster's identity scheme, not
+device credential: a key pair generated inside the agent host's TPM by the local
+administrator during enrollment (not at manufacturing — it is specific to this cluster's identity scheme, not
 indelible), so the private key never leaves the chip, paired with a certificate signed by
 an authority that vouches for which device the key belongs to. The agent sends its DevID certificate (signed by the cluster DevID CA) and
 proves it holds the corresponding private key by signing a server-issued nonce. The server
