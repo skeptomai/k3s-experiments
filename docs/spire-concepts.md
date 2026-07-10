@@ -4,9 +4,18 @@
 
 **Trust domain:** `ipc.local`
 
-**SPIRE Server** — StatefulSet (1 replica) on the cluster. CA keys and registration
-entries live in SQLite on a 1Gi PVC provisioned by the `nfs-subdir-external-provisioner`
-StorageClass, backed by nazgul (`192.168.89.2`) at `/mnt/primary_storage/k8s-nfs`.
+**SPIRE Server** — StatefulSet (1 replica) on the cluster. Two things persist in SQLite
+on a 1Gi PVC provisioned by the `nfs-subdir-external-provisioner` StorageClass, backed
+by nazgul (`192.168.89.2`) at `/mnt/primary_storage/k8s-nfs`:
+
+- **CA keys** — the private key material the server uses to sign SVIDs (Secure Verifiable
+  Identity Documents), the short-lived certificates issued to workloads as proof of
+  identity.
+- **Registration entries** — the policy database that maps Kubernetes pod attributes
+  (namespace, service account) to SPIFFE IDs. When a workload connects to the Workload
+  API, the agent matches the pod's observed metadata against these entries to determine
+  which identity to issue. See the Registration Entries section for a full explanation.
+
 Listens on gRPC port 8081 via a headless service. Flux manages it from `manifests/spire/`.
 
 **SPIRE Agent** — DaemonSet on all 6 nodes.
