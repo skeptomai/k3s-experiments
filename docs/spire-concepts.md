@@ -199,7 +199,14 @@ automatic, and no application-level token handling is needed.
 **When you would use JWT instead (or in addition):**
 JWT becomes necessary when one end of the connection cannot participate in mTLS — either
 because it doesn't support client certificate authentication, or because TLS is terminated
-by an intermediary before reaching the workload. Common cases:
+by an intermediary before reaching the workload. The connection is still typically HTTPS:
+the server presents its certificate and the client validates it, so the channel is
+encrypted and the client knows it is talking to the right server. But only one side is
+authenticated at the TLS layer. The JWT Bearer token in the `Authorization` header fills
+the other half — it proves the caller's identity at the application layer rather than the
+TLS layer.
+
+Common cases:
 
 - **Vault authentication** — Vault's JWT auth method expects a Bearer token, not a
   client cert. A workload that needs to fetch secrets from Vault calls the Workload API
@@ -211,11 +218,37 @@ by an intermediary before reaching the workload. Common cases:
 - **External or third-party services** — services outside the cluster that accept JWTs
   but have no SPIFFE awareness.
 
+**How the called service validates a Bearer token:**
+The verification is structurally identical to X.509 chain validation — the same trust
+anchor, applied to a different encoding. In the X.509 case, the server checks that the
+client certificate is signed by a CA in the trust bundle and reads the SPIFFE ID from the
+SAN URI. In the JWT case, the server splits the token into header/payload/signature,
+verifies the RS256 or ES256 signature against the SPIRE trust bundle's public key, and
+reads the SPIFFE ID from the `sub` claim. It also checks `aud` (must match this service),
+`exp` (must not be expired), and `iss` (must be the expected SPIRE server). Both reduce
+to: "does a signature made by the SPIRE CA's private key cover this credential, and does
+the credential assert the identity I expect?"
+
+The called service has three options for how it performs this validation:
+
+1. **Application code with a JWT library** — the service loads the trust bundle's public
+   key and calls something like `jwt.verify(token, publicKey, { audience: "my-service" })`.
+   Explicit but requires the application to know about SPIRE.
+
+2. **API gateway or sidecar validates on behalf of the service** — the gateway extracts
+   the Bearer token, validates it against the SPIRE JWKS endpoint, and either rejects the
+   request or passes a verified identity header (e.g. `X-SPIFFE-ID:
+   spiffe://ipc.local/caller`) to the backend. The backend never touches the JWT itself.
+
+3. **SPIFFE SDK** — the SDK watches the Workload API for trust bundle updates and
+   validates incoming JWTs automatically, keeping the validation current as the bundle
+   rotates.
+
 **Using both simultaneously:**
 A workload at the boundary between these two worlds can hold both at once. For example:
 it participates in mTLS with internal peers (X.509, rotated automatically by the agent)
 while also authenticating to Vault and calling external REST APIs (JWT, re-fetched by the
-application when needed). The Workload API issues whichever form is requested; there is
+application when needed). The Workload API issues whichever forms are requested; there is
 no restriction on fetching both. The same SPIRE trust bundle verifies both forms — its
 CA cert validates X.509 chains, its public key verifies JWT signatures.
 
