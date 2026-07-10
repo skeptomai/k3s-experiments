@@ -911,6 +911,126 @@ This replaces Vault's Kubernetes auth method with a stronger, SPIFFE-native iden
 
 ---
 
+## Failure, Recovery, and Debugging
+
+### What Breaks When the SPIRE Server Goes Down
+
+SPIRE agents cache SVIDs in memory. A server outage does not cause immediate failure —
+the cascade is time-dependent:
+
+**T+0 (server dies)**
+- Running workloads with cached SVIDs: **unaffected**. The agent serves the cached
+  credential and the workload keeps working normally.
+- New workload pods starting now: **blocked**. The agent cannot reach the server to sign
+  a new SVID. The pod starts but any call to the Workload API returns an error.
+- New node joins / agent restarts: **blocked**. Node attestation requires the server.
+  An agent that hasn't yet attested cannot operate at all.
+
+**T+30 min (50% of 1-hour TTL)**
+- The agent starts attempting SVID renewal in the background. Renewal fails silently.
+  The workload is still using the cached SVID and sees nothing wrong yet.
+
+**T+1 hr (SVIDs expire)**
+- Cached SVIDs are now invalid. What breaks depends on how the SVID is used:
+
+  *mTLS between services* — the TLS handshake fails because the presented certificate is
+  expired. The connecting service's TLS library rejects it with a certificate expiry
+  error. If the service is `mtls-client` calling `mtls-server`, the call fails with a
+  TLS error. If the service retries, it keeps failing until the server comes back and the
+  agent can issue a fresh SVID.
+
+  *Vault authentication via JWT SVID* — the JWT has an `exp` claim. Vault validates it
+  on every login call and rejects expired tokens with `token is expired`. A pod that
+  fetches a Vault token at startup and holds it may continue working (Vault tokens have
+  their own TTL), but any pod that re-authenticates to Vault (e.g. to rotate secrets)
+  will fail until a fresh JWT SVID is available.
+
+  *Envoy mTLS sidecar* — Envoy holds the SVID and rotates it via the SPIFFE Workload
+  API. When the SVID expires and rotation fails, Envoy's outbound TLS connections start
+  failing with certificate errors. Inbound connections from peers will also be rejected
+  if the peer's Envoy enforces certificate validity.
+
+  *X.509 SVID used for signing or encryption* — any operation that presents the
+  certificate to a third party (another service, an HSM, a PKI system) fails because the
+  peer rejects the expired cert.
+
+The common thread: **the failure appears at the peer, not at the workload itself**. The
+workload makes what looks like a normal network call; the remote end rejects it because
+the credential is stale. This can look like a network problem or a service outage rather
+than an identity problem if you don't know to look at certificate expiry.
+
+**Recovery** — once the SPIRE server is back, agents reconnect, re-attest if needed, and
+renew SVIDs automatically. Workloads that hold a connection open get the new SVID pushed
+(if using the SPIFFE SDK or Envoy SDS). Workloads using a one-shot init-container pattern
+need their pod restarted to pick up the new credential.
+
+For this cluster the server is a StatefulSet with NFS-backed storage. If the pod is
+killed, Kubernetes reschedules it automatically — typically within a minute, well inside
+the 1-hour SVID TTL. The realistic risk is not a sustained server outage but a transient
+restart during which no new SVIDs can be issued.
+
+---
+
+### Debugging SPIRE Problems
+
+**Check server health:**
+```
+kubectl exec -n spire spire-server-0 -c spire-server -- \
+  /opt/spire/bin/spire-server healthcheck
+```
+
+**List attested agents:**
+```
+kubectl exec -n spire spire-server-0 -c spire-server -- \
+  /opt/spire/bin/spire-server agent list
+```
+Each entry shows the attestation type, SPIFFE ID, expiry, and whether it can re-attest.
+If a node is missing, its agent never attested — check agent logs and TPM provisioning.
+
+**List registration entries:**
+```
+kubectl exec -n spire spire-server-0 -c spire-server -- \
+  /opt/spire/bin/spire-server entry show
+```
+
+**Check agent logs for workload attestation failures:**
+```
+kubectl logs -n spire <agent-pod> -c spire-agent | grep -E 'error|SVID|attest'
+```
+Common errors:
+- `No identity issued` — the workload connected but no registration entry matched its
+  namespace/service account. Check `entry show` and verify the pod's SA.
+- `failed to attest` — node attestation failed. Check TPM device access and DevID cert
+  validity (`sudo openssl x509 -in /etc/spire/devid.crt -noout -dates`).
+- `could not verify bundle signature` — the `verify-bundle` init container failed.
+  Check that `/etc/spire/server-bundle-signing.pub` on the node is a valid PEM public
+  key (`sudo openssl pkey -in /etc/spire/server-bundle-signing.pub -pubin -noout`).
+
+**Check the signed bundle is being produced:**
+```
+kubectl exec -n spire spire-server-0 -c signer-unix -- \
+  ls -la /var/spire/signed-bundle/
+```
+If `spiffetrustbundle.token` is absent, `signer-unix` has not yet received a bundle push
+from the `tpm-sign` BundlePublisher. It runs every 5 minutes — wait and check again.
+
+**Verify the HTTP service is reachable from an agent node:**
+```
+kubectl exec -n spire <agent-pod> -c spire-agent -- \
+  wget -qO- http://spire-bundle-signing.spire.svc.cluster.local/spiffetrustbundle.token \
+  | head -c 80
+```
+
+**Force SVID fetch from a running agent (expects a registered workload):**
+```
+kubectl exec -n spire <agent-pod> -c spire-agent -- \
+  /opt/spire/bin/spire-agent api fetch x509 -socketPath /run/spire/sockets/agent.sock
+```
+Returns `PermissionDenied: no identity issued` for unregistered callers (the agent
+container itself) — this is correct and means the agent is healthy.
+
+---
+
 ## Configuration Reference
 
 ### Key Files
