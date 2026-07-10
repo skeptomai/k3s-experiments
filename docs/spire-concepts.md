@@ -44,7 +44,7 @@ plane cannot substitute a rogue server's key. A key that arrives via Kubernetes 
 swapped by anyone who controls Kubernetes.
 
 Writing the key to `/etc/spire/server-bundle-signing.pub` during physical provisioning
-(via `provision-tpm-devid.sh`, running from omen over SSH before SPIRE starts) is what
+(via `provision-tpm-devid.sh`, running from the out-of-band admin host over SSH before SPIRE starts) is what
 makes it out-of-band. It arrives through the same direct-SSH channel as the DevID
 material — a channel that SPIRE cannot influence and that a Kubernetes compromise cannot
 reach. This means the agent's trust in the server is rooted in the server's hardware TPM,
@@ -692,7 +692,7 @@ including the non-obvious technical details discovered during the process.
 
 ### Phase 1 — DevID CA (complete)
 
-An offline EC P-256 CA (20-year validity) was generated on omen and used exclusively to
+An offline EC P-256 CA (20-year validity) was generated on the out-of-band admin host and used exclusively to
 sign node DevID certificates.
 
 - **Private key**: stored in 1Password as `ipc-cluster DevID CA key` (Private vault,
@@ -723,7 +723,7 @@ it, SPIRE cannot verify that the TPM presenting the EK is a genuine hardware chi
 
 ### Phase 3 — Node Provisioning Script (complete)
 
-`scripts/provision-tpm-devid.sh` runs from omen, provisions one node end-to-end, and is
+`scripts/provision-tpm-devid.sh` runs from the out-of-band admin host, provisions one node end-to-end, and is
 idempotent (skips if a valid cert signed by our CA already exists with >30 days to expiry).
 
 **What the script does:**
@@ -735,7 +735,7 @@ idempotent (skips if a valid cert signed by our CA already exists with >30 days 
 5. Generates a CSR via the `tpm2` OpenSSL provider — the TPM signs the CSR internally
 6. Evicts the NV handle — SPIRE uses blob files, not handles
 7. Strips the 2-byte TPM2B wrapper from both blob files (see below)
-8. Scp's the CSR to omen; retrieves the DevID CA key from 1Password; signs the cert
+8. Scps the CSR to the out-of-band admin host; retrieves the DevID CA key from 1Password; signs the cert
 9. Installs the signed cert at `/etc/spire/devid.crt`; verifies it chains to the DevID CA
 10. Cleans up temporary files; leaves `/etc/spire/` with `devid.crt`, `devid.priv`,
     `devid.pub`, `devid_pubkey.pem`
