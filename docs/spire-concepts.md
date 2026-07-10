@@ -246,6 +246,60 @@ identity is determined entirely by observation from outside the workload process
 property holds for any observation-based attestor, not just this specific `/proc`-based
 implementation.
 
+### Workload Configuration
+
+A workload does not automatically get access to the Workload API socket — the pod spec
+must explicitly declare it, and the application must know to connect to it.
+
+**Pod spec requirements:**
+
+```yaml
+volumes:
+  - name: spire-agent-socket
+    hostPath:
+      path: /run/spire/sockets
+      type: Directory
+containers:
+  - name: my-app
+    volumeMounts:
+      - name: spire-agent-socket
+        mountPath: /run/spire/sockets
+        readOnly: true
+```
+
+The application then connects to `/run/spire/sockets/agent.sock`. This path is a
+convention shared across the SPIFFE ecosystem — the SPIFFE Workload API SDK defaults to
+it, and `spire-agent api fetch` uses it. It can be overridden via an environment variable
+or flag if needed.
+
+**What "no workload modification" actually means in practice:**
+
+The workload *process* does not need to be rebuilt or instrumented — it just opens a
+socket. But the *pod spec* does need to be modified to mount the socket directory, and
+the application needs to know the socket path and how to call the Workload API (either
+via the SDK, via a helper like spiffe-helper that writes cert files to disk, or via Envoy
+SDS if you are using a service mesh). Migrating an existing application that uses
+manually-managed TLS certificates to SPIRE means changing the pod spec and changing how
+the application loads its credentials — the binary itself may be unchanged, but the
+deployment is not zero-effort.
+
+**Automatic injection via mutating admission webhook:**
+
+The pod spec modification can be eliminated entirely with a **mutating admission
+webhook** — a Kubernetes controller that intercepts pod creation and automatically injects
+the socket volume mount into any pod carrying a particular label or annotation. SPIRE does
+not ship one by default, but the pattern is well-established. The SPIRE Controller
+Manager and spiffe-helper projects both support variations of this. This cluster does not
+currently run a webhook, so socket mounts must be added to pod specs manually.
+
+**Registration entry:**
+
+The pod spec change gives the workload access to the socket, but the SPIRE server also
+needs a registration entry that maps the pod's namespace and service account to a SPIFFE
+ID. Without a matching entry, the agent accepts the connection but returns
+`PermissionDenied: no identity issued`. Entries are currently managed imperatively via
+`spire-server entry create` (see Registration Entries below).
+
 ### Pelagos Compatibility Fixes
 
 Two Pelagos bugs affected SPIRE workload attestation on this cluster:
