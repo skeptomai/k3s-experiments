@@ -84,35 +84,25 @@ possession and TPM residency — satisfy the server that the agent is running on
 enrolled node.
 
 **2. Agent attests the workload (SO_PEERCRED + kubelet)**
-When a workload process connects to `agent.sock`, the agent calls
-`getsockopt(SO_PEERCRED)` on the Unix socket to get the caller's host PID, walks `/proc/<pid>/cgroup` to extract the
-container ID, and calls the kubelet API to get the pod's namespace, service account, and
-labels. The workload never claims its own identity — the agent determines it by
-observation, from outside the workload.
+When a workload connects to `agent.sock`, the agent identifies it entirely by observation
+— `getsockopt(SO_PEERCRED)` → `/proc/<pid>/cgroup` → kubelet API — without the workload
+asserting anything about itself. See the Workload Attestation section for the full
+mechanism.
 
 **3. Server issues an SVID to the workload via the agent**
 The agent presents the observed workload identity to the server. If it matches a
-registration entry, the server signs an SVID and returns it to the agent, which hands it
-to the waiting workload process. The workload requests one or both SVID formats from the Workload API — X.509, JWT, or
-both in sequence — and the server signs whichever forms were asked for. A workload can
-hold both simultaneously, using X.509 for mTLS with internal peers and JWT for services
-that expect a Bearer token. X.509 and JWT are the only two SVID formats defined by the
-SPIFFE standard. An X.509 SVID is delivered as a PEM-encoded certificate and
-private key pair, identical in format to any other TLS certificate — the sole distinction
-is that the SPIFFE ID is encoded in the Subject Alternative Name extension as a URI
-(`spiffe://ipc.local/mtls-client`).
+registration entry, the server signs an SVID (X.509 or JWT — see SVIDs below) and
+returns it to the agent, which hands it to the waiting workload process.
 
 **4. Workload presents the SVID to a peer**
-The workload now has a cryptographically-signed identity document. When it connects to
-another service — `mtls-server`, Vault, an API gateway — it presents the X.509 SVID as
-its TLS client certificate (loaded exactly as any PEM certificate would be), or presents
-the JWT SVID as a Bearer token in an HTTP Authorization header.
+The workload presents the SVID to whatever service it is calling — as a TLS client
+certificate for mTLS, or as a Bearer token in an Authorization header. See SVIDs below
+for when each form is appropriate.
 
 **5. Peer verifies against the trust bundle**
 The receiving service verifies the SVID's signature against the SPIRE CA trust bundle.
-No pre-shared secrets, no sidecar injection of credentials, no service-specific token. If
-the signature checks out and the SPIFFE ID matches an access policy, the connection is
-accepted.
+No pre-shared secrets, no manually distributed certificates. If the signature checks out
+and the SPIFFE ID matches the access policy, the connection is accepted.
 
 Steps 0–3 are handled entirely by SPIRE. Steps 4–5 are between the workload and whatever
 it is talking to; SPIRE's job is to get a cryptographically-grounded identity into the
