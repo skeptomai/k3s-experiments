@@ -1,0 +1,22 @@
+---
+# NodePort Service exposing SPIRE metrics to Prometheus on nazgul.
+# Port 30991: custom Python exporter (per-agent SVID state)
+# Port 30992: SPIRE server built-in Prometheus telemetry (internal operations)
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-metrics
+  namespace: spire
+spec:
+  selector:
+    app: spire-server
+  type: NodePort
+  ports:
+    - name: exporter
+      port: 9090
+      targetPort: 9090
+      nodePort: 30991
+    - name: telemetry
+      port: 9988
+      targetPort: 9988
+      nodePort: 30992

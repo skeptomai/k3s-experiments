@@ -12,3 +12,4 @@ resources:
   - agent-bundle-verifier.yaml
   - agent-daemonset.yaml
   - server-metrics-exporter.yaml
+  - server-metrics-nodeport.yaml
