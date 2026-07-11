@@ -51,6 +51,12 @@ data:
       }
     }
 
+    telemetry {
+      Prometheus {
+        port = 9988
+      }
+    }
+
     health_checks {
       listener_enabled = true
       bind_address = "0.0.0.0"

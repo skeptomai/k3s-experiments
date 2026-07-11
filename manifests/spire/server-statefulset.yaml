@@ -50,6 +50,8 @@ spec:
             - name: sign-binary
               mountPath: /usr/local/bin/spire-server-attestor-tpm-sign
               readOnly: true
+            - name: spire-admin-socket
+              mountPath: /tmp/spire-server/private
           livenessProbe:
             httpGet:
               path: /live
@@ -104,6 +106,28 @@ spec:
               mountPath: /var/spire/signed-bundle
               readOnly: true
 
+        # Prometheus exporter: exposes per-agent SVID expiry metrics and
+        # signed bundle token age on :9090/metrics.
+        - name: spire-exporter
+          image: docker.io/library/python:3.12-alpine
+          command: ["python3", "/scripts/exporter.py"]
+          ports:
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: spire-metrics-exporter-script
+              mountPath: /scripts
+              readOnly: true
+            - name: spire-server-cli
+              mountPath: /usr/local/bin/spire-server
+              readOnly: true
+            - name: spire-admin-socket
+              mountPath: /tmp/spire-server/private
+              readOnly: true
+            - name: signed-bundle-dir
+              mountPath: /var/spire/signed-bundle
+              readOnly: true
+
       volumes:
         - name: spire-config
           configMap:
@@ -116,6 +140,15 @@ spec:
             name: spire-signer-unix-config
         - name: signer-socket-dir
           emptyDir: {}
+        - name: spire-admin-socket
+          emptyDir: {}
+        - name: spire-server-cli
+          hostPath:
+            path: /usr/local/bin/spire-server
+            type: File
+        - name: spire-metrics-exporter-script
+          configMap:
+            name: spire-metrics-exporter
         - name: signed-bundle-dir
           emptyDir: {}
         - name: sign-binary

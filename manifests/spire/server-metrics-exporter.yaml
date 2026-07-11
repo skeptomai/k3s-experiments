@@ -1,0 +1,152 @@
+---
+# ConfigMap holding the Prometheus exporter script for the spire-server-0 pod.
+# The spire-exporter sidecar runs this script, which calls `spire-server agent list`
+# via the admin socket (shared with the main container) and exposes per-agent SVID
+# expiry metrics plus signed bundle token age on :9090/metrics.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-metrics-exporter
+  namespace: spire
+data:
+  exporter.py: |
+    #!/usr/bin/env python3
+    """
+    SPIRE Prometheus exporter — runs as a sidecar in spire-server-0.
+    Exposes:
+      spire_agent_svid_expiry_seconds{spiffe_id, attestor}   — Unix timestamp of expiry
+      spire_agent_svid_ttl_seconds{spiffe_id, attestor}      — seconds until expiry
+      spire_agents_total{attestor}                           — count of attested agents
+      spire_bundle_token_age_seconds                         — age of signed JWT on disk
+      spire_bundle_token_expiry_seconds                      — seconds until JWT exp claim
+      spire_exporter_scrape_errors_total                     — parse/exec errors
+    """
+    import http.server, subprocess, time, os, json, base64, re, datetime, traceback
+
+    SOCKET      = "/tmp/spire-server/private/api.sock"
+    CLI         = "/usr/local/bin/spire-server"
+    TOKEN_FILE  = "/var/spire/signed-bundle/spiffetrustbundle.token"
+    PORT        = 9090
+
+    scrape_errors = 0
+
+    def b64d(s):
+        s = s.replace('-', '+').replace('_', '/')
+        return base64.b64decode(s + '=' * (-len(s) % 4))
+
+    def parse_agent_list(output):
+        """Parse `spire-server agent list` plain-text output into a list of dicts."""
+        agents = []
+        current = {}
+        for line in output.splitlines():
+            line = line.strip()
+            if not line:
+                if current:
+                    agents.append(current)
+                    current = {}
+                continue
+            if ':' in line:
+                key, _, val = line.partition(':')
+                key = key.strip().lower().replace(' ', '_')
+                val = val.strip()
+                current[key] = val
+        if current:
+            agents.append(current)
+        return [a for a in agents if 'spiffe_id' in a]
+
+    def parse_expiry(expiry_str):
+        """Parse '2026-07-09 21:57:35 +0000 UTC' → Unix timestamp."""
+        try:
+            # strip the trailing timezone name (UTC/BST/etc) — strptime handles offset
+            s = re.sub(r'\s+[A-Z]{2,4}$', '', expiry_str.strip())
+            dt = datetime.datetime.strptime(s, '%Y-%m-%d %H:%M:%S %z')
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def collect_agent_metrics():
+        result = subprocess.run(
+            [CLI, "agent", "list", "-socketPath", SOCKET],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"agent list failed: {result.stderr.strip()}")
+        agents = parse_agent_list(result.stdout)
+        lines = []
+        counts = {}
+        now = time.time()
+        for a in agents:
+            spiffe_id  = a.get('spiffe_id', 'unknown')
+            attestor   = a.get('attestation_type', 'unknown')
+            expiry_str = a.get('expiration_time', '')
+            expiry_ts  = parse_expiry(expiry_str)
+            counts[attestor] = counts.get(attestor, 0) + 1
+            if expiry_ts is not None:
+                ttl = expiry_ts - now
+                labels = f'spiffe_id="{spiffe_id}",attestor="{attestor}"'
+                lines.append(f'spire_agent_svid_expiry_seconds{{{labels}}} {expiry_ts:.0f}')
+                lines.append(f'spire_agent_svid_ttl_seconds{{{labels}}} {ttl:.0f}')
+        for attestor, count in counts.items():
+            lines.append(f'spire_agents_total{{attestor="{attestor}"}} {count}')
+        return lines
+
+    def collect_bundle_metrics():
+        lines = []
+        now = time.time()
+        try:
+            stat = os.stat(TOKEN_FILE)
+            age = now - stat.st_mtime
+            lines.append(f'spire_bundle_token_age_seconds {age:.0f}')
+            token = open(TOKEN_FILE).read().strip()
+            parts = token.split('.')
+            if len(parts) == 3:
+                payload = json.loads(b64d(parts[1]))
+                exp = payload.get('exp')
+                if exp:
+                    lines.append(f'spire_bundle_token_expiry_seconds {exp - now:.0f}')
+        except Exception as e:
+            lines.append(f'# bundle token error: {e}')
+        return lines
+
+    def render_metrics():
+        global scrape_errors
+        lines = []
+        lines.append('# HELP spire_agent_svid_expiry_seconds Unix timestamp when agent SVID expires')
+        lines.append('# TYPE spire_agent_svid_expiry_seconds gauge')
+        lines.append('# HELP spire_agent_svid_ttl_seconds Seconds until agent SVID expires')
+        lines.append('# TYPE spire_agent_svid_ttl_seconds gauge')
+        lines.append('# HELP spire_agents_total Number of attested agents by attestor type')
+        lines.append('# TYPE spire_agents_total gauge')
+        lines.append('# HELP spire_bundle_token_age_seconds Age of the signed trust bundle JWT on disk')
+        lines.append('# TYPE spire_bundle_token_age_seconds gauge')
+        lines.append('# HELP spire_bundle_token_expiry_seconds Seconds until signed bundle JWT exp claim')
+        lines.append('# TYPE spire_bundle_token_expiry_seconds gauge')
+        lines.append('# HELP spire_exporter_scrape_errors_total Total scrape errors since start')
+        lines.append('# TYPE spire_exporter_scrape_errors_total counter')
+        try:
+            lines += collect_agent_metrics()
+        except Exception as e:
+            scrape_errors += 1
+            lines.append(f'# agent metrics error: {e}')
+        lines += collect_bundle_metrics()
+        lines.append(f'spire_exporter_scrape_errors_total {scrape_errors}')
+        return '\n'.join(lines) + '\n'
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path not in ('/metrics', '/'):
+                self.send_response(404); self.end_headers(); return
+            try:
+                body = render_metrics().encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain; version=0.0.4')
+                self.send_header('Content-Length', len(body))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                self.send_response(500); self.end_headers()
+        def log_message(self, *_):
+            pass  # suppress access logs
+
+    print(f"SPIRE exporter listening on :{PORT}/metrics")
+    http.server.HTTPServer(('', PORT), Handler).serve_forever()
