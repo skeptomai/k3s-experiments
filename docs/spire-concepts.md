@@ -23,7 +23,7 @@ identity is their own business.
 
 This distinction matters because attestation flows in multiple directions simultaneously.
 
-**The out-of-band provisioning channel**
+**The out-of-band provisioning channel:**
 Both steps 0 and 1 below depend on material written to each node by
 `provision-tpm-devid.sh`, running from the out-of-band admin host over direct SSH before
 SPIRE starts. This script writes two things to `/etc/spire/` on every node:
@@ -42,7 +42,7 @@ of this provisioning step, in addition to the hardware guarantees of the TPMs th
 
 Here is the full chain as implemented on this cluster:
 
-**0. Agent trusts the server (TPM-signed bundle)**
+**0. Agent trusts the server (TPM-signed bundle):**
 Before the SPIRE agent starts, the `verify-bundle` init container fetches the trust bundle
 JWT from `spire-bundle-signing` — a ClusterIP Service that exposes an HTTP endpoint on
 the SPIRE server pod (a busybox httpd sidecar on port 8181, serving the file that the
@@ -63,7 +63,7 @@ server's hardware TPM (which guarantees the private key never leaves ipc4's chip
 provisioner's ability to deliver the matching public key to each agent node with integrity.
 Both must hold. The trust root is not in Kubernetes infrastructure.
 
-**1. Server trusts the agent (TPM DevID credential activation)**
+**1. Server trusts the agent (TPM DevID credential activation):**
 DevID (IEEE 802.1AR Secure Device Identity) is the standard that defines a hardware-bound
 device credential: a key pair generated inside the agent host's TPM by the local
 administrator during enrollment (not at manufacturing — it is specific to this cluster's
@@ -83,23 +83,23 @@ returns the secret. Both proofs together — key
 possession and TPM residency — satisfy the server that the agent is running on a real,
 enrolled node.
 
-**2. Agent attests the workload (SO_PEERCRED + kubelet)**
+**2. Agent attests the workload (SO_PEERCRED + kubelet):**
 When a workload connects to `agent.sock`, the agent identifies it entirely by observation
 — `getsockopt(SO_PEERCRED)` → `/proc/<pid>/cgroup` → kubelet API — without the workload
 asserting anything about itself. See the Workload Attestation section for the full
 mechanism.
 
-**3. Server issues an SVID to the workload via the agent**
+**3. Server issues an SVID to the workload via the agent:**
 The agent presents the observed workload identity to the server. If it matches a
 registration entry, the server signs an SVID (X.509 or JWT — see SVIDs below) and
 returns it to the agent, which hands it to the waiting workload process.
 
-**4. Workload presents the SVID to a peer**
+**4. Workload presents the SVID to a peer:**
 The workload presents the SVID to whatever service it is calling — as a TLS client
 certificate for mTLS, or as a Bearer token in an Authorization header. See SVIDs below
 for when each form is appropriate.
 
-**5. Peer verifies against the trust bundle**
+**5. Peer verifies against the trust bundle:**
 The receiving service verifies the SVID's signature against the SPIRE CA trust bundle.
 No pre-shared secrets, no manually distributed certificates. If the signature checks out
 and the SPIFFE ID matches the access policy, the connection is accepted.
@@ -350,11 +350,11 @@ determines it entirely by observation from outside the workload process.
 
 The flow for this cluster (`k8s` workload attestor):
 
-**1. Workload connects to the agent socket.**
+**1. Workload connects to the agent socket:**
 The workload process opens a connection to `/run/spire/sockets/agent.sock`, a Unix domain
 socket on the node filesystem, mounted into the workload pod via a hostPath volume.
 
-**2. Agent calls `getsockopt(SO_PEERCRED)` → host PID.**
+**2. Agent calls `getsockopt(SO_PEERCRED)` → host PID:**
 Unix domain sockets have a kernel feature called `SO_PEERCRED`. When the agent calls
 `getsockopt(SO_PEERCRED)` on the connected socket, the kernel returns the PID, UID,
 and GID of the process on the other end. This is trustworthy because it comes from the
@@ -371,7 +371,7 @@ could map a Unix socket peer to a container ID through a namespace-aware kernel 
 would not need `hostPID: true` and would still require no modification to the workload.
 The workload is unaware of SPIRE in either case — it simply opens a socket connection.
 
-**3. Agent reads `/proc/<pid>/cgroup` → container ID.**
+**3. Agent reads `/proc/<pid>/cgroup` → container ID:**
 The cgroup path for a containerized process encodes the container ID, in a form like:
 ```
 0::/kubepods/besteffort/pod<pod-uid>/<container-id>
@@ -380,13 +380,13 @@ The agent parses this to extract the container ID. (`use_new_container_locator: 
 the agent config tries mountinfo first, which is more reliable under cgroupv2, before
 falling back to the cgroup path.)
 
-**4. Agent calls kubelet API → pod metadata.**
+**4. Agent calls kubelet API → pod metadata:**
 The agent calls the local kubelet's `/pods` endpoint (this is why the agent needs
 `nodes/proxy` RBAC) asking: "which pod contains a container with this ID?" The kubelet
 returns the full pod record: namespace, pod name, service account, labels, and
 annotations. The agent now has everything Kubernetes knows about who made the connection.
 
-**5. Agent matches pod metadata against registration entries.**
+**5. Agent matches pod metadata against registration entries:**
 The agent compares the pod's namespace and service account against its registration
 entries (synced from the SPIRE server). If an entry matches — for example,
 `ns=mtls-demo, sa=mtls-client-sa → spiffe://ipc.local/mtls-client` — the agent issues
