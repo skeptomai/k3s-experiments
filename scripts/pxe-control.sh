@@ -7,7 +7,7 @@
 #
 # Usage:
 #   pxe-control.sh status
-#   pxe-control.sh enable  <node>   # node: ipc1 | ipc2 | ipc3 | all
+#   pxe-control.sh enable  <node>   # node: ipc4..ipc9 | all
 #   pxe-control.sh disable <node>
 #
 # Requires BIOS boot order: PXE first, local disk second.
@@ -21,9 +21,6 @@ fi
 MENUS=/mnt/.ix-apps/app_mounts/netbootxyz/config/menus
 
 declare -A NODE_MAC=(
-    [ipc1]="MAC-a8a159432a67.ipxe"
-    [ipc2]="MAC-a8a159432aed.ipxe"
-    [ipc3]="MAC-a8a159432a74.ipxe"
     [ipc4]="MAC-d0ad089cd2cb.ipxe"
     [ipc5]="MAC-d0ad089cd145.ipxe"
     [ipc6]="MAC-e073e7c0b008.ipxe"
@@ -33,12 +30,12 @@ declare -A NODE_MAC=(
 )
 
 # Canonical node list (keep the loops below in sync with NODE_MAC).
-ALL_NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
+ALL_NODES=(ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
 
 usage() {
     echo "Usage: $0 status"
-    echo "       $0 enable  <ipc1..ipc9|all>"
-    echo "       $0 disable <ipc1..ipc9|all>"
+    echo "       $0 enable  <ipc4..ipc9|all>"
+    echo "       $0 disable <ipc4..ipc9|all>"
     exit 1
 }
 

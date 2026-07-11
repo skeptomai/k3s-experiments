@@ -67,7 +67,7 @@ requests are lower than limits.
 ## Read node resource allocation
 
 ```
-kubectl describe node ipc2
+kubectl describe node ipc7
 ```
 
 Scroll to the `Allocated resources` section. You'll see a table showing how much

@@ -103,7 +103,7 @@ The `local-path` provisioner creates a directory on the node that scheduled the 
 kubectl get pod -n pv-demo <pod-name> -o wide
 ```
 
-On that node (e.g., ipc2), the data lives under `/var/lib/rancher/k3s/storage/`.
+On that node (e.g., ipc7), the data lives under `/var/lib/rancher/k3s/storage/`.
 
 ## Teardown and reclaim policy
 

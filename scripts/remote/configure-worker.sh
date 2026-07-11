@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Locks down SSH on a k3s worker node to accept connections only from the
-# bastion host (ipc1), and configures UFW to allow k3s inter-node traffic.
+# bastion host (ipc4), and configures UFW to allow k3s inter-node traffic.
 # Runs directly on the worker node. Safe to run multiple times.
 set -euo pipefail
 
-BASTION_IP="192.168.88.53"
+BASTION_IP="192.168.88.55"
 LAN_SUBNET="192.168.88.0/24"
 SSH_CONF="/etc/ssh/sshd_config.d/10-bastion-lockdown.conf"
 
@@ -12,7 +12,7 @@ SSH_CONF="/etc/ssh/sshd_config.d/10-bastion-lockdown.conf"
 
 DESIRED="# Worker SSH lockdown
 # Managed by k3s-experiments/scripts/remote/configure-worker.sh — do not edit manually.
-# Only allows SSH connections originating from the bastion host (ipc1).
+# Only allows SSH connections originating from the bastion host (ipc4).
 AllowUsers cb@${BASTION_IP}"
 
 if [ -f "$SSH_CONF" ] && [ "$(sudo cat "$SSH_CONF")" = "$DESIRED" ]; then

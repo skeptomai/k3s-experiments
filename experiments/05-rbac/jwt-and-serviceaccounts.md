@@ -28,7 +28,7 @@ was altered in any way, the signature check fails. No session store, no round-tr
     "namespace": "rbac-demo",
     "pod": { "name": "rbac-tester-77fc98cd4f-drtbp" },
     "serviceaccount": { "name": "pod-reader" },
-    "node": { "name": "ipc2" }
+    "node": { "name": "ipc7" }
   }
 }
 ```

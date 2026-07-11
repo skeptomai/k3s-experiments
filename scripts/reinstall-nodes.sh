@@ -21,7 +21,7 @@
 #
 # Usage: reinstall-nodes.sh [--check] <node> [node...]
 #   --check : PREFLIGHT ONLY (no changes) — fleet-readiness check.
-# ipc1 is refused (control-plane; see docs/ipc1-upgrade-runbook.md).
+# ipc4 is refused (etcd seed; see the ipc4 runbook in docs/).
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,14 +39,14 @@ NODES=("$@")
 [[ ${#NODES[@]} -eq 0 ]] && { echo "Usage: $0 [--check] <node> [node...]"; exit 1; }
 
 for node in "${NODES[@]}"; do
-    [[ "$node" == "ipc4" ]] && { echo "ERROR: ipc4 is the etcd seed — use docs/ipc1-upgrade-runbook.md" >&2; exit 1; }
+    [[ "$node" == "ipc4" ]] && { echo "ERROR: ipc4 is the etcd seed — use the ipc4 runbook in docs/" >&2; exit 1; }
     [[ -z "${NODE_IP[$node]+x}" ]] && { echo "ERROR: unknown node '$node' (see scripts/lib/node-maps.sh)" >&2; exit 1; }
 done
 
-ssh_ipc1()   { ssh -o StrictHostKeyChecking=no cb@"$SERVER" "$@"; }
+ssh_ipc4()   { ssh -o StrictHostKeyChecking=no cb@"$SERVER" "$@"; }
 ssh_node()   { local n=$1; shift; ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$n]}" "$@"; }
 node_ssh_up(){ ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"${NODE_IP[$1]}" true 2>/dev/null; }
-kc()         { ssh_ipc1 "sudo kubectl $*"; }
+kc()         { ssh_ipc4 "sudo kubectl $*"; }
 ssh_mt()     { ssh -o StrictHostKeyChecking=no -J cb@"$SERVER" "$MIKROTIK" "$@"; }
 
 # MikroTik lease host-name for a node's IP: "ubuntu-server"=installing, "<node>"=booted.

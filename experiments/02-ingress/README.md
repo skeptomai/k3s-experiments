@@ -31,7 +31,7 @@ to resolve to one of the node IPs on your client machine.
 Add to `/etc/hosts` on omen:
 
 ```
-192.168.88.53  hello.ipc
+192.168.88.55  hello.ipc
 ```
 
 ## Test it
@@ -49,7 +49,7 @@ With NodePort you were bypassing the ingress controller entirely — the iptable
 rules handled balancing directly. With Ingress, the request flow is:
 
 ```
-curl → Traefik (port 80 on ipc1) → hello Service → pod
+curl → Traefik (port 80 on ipc4) → hello Service → pod
 ```
 
 Traefik is a real proxy process doing the load balancing, not kernel iptables

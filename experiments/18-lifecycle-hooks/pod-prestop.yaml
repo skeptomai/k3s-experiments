@@ -4,7 +4,7 @@ metadata:
   name: prestop-demo
   namespace: hooks-demo
 spec:
-  nodeName: ipc1
+  nodeName: ipc4
   restartPolicy: Never
   terminationGracePeriodSeconds: 15
   containers:

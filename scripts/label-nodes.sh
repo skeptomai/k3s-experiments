@@ -3,7 +3,6 @@
 # workloads can be scheduled by capability via a nodeSelector/affinity on
 # `node-class`:
 #
-#   standard    = 2-core / 4-thread Intel Pentium Gold G5400T   (ipc1, ipc2, ipc3)
 #   performance = 6-core / 12-thread Intel Core i5-12500T (35W)  (ipc4, ipc5, ipc6)
 #   fastest     = 6-core / 12-thread Intel Core i5-12500  (65W)  (ipc7, ipc8, ipc9)
 #
@@ -14,20 +13,14 @@
 # Node labels are live cluster state: they survive reboots but NOT a PXE reinstall
 # (a fresh node registers unlabelled). Run this after reinstalling a node — it's
 # idempotent (--overwrite), so re-running is always safe.
-#
-# Note: ipc1 also carries the control-plane taint, so it won't actually schedule
-# workloads regardless of its label; it's labelled by hardware for completeness.
 set -euo pipefail
 
-IPC1="${IPC1:-cb@ipc1.taildd208.ts.net}"
-SSH="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 $IPC1"
+IPC4="${IPC4:-cb@ipc4.taildd208.ts.net}"
+SSH="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 $IPC4"
 
-STANDARD="ipc1 ipc2 ipc3"      # Pentium Gold G5400T, 2c/4t
 PERFORMANCE="ipc4 ipc5 ipc6"   # i5-12500T (35W), 6c/12t, 32GB
 FASTEST="ipc7 ipc8 ipc9"       # i5-12500 non-T (65W), 6c/12t, 16GB
 
-echo "=== labelling standard (2-core Pentium): $STANDARD ==="
-$SSH "sudo kubectl label node $STANDARD node-class=standard --overwrite"
 echo "=== labelling performance (i5-12500T, 35W): $PERFORMANCE ==="
 $SSH "sudo kubectl label node $PERFORMANCE node-class=performance --overwrite"
 echo "=== labelling fastest (i5-12500 non-T, 65W): $FASTEST ==="

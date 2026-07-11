@@ -17,7 +17,7 @@ set -uo pipefail   # deliberately NOT -e: run every check, report all findings
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/node-maps.sh"
-SERVER="ipc1.taildd208.ts.net"
+SERVER="ipc4.taildd208.ts.net"
 MIKROTIK="admin@192.168.88.1"
 NB="http://192.168.89.2:31011"                                   # nazgul netboot assets
 MENUS="/mnt/.ix-apps/app_mounts/netbootxyz/config/menus"
@@ -28,7 +28,7 @@ ok()   { echo "  [ OK ] $*"; }
 bad()  { echo "  [FAIL] $*"; fails=$((fails+1)); }
 warn() { echo "  [WARN] $*"; warns=$((warns+1)); }
 
-ssh_ipc1() { ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no cb@"$SERVER" "$@"; }
+ssh_ipc4() { ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no cb@"$SERVER" "$@"; }
 ssh_node() { ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no -J cb@"$SERVER" cb@"$1" "${@:2}"; }
 ssh_naz()  { ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no root@nazgul "$@"; }
 ssh_mt()   { ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no -J cb@"$SERVER" "$MIKROTIK" "$@"; }
@@ -38,7 +38,7 @@ ssh_mt()   { ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=n
 for node in "$@"; do
   echo "== preflight: $node =="
   if [[ -z "${NODE_MAC[$node]+x}" ]]; then bad "unknown node (not in node-maps.sh)"; continue; fi
-  if [[ "$node" == "ipc1" ]]; then bad "ipc1 is control-plane — not reinstallable via this path"; continue; fi
+  if [[ "$node" == "ipc4" ]]; then bad "ipc4 is the etcd seed — not reinstallable via this path"; continue; fi
   macnc=$(mac_nocolon "$node"); macd=$(mac_dashed "$node"); ip="${NODE_IP[$node]}"
 
   # 1. per-MAC iPXE menu file present on nazgul (enabled or .disabled)

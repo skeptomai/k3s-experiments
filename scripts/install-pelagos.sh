@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 # Installs or upgrades Pelagos CRI on one or more ipc nodes.
-# Run from any machine with SSH access to ipc1 via the tailnet.
-# ipc2 and ipc3 are reached by jumping through ipc1.
+# Run from any machine with SSH access to ipc4 via the tailnet.
+# ipc5 and ipc6 are reached by jumping through ipc4.
 #
 # Installs the latest pelagos release deb (which includes both pelagos and
 # pelagos-cri), sets up /usr/local/bin symlinks, writes the pelagos-cri
 # systemd unit, and deploys the canonical k3s config from config/k3s-server.yaml
 # or config/k3s-agent.yaml in the repo root. Safe to run multiple times (idempotent).
 #
-# Role-aware: deploys the server config (k3s-server.yaml on the etcd seed ipc1,
-# k3s-server-join.yaml with the token injected on ipc2/ipc3) + the `k3s` unit on
-# control-plane nodes, and the agent config + `k3s-agent` unit on workers ipc4-6.
+# Role-aware: deploys the server config (k3s-server.yaml on the etcd seed ipc4,
+# k3s-server-join.yaml with the token injected on ipc5/ipc6) + the `k3s` unit on
+# control-plane nodes, and the agent config + `k3s-agent` unit on workers ipc7-9.
 # Role map: scripts/lib/node-roles.sh.
 #
 # Usage: ./install-pelagos.sh [--version vX.Y.Z] [node...]
 #   --version: pin a specific release (default: latest)
-#   node: ipc1 | ipc2 | ipc3 | ipc4 | ipc5 | ipc6 (default: all six)
+#   node: ipc4 | ipc5 | ipc6 | ipc7 | ipc8 | ipc9 (default: all six)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVER="ipc1.taildd208.ts.net"
+SERVER="ipc4.taildd208.ts.net"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
-DEFAULT_NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
-declare -A NODE_IP=([ipc1]="" [ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
+DEFAULT_NODES=(ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
+declare -A NODE_IP=([ipc4]="" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
 
 VERSION_PIN=""
 NODES=()
@@ -61,7 +61,7 @@ install_node() {
     local node=$1
     local ssh_cmd svc k3s_config_b64 registries_b64
 
-    if [ "$node" = "ipc1" ]; then
+    if [ "$node" = "ipc4" ]; then
         ssh_cmd="ssh -o StrictHostKeyChecking=no cb@$SERVER"
     else
         ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@$SERVER cb@${NODE_IP[$node]}"
@@ -69,9 +69,9 @@ install_node() {
     svc=$(k3s_service "$node")
 
     # Role-aware k3s config:
-    #   - etcd seed (ipc1)        -> server config (cluster-init)
-    #   - joining server (ipc2/3) -> server-join config, token injected
-    #   - agent (ipc4-6)          -> agent config
+    #   - etcd seed (ipc4)        -> server config (cluster-init)
+    #   - joining server (ipc5/6) -> server-join config, token injected
+    #   - agent (ipc7-9)          -> agent config
     if [ "$node" = "$CLUSTER_INIT_NODE" ]; then
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
     elif is_server_node "$node"; then

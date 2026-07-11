@@ -45,7 +45,7 @@ For this cluster, the control plane is the trust anchor and that is a deliberate
 ## Architecture on this cluster
 
 ```
-ipc1 (control-plane)          ipc2, ipc3 (workers)
+ipc4-6 (control-plane+worker)  ipc7, ipc8, ipc9 (workers)
 ┌─────────────────────┐       ┌──────────────────────────┐
 │ spire-server-0      │       │ spire-agent (DaemonSet)   │
 │ StatefulSet         │◄──────│ node attestation via psat │

@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
-# Upgrades the k3s SERVER (control-plane) nodes: ipc1 ipc2 ipc3.
+# Upgrades the k3s SERVER (control-plane) nodes: ipc4 ipc5 ipc6.
 # In-place binary upgrade, ONE AT A TIME, waiting for each to return Ready before
 # the next — so the 3-member etcd quorum is never lost (HA-safe rolling upgrade).
-# Run from any machine with SSH access to ipc1 via the tailnet.
+# Run from any machine with SSH access to ipc4 via the tailnet.
 #
 # Usage: ./upgrade-server.sh [channel] [node...]
 #   channel: k3s release channel, e.g. v1.32, v1.33, stable (default: stable)
-#   node:    ipc1 | ipc2 | ipc3 (default: all server nodes, seed first)
+#   node:    ipc4 | ipc5 | ipc6 (default: all server nodes, seed first)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
 
-SERVER="ipc1.taildd208.ts.net"
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54")
+SERVER="ipc4.taildd208.ts.net"
+declare -A NODE_IP=([ipc5]="192.168.88.56" [ipc6]="192.168.88.57")
 
 CHANNEL="stable"
 TARGETS=()
 for arg in "$@"; do
     if [[ "$arg" == ipc* ]]; then TARGETS+=("$arg"); else CHANNEL="$arg"; fi
 done
-[[ ${#TARGETS[@]} -eq 0 ]] && TARGETS=("${SERVER_NODES[@]}")   # ipc1 ipc2 ipc3, seed first
+[[ ${#TARGETS[@]} -eq 0 ]] && TARGETS=("${SERVER_NODES[@]}")   # ipc4 ipc5 ipc6, seed first
 
 for node in "${TARGETS[@]}"; do
     if ! is_server_node "$node"; then
         echo "ERROR: $node is not a control-plane server — use upgrade-agents.sh." >&2
         exit 1
     fi
-    # ipc1 is reachable directly; ipc2/ipc3 via the ipc1 jump.
+    # ipc4 is reachable directly; ipc5/ipc6 via the ipc4 jump.
     if [[ "$node" == "$CLUSTER_INIT_NODE" ]]; then
         ssh_cmd=(ssh -o StrictHostKeyChecking=no cb@"$SERVER")
     else

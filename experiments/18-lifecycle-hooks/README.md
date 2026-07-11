@@ -66,9 +66,9 @@ kubectl wait pod/poststart-demo -n hooks-demo --for=condition=ready --timeout=30
 kubectl exec -n hooks-demo poststart-demo -- cat /tmp/hook-proof
 # → poststart-ran
 
-# Verify preStop runs before termination (evidence file on ipc1 at /tmp/hooks-demo-prestop/)
+# Verify preStop runs before termination (evidence file on ipc4 at /tmp/hooks-demo-prestop/)
 kubectl wait pod/prestop-demo -n hooks-demo --for=condition=ready --timeout=30s
 kubectl delete pod prestop-demo -n hooks-demo --grace-period=10
-ssh cb@ipc1.taildd208.ts.net "cat /tmp/hooks-demo-prestop/prestop-proof"
+ssh cb@ipc4.taildd208.ts.net "cat /tmp/hooks-demo-prestop/prestop-proof"
 # → prestop-ran
 ```

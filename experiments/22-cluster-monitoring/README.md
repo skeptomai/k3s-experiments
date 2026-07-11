@@ -12,8 +12,8 @@ Rather than deploying a second Prometheus stack inside the cluster, this experim
 
 ```
 nazgul (192.168.89.2)
-  pelagos-prometheus ─── scrapes ──► ipc1-5 :9100      (node-exporter, per-node hardware/OS)
-                     └── scrapes ──► ipc1:30808        (kube-state-metrics, k8s objects)
+  pelagos-prometheus ─── scrapes ──► ipc4-9 :9100      (node-exporter, per-node hardware/OS)
+                     └── scrapes ──► ipc4:30808        (kube-state-metrics, k8s objects)
 ```
 
 The MikroTik firewall allows unrestricted bridge-nas → bridge-lan traffic, so nazgul can reach all five ipc nodes directly.
@@ -35,13 +35,13 @@ Added to `~/Projects/home-monitoring/pelagos/config/prometheus/prometheus.yml`:
 ```yaml
 - job_name: k3s_nodes
   static_configs:
-    - targets: ['192.168.88.53:9100']
-      labels: {node: ipc1}
+    - targets: ['192.168.88.55:9100']
+      labels: {node: ipc4}
     ...
 
 - job_name: k3s_kube_state_metrics
   static_configs:
-    - targets: ['192.168.88.53:30808']
+    - targets: ['192.168.88.55:30808']
 ```
 
 After updating the config, run `bash update.sh` on nazgul to reload Prometheus.

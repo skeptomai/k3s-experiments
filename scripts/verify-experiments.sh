@@ -8,25 +8,25 @@
 set -uo pipefail
 
 REPO="${REPO:-/home/cb/Projects/k3s-experiments}"
-IPC1="cb@ipc1.taildd208.ts.net"
-# On-LAN mode (e.g. run from nazgul): reach ipc1 + nodes by LAN IP directly —
-# no tailnet, no ProxyJump through ipc1, removing the single-jump chokepoint.
-[[ -n "${VERIFY_ONLAN:-}" ]] && IPC1="cb@192.168.88.53"
+IPC4="cb@ipc4.taildd208.ts.net"
+# On-LAN mode (e.g. run from nazgul): reach ipc4 + nodes by LAN IP directly —
+# no tailnet, no ProxyJump through ipc4, removing the single-jump chokepoint.
+[[ -n "${VERIFY_ONLAN:-}" ]] && IPC4="cb@192.168.88.55"
 LOGDIR="${LOGDIR:-/tmp/verify-experiments-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$LOGDIR"
 
 SSH_CTRL="/tmp/ssh-verify-ctl-%r@%h:%p"
 SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPath=$SSH_CTRL -o ControlPersist=120"
 
-# Pre-open a single master connection to ipc1 so all parallel subprocesses
+# Pre-open a single master connection to ipc4 so all parallel subprocesses
 # reuse it instead of each racing to establish their own TCP+tailnet session.
-ssh $SSH_OPTS "$IPC1" true 2>/dev/null || true
-trap 'ssh -o ControlPath="$SSH_CTRL" -O exit "$IPC1" 2>/dev/null; true' EXIT
+ssh $SSH_OPTS "$IPC4" true 2>/dev/null || true
+trap 'ssh -o ControlPath="$SSH_CTRL" -O exit "$IPC4" 2>/dev/null; true' EXIT
 
-kube() { ssh $SSH_OPTS "$IPC1" "sudo kubectl $*"; }
+kube() { ssh $SSH_OPTS "$IPC4" "sudo kubectl $*"; }
 
 # Run a per-node SSH command, retrying on TRANSIENT connection failures
-# (banner-exchange timeouts when the ipc1 jump is contended or the link is laggy).
+# (banner-exchange timeouts when the ipc4 jump is contended or the link is laggy).
 # $1 = ssh-prefix string (word-split), $2 = remote command. Echoes stdout; only
 # retries connection-setup errors, NOT a real non-zero exit from the remote cmd.
 sshn_retry() {
@@ -49,7 +49,7 @@ kapply() {
     [[ "$(basename "$f")" == "namespace.yaml" ]] && ns_files+=("$f") || other_files+=("$f")
   done
   { for f in "${ns_files[@]}" "${other_files[@]}"; do printf -- "---\n"; cat "$f"; done; } \
-    | ssh $SSH_OPTS "$IPC1" "sudo kubectl apply -f -"
+    | ssh $SSH_OPTS "$IPC4" "sudo kubectl apply -f -"
 }
 
 del_ns() { kube "delete namespace $1 --ignore-not-found --wait=true --timeout=120s" 2>&1 || true; }
@@ -59,16 +59,16 @@ del_ns() { kube "delete namespace $1 --ignore-not-found --wait=true --timeout=12
 # the cache for the rest. Covers all six nodes since pods now land anywhere.
 prefetch_images() {
   echo "Pre-fetching images on all nodes (best-effort)..."
-  local nodes="ipc1 ipc2 ipc3 ipc4 ipc5 ipc6"
+  local nodes="ipc4 ipc5 ipc6 ipc7 ipc8 ipc9"
   # bitnami/kubectl (exp 05/11/registration jobs), python (exp 14),
   # envoy (exp 23/24 — the heavy one).
   local images="docker.io/bitnami/kubectl:latest docker.io/library/python:3.12-alpine docker.io/envoyproxy/envoy:v1.32.0"
   for node in $nodes; do
     for img in $images; do
-      if [ "$node" = "ipc1" ]; then
-        ssh $SSH_OPTS "$IPC1" "sudo crictl pull $img" >/dev/null 2>&1 || echo "  WARNING: $img pull failed on $node"
+      if [ "$node" = "ipc4" ]; then
+        ssh $SSH_OPTS "$IPC4" "sudo crictl pull $img" >/dev/null 2>&1 || echo "  WARNING: $img pull failed on $node"
       else
-        ssh $SSH_OPTS -J "$IPC1" "cb@$node" "sudo crictl pull $img" >/dev/null 2>&1 || echo "  WARNING: $img pull failed on $node"
+        ssh $SSH_OPTS -J "$IPC4" "cb@$node" "sudo crictl pull $img" >/dev/null 2>&1 || echo "  WARNING: $img pull failed on $node"
       fi
     done
   done
@@ -92,7 +92,7 @@ verify_01_02() {
     # Retry curl a few times; kube-proxy rules may lag behind rollout completion.
     local curl_ok=false
     for i in 1 2 3 4 5; do
-      if ssh $SSH_OPTS "$IPC1" "curl -sf --max-time 5 http://localhost:30080" > /dev/null 2>&1; then
+      if ssh $SSH_OPTS "$IPC4" "curl -sf --max-time 5 http://localhost:30080" > /dev/null 2>&1; then
         curl_ok=true; break
       fi
       sleep 5
@@ -485,14 +485,14 @@ verify_17() {
 }
 
 # ---------------------------------------------------------------------------
-# 18 — Container lifecycle hooks (sequential: preStop uses hostPath on ipc1)
+# 18 — Container lifecycle hooks (sequential: preStop uses hostPath on ipc4)
 # ---------------------------------------------------------------------------
 verify_18() {
   local rc=0
   echo "=== 18: lifecycle-hooks ==="
 
   # Clean any leftover evidence from a prior run
-  ssh $SSH_OPTS "$IPC1" "sudo rm -rf /tmp/hooks-demo-prestop" 2>/dev/null || true
+  ssh $SSH_OPTS "$IPC4" "sudo rm -rf /tmp/hooks-demo-prestop" 2>/dev/null || true
 
   if ! kapply \
     "$REPO/experiments/18-lifecycle-hooks/namespace.yaml" \
@@ -518,7 +518,7 @@ verify_18() {
     # Give preStop a moment to complete
     sleep 5
     local prestop_proof
-    prestop_proof=$(ssh $SSH_OPTS "$IPC1" "cat /tmp/hooks-demo-prestop/prestop-proof 2>/dev/null | tr -d '[:space:]'")
+    prestop_proof=$(ssh $SSH_OPTS "$IPC4" "cat /tmp/hooks-demo-prestop/prestop-proof 2>/dev/null | tr -d '[:space:]'")
     if [[ "$prestop_proof" != "prestop-ran" ]]; then
       echo "FAIL: preStop did not write proof file (got: '$prestop_proof')"; rc=1
     else
@@ -527,7 +527,7 @@ verify_18() {
   fi
 
   del_ns hooks-demo
-  ssh $SSH_OPTS "$IPC1" "sudo rm -rf /tmp/hooks-demo-prestop" 2>/dev/null || true
+  ssh $SSH_OPTS "$IPC4" "sudo rm -rf /tmp/hooks-demo-prestop" 2>/dev/null || true
   [[ $rc -eq 0 ]] && echo "PASS" || echo "FAIL"
   return $rc
 }
@@ -598,10 +598,10 @@ for p in d['items']:
       local sshn nodeaddr="${node_ip[$node]:-$node}"
       if [[ -n "${VERIFY_ONLAN:-}" ]]; then
         sshn="ssh $SSH_OPTS cb@$nodeaddr"            # direct, no jump (on-LAN)
-      elif [[ "$node" == "ipc1" ]]; then
-        sshn="ssh $SSH_OPTS $IPC1"
+      elif [[ "$node" == "ipc4" ]]; then
+        sshn="ssh $SSH_OPTS $IPC4"
       else
-        sshn="ssh $SSH_OPTS -J $IPC1 cb@$nodeaddr"
+        sshn="ssh $SSH_OPTS -J $IPC4 cb@$nodeaddr"
       fi
 
       # Check 1: cgroup_name is non-null and starts with kubepods/
@@ -624,7 +624,7 @@ for p in d['items']:
 
       # Check 3: usageCoreNanoSeconds > 0 in kubelet summary on the pod's node
       local cum
-      cum=$(ssh $SSH_OPTS "$IPC1" "sudo curl -sk \
+      cum=$(ssh $SSH_OPTS "$IPC4" "sudo curl -sk \
         --cert /var/lib/rancher/k3s/server/tls/client-admin.crt \
         --key /var/lib/rancher/k3s/server/tls/client-admin.key \
         https://${nodeaddr}:10250/stats/summary 2>/dev/null" | \
@@ -824,7 +824,7 @@ verify_22() {
     echo "FAIL: kube-state-metrics not ready"; rc=1
   else
     # These curls MUST bypass the shared SSH ControlMaster. The parallel batch
-    # multiplexes every `ssh ipc1` over one master and degrades it, and that
+    # multiplexes every `ssh ipc4` over one master and degrades it, and that
     # degradation persists for the rest of the run — so the multiplexed curl
     # fails here even though ksm is healthy (a fresh connection returns 2590
     # metrics fine). ControlMaster=no + ControlPath=none, placed BEFORE $SSH_OPTS
@@ -832,8 +832,8 @@ verify_22() {
     local fresh="-o ControlMaster=no -o ControlPath=none"
     local ne_ok=false ksm_ok=false
     for i in $(seq 8); do
-      $ne_ok  || { ssh $fresh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30900/metrics" 2>/dev/null | grep -q '^node_' && ne_ok=true; }
-      $ksm_ok || { ssh $fresh $SSH_OPTS "$IPC1" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30808/metrics" 2>/dev/null | grep -q '^kube_' && ksm_ok=true; }
+      $ne_ok  || { ssh $fresh $SSH_OPTS "$IPC4" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30900/metrics" 2>/dev/null | grep -q '^node_' && ne_ok=true; }
+      $ksm_ok || { ssh $fresh $SSH_OPTS "$IPC4" "curl -sf --connect-timeout 5 --max-time 15 http://localhost:30808/metrics" 2>/dev/null | grep -q '^kube_' && ksm_ok=true; }
       $ne_ok && $ksm_ok && break
       sleep 3
     done

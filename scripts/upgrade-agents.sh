@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Upgrades / (re)joins the k3s AGENT (worker) nodes: ipc4 ipc5 ipc6.
-# Run from any machine with SSH access to ipc1 via the tailnet (not from ipc1 itself).
-# Agents are reached by jumping through ipc1.
+# Upgrades / (re)joins the k3s AGENT (worker) nodes: ipc7 ipc8 ipc9.
+# Run from any machine with SSH access to ipc4 via the tailnet (not from ipc4 itself).
+# Agents are reached by jumping through ipc4.
 #
 # IMPORTANT: K3S_URL and K3S_TOKEN must always be passed explicitly when
 # joining agents. Without them the install script has no way to know
 # the node is an agent and will incorrectly install it as a server.
 #
-# Control-plane nodes (ipc1/ipc2/ipc3) are NOT agents — they run servers.
-# Use join-server.sh for ipc2/ipc3; this script refuses them. See
+# Control-plane nodes (ipc4/ipc5/ipc6) are NOT agents — they run servers.
+# Use join-server.sh for ipc5/ipc6; this script refuses them. See
 # scripts/lib/node-roles.sh for the role map.
 #
 # Usage: ./upgrade-agents.sh [channel] [node...]
 #   channel: k3s release channel, e.g. v1.32, v1.33, stable (default: stable)
-#   node:    ipc4 | ipc5 | ipc6 (default: all agent nodes; specify to target one)
+#   node:    ipc7 | ipc8 | ipc9 (default: all agent nodes; specify to target one)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
 
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
+declare -A NODE_IP=([ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
 
 CHANNEL="stable"
 AGENTS=()

@@ -12,10 +12,10 @@
 set -euo pipefail
 
 NODES=("$@")
-[[ ${#NODES[@]} -eq 0 ]] && NODES=(ipc1 ipc2 ipc3 ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
-# SSH by IP (via the ipc1 jump). Node short-names only resolve for Tailscale-enrolled
+[[ ${#NODES[@]} -eq 0 ]] && NODES=(ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
+# SSH by IP (via the ipc4 jump). Node short-names only resolve for Tailscale-enrolled
 # nodes; ipc7-9 (manual install) aren't on the tailnet, so name-based SSH fails.
-declare -A NODE_IP=([ipc2]="192.168.88.52" [ipc3]="192.168.88.54" [ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
+declare -A NODE_IP=([ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
 NUT_SERVER="192.168.89.2"
 UPS_NAME="cyberpower"
 MON_USER="upsmon"
@@ -25,10 +25,10 @@ configure_node() {
   local node="$1"
   local ssh_cmd
 
-  if [[ "$node" == "ipc1" ]]; then
-    ssh_cmd="ssh -o StrictHostKeyChecking=no cb@ipc1.taildd208.ts.net"
+  if [[ "$node" == "ipc4" ]]; then
+    ssh_cmd="ssh -o StrictHostKeyChecking=no cb@ipc4.taildd208.ts.net"
   else
-    ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@ipc1.taildd208.ts.net cb@${NODE_IP[$node]}"
+    ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@ipc4.taildd208.ts.net cb@${NODE_IP[$node]}"
   fi
 
   echo "Configuring NUT client on $node..."
