@@ -22,6 +22,24 @@ claim to be, and a government vouches for that." What the receiving party does w
 identity is their own business.
 
 This distinction matters because attestation flows in multiple directions simultaneously.
+
+**The out-of-band provisioning channel**
+Both steps 0 and 1 below depend on material written to each node by
+`provision-tpm-devid.sh`, running from the out-of-band admin host over direct SSH before
+SPIRE starts. This script writes two things to `/etc/spire/` on every node:
+
+- The node's own **DevID key pair and certificate** (step 1) — a TPM-bound key pair
+  generated inside the node's hardware TPM, plus a certificate signed by the cluster
+  DevID CA
+- The server's **bundle-signing public key** (step 0) — read from ipc4's TPM
+  (handle `0x81008006`) and written as a PEM file
+
+This direct-SSH channel is the trust anchor for the entire bootstrap. It is independent
+of Kubernetes: SPIRE cannot influence it, and a compromise of the Kubernetes control
+plane cannot reach it. A key delivered this way cannot be substituted by anyone who
+controls only the cluster. Both steps 0 and 1 derive their security from the integrity
+of this provisioning step, in addition to the hardware guarantees of the TPMs themselves.
+
 Here is the full chain as implemented on this cluster:
 
 **0. Agent trusts the server (TPM-signed bundle)**
@@ -30,36 +48,30 @@ JWT from `spire-bundle-signing` — a ClusterIP Service that exposes an HTTP end
 the SPIRE server pod (a busybox httpd sidecar on port 8181, serving the file that the
 `signer-unix` sidecar writes after signing with the server's TPM key). The init container
 verifies the RS256 signature on that JWT against `/etc/spire/server-bundle-signing.pub`
-and only writes the bundle to disk if the signature is valid. The agent will not start if
-this check fails.
+— the server's TPM public key written by the provisioning script — and only writes the
+bundle to disk if the signature is valid. The agent will not start if this check fails.
 
-The server's TPM public key lives in a file on the agent node rather than being fetched
-from the TPM at runtime for two reasons. First, TPMs are local hardware — the server's
-TPM is physically on ipc4 and there is no network protocol for reading a remote TPM's
-public key; each TPM is only accessible to the machine it is soldered to. Second, and
-more importantly, fetching the key through any Kubernetes channel (ConfigMap, Secret,
-API) would defeat the purpose entirely: the whole point is that the agent needs a trust
-anchor that is independent of Kubernetes infrastructure, so that a compromised control
-plane cannot substitute a rogue server's key. A key that arrives via Kubernetes can be
-swapped by anyone who controls Kubernetes.
+The server's TPM public key lives in a file rather than being fetched from the TPM at
+runtime for two reasons. First, TPMs are local hardware — the server's TPM is physically
+on ipc4 and there is no network protocol for reading a remote TPM's public key; each TPM
+is only accessible to the machine it is soldered to. Second, fetching it through any
+Kubernetes channel (ConfigMap, Secret, API) would defeat the purpose: a key that arrives
+via Kubernetes can be swapped by anyone who controls Kubernetes.
 
-Writing the key to `/etc/spire/server-bundle-signing.pub` during physical provisioning
-(via `provision-tpm-devid.sh`, running from the out-of-band admin host over SSH before SPIRE starts) is what
-makes it out-of-band. It arrives through the same direct-SSH channel as the DevID
-material — a channel that SPIRE cannot influence and that a Kubernetes compromise cannot
-reach. This means the agent's trust in the server is rooted in two things held together: the
+The agent's trust in the server is therefore rooted in two things held together: the
 server's hardware TPM (which guarantees the private key never leaves ipc4's chip) and the
-provisioner's ability to deliver the matching public key to each agent node with integrity
-(which guarantees no substitution occurred during the out-of-band provisioning step).
+provisioner's ability to deliver the matching public key to each agent node with integrity.
 Both must hold. The trust root is not in Kubernetes infrastructure.
 
 **1. Server trusts the agent (TPM DevID credential activation)**
 DevID (IEEE 802.1AR Secure Device Identity) is the standard that defines a hardware-bound
 device credential: a key pair generated inside the agent host's TPM by the local
-administrator during enrollment (not at manufacturing — it is specific to this cluster's identity scheme, not
-indelible), so the private key never leaves the chip, paired with a certificate signed by
-an authority that vouches for which device the key belongs to. The agent sends its DevID certificate (signed by the cluster DevID CA) and
-proves it holds the corresponding private key by signing a server-issued nonce. The server
+administrator during enrollment (not at manufacturing — it is specific to this cluster's
+identity scheme, not indelible), so the private key never leaves the chip, paired with a
+certificate signed by an authority that vouches for which device the key belongs to. The
+DevID key pair and certificate are written to the node by the provisioning script
+described above. The agent sends its DevID certificate (signed by the cluster DevID CA)
+and proves it holds the corresponding private key by signing a server-issued nonce. The server
 then performs a credential activation challenge using the attesting agent node's EK
 (Endorsement Key) public key. The EK is a key pair burned into that agent node's TPM at
 manufacturing time; the manufacturer signs an EK certificate and stores it in that TPM's
