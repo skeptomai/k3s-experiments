@@ -1336,3 +1336,48 @@ container itself) — this is correct and means the agent is healthy.
 | Workload attestor | `k8s`, `skip_kubelet_verification: true`, `use_new_container_locator: true` |
 | Key manager | Memory |
 | Health port | 8080 |
+
+---
+
+## Appendix: Design Notes
+
+### Trust Bundle Bootstrap — Standard Options and What We Built
+
+**Standard SPIRE trust bundle bootstrap options:**
+
+SPIRE provides four built-in ways for an agent to obtain the initial trust bundle at
+startup:
+
+| Option | Mechanism | Security property |
+|--------|-----------|-------------------|
+| `spire-bundle` ConfigMap (`k8s_bundle` notifier) | Server writes bundle to ConfigMap; agent mounts it | Kubernetes RBAC — policy, not cryptographic proof |
+| `trust_bundle_path` | PEM file pre-placed on disk | Filesystem permissions — integrity depends on delivery channel |
+| `trust_bundle_url` | Fetch bundle from an HTTPS URL at startup | HTTPS certificate — pushes trust question to whoever runs the URL |
+| `insecure_bootstrap` | Accept whatever the server presents | None — only appropriate on fully-trusted private networks |
+
+All four have the same fundamental limitation: the bundle arrives through a channel that
+is either Kubernetes-controlled or unauthenticated. A compromised Kubernetes control
+plane can substitute the ConfigMap; a `trust_bundle_url` endpoint can be hijacked; a
+pre-placed file can be replaced if the node is compromised before SPIRE starts.
+
+**What we built:**
+
+Our implementation is functionally equivalent to `trust_bundle_url` combined with
+`spire-server-attestor-tpm` signing: the bundle is fetched from an HTTP endpoint
+(`spire-bundle-signing` ClusterIP Service), but the content is a JWT signed by the
+server's TPM private key (handle `0x81008006` on ipc4). The agent node has the matching
+public key installed out-of-band via `provision-tpm-devid.sh` before SPIRE starts,
+through a channel that Kubernetes cannot influence.
+
+Rather than using SPIRE's native `trust_bundle_url` config option (which would require
+the SPIRE agent binary to perform the signature verification), we use `trust_bundle_path`
+pointing at an emptyDir volume, and a `verify-bundle` init container performs the
+fetch-and-verify step before the agent starts. This fits the Kubernetes pod lifecycle
+cleanly — the init container runs once, exits 0 on success, and the agent reads the
+verified bundle from the shared emptyDir. The `spire-server-attestor-tpm` project's
+`verifier` binary was designed for the same role but as a persistent systemd daemon,
+which does not map well to Kubernetes pods (and Pelagos does not support native sidecars
+with `restartPolicy: Always`).
+
+The net result is a bootstrap path whose integrity guarantee is hardware-rooted: producing
+a valid signature over a substituted bundle requires physical access to ipc4's TPM.
