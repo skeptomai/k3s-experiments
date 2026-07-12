@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Install and configure NUT client (upsmon) on ipc nodes.
-# Connects each node to the NUT server running on nazgul (192.168.89.2).
+# Connects each node to the NUT server running on ipc4 (192.168.88.55).
+# ipc4 runs the NUT server with the UPS connected via USB; ipc5-9 are clients.
+# NOTE: ipc4 itself runs upsmon as master — this script configures it as a slave
+# client only when run on ipc4; for a fresh ipc4 reinstall, run
+# scripts/install-nut-server.sh first, then this script for the other nodes.
 # Run from omen after any node reinstall.
 # Usage: install-nut-clients.sh [node...]   (default: ALL six nodes)
 #
@@ -16,7 +20,7 @@ NODES=("$@")
 # SSH by IP (via the ipc4 jump). Node short-names only resolve for Tailscale-enrolled
 # nodes; ipc7-9 (manual install) aren't on the tailnet, so name-based SSH fails.
 declare -A NODE_IP=([ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
-NUT_SERVER="192.168.89.2"
+NUT_SERVER="192.168.88.55"  # ipc4 — NUT server with USB-connected UPS
 UPS_NAME="cyberpower"
 MON_USER="upsmon"
 MON_PWD="upsmon123"
