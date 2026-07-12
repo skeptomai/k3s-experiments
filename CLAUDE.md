@@ -36,8 +36,8 @@ previously workers.
   from scratch" below).
 - k3s v1.35.5, Ubuntu 26.04, x86_64
 - ipc4-6: HP Elite Mini 800 G9, Intel Core i5-12500T (12th Gen), 6 cores / 12 threads, 32GB RAM (NVMe) — node-class: `performance`
-- ipc7-9: Intel Core i5-12500 (12th Gen, non-T), 6 cores / 12 threads, 16GB RAM (NVMe ~256GB) — node-class: `fastest`
-- Container runtime: Pelagos v0.65.47 on all six nodes (`pelagos://0.65.47+c748f09`)
+- ipc7-9: Intel Core i5-12500 (12th Gen, non-T), 6 cores / 12 threads, 32GB RAM (NVMe ~256GB) — node-class: `fastest`
+- Container runtime: Pelagos v0.65.48 on all six nodes (`pelagos://0.65.48+937cdca`)
 - Pelagos configured via `/etc/rancher/k3s/config.yaml`: `container-runtime-endpoint: "unix:///run/pelagos/cri.sock"`
 - Pelagos CRI service: `pelagos-cri.service` (binaries at `/usr/local/bin/pelagos` and `/usr/local/bin/pelagos-cri`)
 - SSH key: `~/.ssh/id_rsa` (cb@omen)

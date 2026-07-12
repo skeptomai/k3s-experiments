@@ -15,12 +15,13 @@ roles/taints. **ipc7-9 (HP Elite Mini 800 G9 workers) joined the cluster 2026-07
 | ipc4 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
 | ipc5 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
 | ipc6 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB (2×16 GiB) | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
-| ipc7 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **14 GiB (16 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
-| ipc8 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **14 GiB (16 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
-| ipc9 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **14 GiB (16 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
+| ipc7 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **30 GiB (32 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
+| ipc8 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **30 GiB (32 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
+| ipc9 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **30 GiB (32 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
 
 All nine: **Ubuntu 26.04 LTS**, pelagos CRI, `v1.35.5+k3s1`. ipc7-9 joined 2026-07-01
-(i5-12500 non-T, 16 GB — all three verified live; manual OS install, not PXE).
+(i5-12500 non-T — all three verified live; manual OS install, not PXE). RAM upgraded
+from 16 GB → **32 GB** on **2026-07-11**.
 
 ## Hardware classes
 
@@ -30,8 +31,8 @@ All nine: **Ubuntu 26.04 LTS**, pelagos CRI, `v1.35.5+k3s1`. ipc7-9 joined 2026-
 - **`performance` (ipc4-6)** — Core i5-12500**T** (35W), 6c/12t, **32 GB** RAM,
   **NVMe SSD**. Carry all standard workloads.
 - **`fastest` (ipc7-9)** — Core i5-12500 (**65W non-T** — higher base clock 3.0 vs
-  2.0 GHz, highest sustained all-core clocks, hotter/more power), 6c/12t, **16 GB**
-  RAM (half of ipc4-6; upgradeable via the G9's 2× DDR5 SO-DIMM slots), **NVMe SSD**.
+  2.0 GHz, highest sustained all-core clocks, hotter/more power), 6c/12t, **32 GB**
+  RAM (upgraded 2026-07-11 via the G9's 2× DDR5 SO-DIMM slots), **NVMe SSD**.
   The fastest tier for CPU-bound work (builds, tests). Different SKU — bought on
   availability. (Chassis: all six i5 nodes are HP Elite Mini 800 G9.)
 
@@ -61,9 +62,9 @@ All nine: **Ubuntu 26.04 LTS**, pelagos CRI, `v1.35.5+k3s1`. ipc7-9 joined 2026-
 ## Notes / history
 
 - **ipc6 RAM upgrade (2026-06-28):** ipc6 was upgraded from 16 GB to **2×16 GiB**
-  modules, now reporting 30 GiB like the rest of the fleet. The old "less RAM than
-  ipc4/5" caveat in `node-scheduling.md` has been corrected. **All six nodes now
-  report 30 GiB** — the fleet is RAM-uniform.
+  modules, now reporting 30 GiB like ipc4/5.
+- **ipc7-9 RAM upgrade (2026-07-11):** ipc7-9 upgraded from 16 GB to **32 GB** each
+  (2× DDR5 SO-DIMMs). All six i5 nodes now report ~30 GiB — the fleet is RAM-uniform.
 
 ## Method
 

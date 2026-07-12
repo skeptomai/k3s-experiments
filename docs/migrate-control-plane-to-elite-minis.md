@@ -11,7 +11,7 @@ so the only thing to relocate is **etcd + the API server**.
 | Nodes | Role | Notes |
 |---|---|---|
 | **ipc4, ipc5, ipc6** | server + etcd + **worker** (co-located, **un-tainted**) | 32 GB; already the "infra" nodes (build jobs, cluster-deploy key) |
-| **ipc7, ipc8, ipc9** | agent (worker) | 16 GB |
+| **ipc7, ipc8, ipc9** | agent (worker) | 32 GB |
 | ~~ipc1, ipc2, ipc3~~ | **removed** | physically pulled after migration |
 
 Result: **3-member HA etcd preserved, all 6 nodes run workloads**, zero rack penalty.
