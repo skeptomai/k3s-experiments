@@ -324,7 +324,9 @@ The k8s_psat flow:
 1. Kubernetes issues a short-lived projected SAT to the agent pod (audience:
    `spire-server`, expiry: 7200s). This token is in the pod's filesystem at
    `/var/run/secrets/tokens/`.
-2. The agent sends this token to the SPIRE server over gRPC.
+2. The agent sends this token to the SPIRE server over gRPC. gRPC is HTTP/2 under the
+   hood; the token is passed as an `authorization: Bearer <token>` entry in the HTTP/2
+   metadata (i.e. an HTTP/2 header), the same field name used in REST/HTTP/1.1.
 3. The server calls the Kubernetes **TokenReview API** to validate it — Kubernetes
    confirms the token is real, which SA issued it, and which pod it was issued to.
 4. The server checks its allow-list (`spire:spire-agent` SA) and grants the agent a
@@ -370,6 +372,19 @@ requirement of the observation-based approach in general. A different implementa
 could map a Unix socket peer to a container ID through a namespace-aware kernel interface
 would not need `hostPID: true` and would still require no modification to the workload.
 The workload is unaware of SPIRE in either case — it simply opens a socket connection.
+
+`SO_PEERCRED` is only available on Unix domain sockets — the kernel supplies peer
+credentials at the socket layer because both endpoints are on the same host and the kernel
+controls both. gRPC over a network socket has no equivalent: there is no kernel-level peer
+identity. In that case identity must be carried in the protocol itself, either as an
+`authorization: Bearer <token>` entry in the HTTP/2 metadata (gRPC maps directly onto
+HTTP/2, so gRPC metadata is HTTP/2 headers), or via mutual TLS where the client presents a
+certificate during the TLS handshake and the server extracts identity from it. SPIRE uses
+the latter for its own inter-component communication: the agent authenticates to the server
+over mTLS using its Node SVID, so the server knows which agent it is talking to from the
+TLS handshake before any gRPC frames are exchanged. The Workload API deliberately avoids
+this requirement by using a Unix socket, so workloads need no pre-shared credential at
+all.
 
 **3. Agent reads `/proc/<pid>/cgroup` → container ID:**
 The cgroup path for a containerized process encodes the container ID, in a form like:
@@ -469,6 +484,15 @@ for the namespace. The service account must exist as a `ServiceAccount` resource
 same namespace — Kubernetes then automatically mounts a signed JWT for it into the pod at
 startup. The service account is how Kubernetes RBAC controls what the pod can do with the
 Kubernetes API.
+
+A service account is not a Unix account. It is a Kubernetes API object — a record in etcd
+with a name and a namespace. The JWT Kubernetes mounts for it is how identity is carried:
+when a pod calls the Kubernetes API (which is REST over HTTPS), it presents that token in
+a standard HTTP `Authorization: Bearer <token>` header. The API server verifies the JWT
+signature, extracts the service account identity from the token's claims, and evaluates
+RBAC against it. The pod never manages the token manually — it is mounted automatically at
+`/var/run/secrets/kubernetes.io/serviceaccount/token` and the Kubernetes client libraries
+pick it up by convention.
 
 For SPIRE, the service account is also an identity anchor. When the agent resolves a
 connecting process to a pod via the kubelet API, one of the fields returned is
