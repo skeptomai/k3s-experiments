@@ -41,10 +41,11 @@ echo "  /var/lib/kubevirt-node-labeller: ok"
 cat > /etc/tmpfiles.d/kubevirt.conf << 'EOF'
 # KubeVirt virt-handler HostPath volumes — created here because Pelagos CRI
 # does not auto-create missing HostPath source dirs (pelagos#445).
+# Uses /run/ (canonical); /var/run/ is a symlink to /run/ on Ubuntu 26.04.
 # Remove once pelagos#445 is fixed.
-d /var/run/kubevirt                  0755 root root -
-d /var/run/kubevirt-private          0755 root root -
-d /var/run/kubevirt-libvirt-runtimes 0755 root root -
+d /run/kubevirt                  0755 root root -
+d /run/kubevirt-private          0755 root root -
+d /run/kubevirt-libvirt-runtimes 0755 root root -
 EOF
 systemd-tmpfiles --create /etc/tmpfiles.d/kubevirt.conf
 echo "  /var/run/kubevirt*: ok (tmpfiles.d installed)"
