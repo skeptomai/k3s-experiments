@@ -77,6 +77,7 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/pxe-control.sh <status\|enable\|disable> [node]` | Enables/disables PXE boot per node (run from omen) |
 | `scripts/tailscale-cleanup.sh [--verify] <node...>` | Deletes stale Tailscale device(s) for a node before reinstall so it reclaims its name; `--verify` checks post-install. Needs a Tailscale OAuth client (devices:core write) via `TS_OAUTH_CLIENT_ID`/`_SECRET` env or 1Password `op://Private/Tailscale OAuth k3s`. Called automatically by `reinstall-nodes.sh`; no-op with a WARN if creds absent. |
 | `scripts/provision-tpm-devid.sh <node>` | Generates a TPM-bound DevID key on the node, creates a CSR, signs it with the DevID CA (key retrieved from 1Password `ipc-cluster DevID CA key`), and installs cert+blobs at `/etc/spire/`. Called automatically by `reinstall-nodes.sh`; warns if 1Password not authenticated. Idempotent. |
+| `scripts/install-kubevirt-node-prereqs.sh [node...]` | Creates host directories required by KubeVirt's virt-handler before it can start (Pelagos workaround for #445/#444); installs tmpfiles.d for volatile paths. Run once when deploying KubeVirt — **not** called by reinstall-nodes.sh |
 | `scripts/shutdown-cluster.sh` | Gracefully cordons all nodes, drains workers then control plane, shuts down workers first and ipc4 last |
 
 ## PXE Reinstall Workflow
