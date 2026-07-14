@@ -1,0 +1,181 @@
+{
+  "title": "k3s Node Temperatures",
+  "uid": "k3s-node-temps",
+  "tags": ["k3s", "hardware", "temperature"],
+  "timezone": "browser",
+  "schemaVersion": 36,
+  "refresh": "1m",
+  "time": {"from": "now-3h", "to": "now"},
+  "panels": [
+    {
+      "type": "text",
+      "id": 1,
+      "gridPos": {"h": 2, "w": 24, "x": 0, "y": 0},
+      "options": {
+        "mode": "markdown",
+        "content": "### CPU Package Temperature (current)  \nIntel i5-12500T (ipc4-6, 35W) · Intel i5-12500 (ipc7-9, 65W) · high=80°C · crit=100°C"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "title": "ipc4 CPU",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 2},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc4\"}", "legendFormat": "ipc4"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "title": "ipc5 CPU",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 2},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc5\"}", "legendFormat": "ipc5"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "title": "ipc6 CPU",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 2},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc6\"}", "legendFormat": "ipc6"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 5,
+      "title": "ipc7 CPU",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 2},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc7\"}", "legendFormat": "ipc7"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 6,
+      "title": "ipc8 CPU",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 2},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc8\"}", "legendFormat": "ipc8"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 7,
+      "title": "ipc9 CPU",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 2},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc9\"}", "legendFormat": "ipc9"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "text",
+      "id": 8,
+      "gridPos": {"h": 2, "w": 24, "x": 0, "y": 6},
+      "options": {
+        "mode": "markdown",
+        "content": "### NVMe Temperature (current)  \nSamsung MZVL2256HCHQ-00BH1 (all nodes) · composite sensor · high=80.8°C · crit=84.8°C"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 9,
+      "title": "ipc4 NVMe",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc4\"}", "legendFormat": "ipc4"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 10,
+      "title": "ipc5 NVMe",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc5\"}", "legendFormat": "ipc5"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 11,
+      "title": "ipc6 NVMe",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc6\"}", "legendFormat": "ipc6"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 12,
+      "title": "ipc7 NVMe",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc7\"}", "legendFormat": "ipc7"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 13,
+      "title": "ipc8 NVMe",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc8\"}", "legendFormat": "ipc8"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "id": 14,
+      "title": "ipc9 NVMe",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc9\"}", "legendFormat": "ipc9"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+    },
+    {
+      "type": "timeseries",
+      "id": 15,
+      "title": "CPU Package Temperature — all nodes",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\"}", "legendFormat": "{{node}}"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {"lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}
+        }
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "type": "timeseries",
+      "id": 16,
+      "title": "NVMe Composite Temperature — all nodes",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\"}", "legendFormat": "{{node}}"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {"lineWidth": 2, "fillOpacity": 10},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}
+        }
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}}
+    }
+  ]
+}
