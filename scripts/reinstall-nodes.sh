@@ -242,6 +242,18 @@ for node in "${NODES[@]}"; do
     echo "--- Verifying Tailscale name is clean ---"
     bash "$REPO_ROOT/scripts/tailscale-cleanup.sh" --verify "$node" || true
 
+    echo "--- Installing NUT client (UPS monitoring) ---"
+    bash "$REPO_ROOT/scripts/install-nut-clients.sh" "$node" || \
+        echo "  [WARN] NUT client setup failed — run 'bash scripts/install-nut-clients.sh $node' manually"
+
+    echo "--- Installing monitoring prerequisites (lm-sensors / coretemp) ---"
+    bash "$REPO_ROOT/scripts/install-node-monitoring.sh" "$node" || \
+        echo "  [WARN] monitoring prereqs failed — run 'bash scripts/install-node-monitoring.sh $node' manually"
+
+    echo "--- Applying node-class labels ---"
+    bash "$REPO_ROOT/scripts/label-nodes.sh" || \
+        echo "  [WARN] label-nodes failed — run 'bash scripts/label-nodes.sh' manually"
+
     postflight "$node" || { echo "  postflight found issues on $node"; rc=1; }
     echo "Done: $node"
 done

@@ -19,7 +19,7 @@ IPC4="${IPC4:-cb@ipc4.taildd208.ts.net}"
 SSH="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 $IPC4"
 
 PERFORMANCE="ipc4 ipc5 ipc6"   # i5-12500T (35W), 6c/12t, 32GB
-FASTEST="ipc7 ipc8 ipc9"       # i5-12500 non-T (65W), 6c/12t, 16GB
+FASTEST="ipc7 ipc8 ipc9"       # i5-12500 non-T (65W), 6c/12t, 32GB
 
 echo "=== labelling performance (i5-12500T, 35W): $PERFORMANCE ==="
 $SSH "sudo kubectl label node $PERFORMANCE node-class=performance --overwrite"

@@ -69,7 +69,9 @@ Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes an
 | `scripts/reinstall-nodes.sh <node> [node...]` | Full PXE reinstall of node(s): enables PXE → reboots → waits → rejoins k3s (role-dispatched: servers→join-server.sh, agents→upgrade-agents.sh) |
 | `scripts/upgrade-cluster.sh [channel]` | Upgrades all nodes in correct order (servers rolling, then agents) |
 | `scripts/install-pelagos.sh [node...]` | Installs/upgrades Pelagos CRI on ipc nodes (role-aware config + unit; default: all six) |
-| `scripts/install-nut-clients.sh [node...]` | Installs/configures NUT client (upsmon) on ipc nodes — run after reinstall |
+| `scripts/install-nut-server.sh` | Configures ipc4 as NUT server (USB-connected UPS) — run after ipc4 manual reinstall |
+| `scripts/install-nut-clients.sh [node...]` | Installs/configures NUT client (upsmon) on ipc5-9 — called automatically by `reinstall-nodes.sh` |
+| `scripts/install-node-monitoring.sh [node...]` | Installs lm-sensors + persists `coretemp` for temperature metrics — called automatically by `reinstall-nodes.sh` |
 | `scripts/label-nodes.sh` | Applies durable `node-class` labels (performance=i5-12500T ipc4-6, fastest=i5-12500 non-T ipc7-9) for capability-based scheduling; idempotent, run after reinstall |
 | `scripts/deploy-pxe-configs.sh` | Deploys PXE iPXE scripts + autoinstall configs to nazgul (run from omen) |
 | `scripts/pxe-control.sh <status\|enable\|disable> [node]` | Enables/disables PXE boot per node (run from omen) |
@@ -99,8 +101,11 @@ with `kubectl get nodes -l node-role.kubernetes.io/etcd`.
 7. Remove stale Tailscale device; rename new one if it registered as `<node>-1`
 8. Rejoin k3s + install Pelagos — **server (ipc5/ipc6):** `bash scripts/join-server.sh <node>`; **worker (ipc7-9):** `bash scripts/upgrade-agents.sh <node>`
 9. `bash scripts/provision-tpm-devid.sh <node>` — provision TPM DevID cert (requires `op` authenticated)
-10. `bash scripts/install-nut-clients.sh <node>` — restore NUT UPS monitoring
-11. `bash scripts/label-nodes.sh` — restore the node's `node-class` label (labels don't survive a fresh registration)
+10. `bash scripts/install-nut-clients.sh <node>` — restore NUT UPS monitoring (automated by `reinstall-nodes.sh`)
+11. `bash scripts/label-nodes.sh` — restore the node's `node-class` label (automated by `reinstall-nodes.sh`)
+12. `bash scripts/install-node-monitoring.sh <node>` — install lm-sensors + coretemp for temperature metrics (automated by `reinstall-nodes.sh`)
+
+Note: steps 10-12 are run automatically by `reinstall-nodes.sh` after k3s rejoins. They are listed here for manual reinstalls (ipc4, or if the automated script fails).
 
 **After ipc4 reinstall** (wipes etcd — full cluster rebuild):
 - Install k3s, Pelagos, rejoin agents, bootstrap Flux (GitHub token in 1Password)
@@ -118,7 +123,9 @@ and must be re-applied by hand.
   `cluster-init` on ipc4 + `join-server.sh` for ipc5/6.
 - **kube-vip + MetalLB** — Flux reconciles `clusters/ipc/{kube-vip,metallb,metallb-config}.yaml`
   → `manifests/{kube-vip,metallb,metallb-config}/` once Flux is bootstrapped. No manual apply.
-- **node-class labels** — `scripts/label-nodes.sh`.
+- **node-class labels** — `scripts/label-nodes.sh` (called by `reinstall-nodes.sh`).
+- **NUT UPS clients (ipc5-9)** — `scripts/install-nut-clients.sh` (called by `reinstall-nodes.sh`). ipc4 NUT server requires `scripts/install-nut-server.sh` after ipc4 manual reinstall.
+- **Temperature monitoring** — `scripts/install-node-monitoring.sh` (called by `reinstall-nodes.sh`); installs lm-sensors, persists `coretemp` in `/etc/modules`.
 
 **Out-of-band on the MikroTik (NOT in Git — re-apply by hand; see orgfiles `home-network/dns-dhcp.md`):**
 - **Static leases** for all six nodes (by MAC → IP).
