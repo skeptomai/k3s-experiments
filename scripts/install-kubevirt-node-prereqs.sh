@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # Install KubeVirt node prerequisites on ipc nodes.
 #
-# KubeVirt's virt-handler DaemonSet bind-mounts several host paths that must
-# pre-exist. containerd creates missing HostPath source directories automatically
-# (type: ""), but Pelagos CRI does not (pelagos-containers/pelagos#445). Until
-# that is fixed, these directories must be created manually on each node.
+# Creates /var/lib/kubevirt-node-labeller on each node. KubeVirt's virt-handler
+# init container bind-mounts this path (hostPath type "") and writes the node's
+# KVM capability files into it. It must exist before the first virt-handler run;
+# after that virt-handler manages it. Pelagos v0.65.50+ auto-creates it (#445
+# fixed), but the directory may still be absent on nodes that have never run
+# virt-handler before — this script ensures it exists.
 #
-# Volatile paths (/var/run/kubevirt*) are recreated at boot via tmpfiles.d.
-# The persistent path (/var/lib/kubevirt-node-labeller) is created once.
-#
-# Not called by reinstall-nodes.sh — run explicitly when deploying KubeVirt.
+# Not called by reinstall-nodes.sh — run once explicitly when deploying KubeVirt.
 # Usage: install-kubevirt-node-prereqs.sh [node...]   (default: ALL six nodes)
 set -euo pipefail
 
@@ -32,23 +31,8 @@ configure_node() {
   echo "Configuring KubeVirt node prereqs on $node..."
   $ssh_cmd "sudo bash -s" << 'ENDSSH'
 set -euo pipefail
-
-# Persistent: written by node-labeller init container on first virt-handler run
 mkdir -p /var/lib/kubevirt-node-labeller
 echo "  /var/lib/kubevirt-node-labeller: ok"
-
-# Volatile: recreated at boot by tmpfiles.d
-cat > /etc/tmpfiles.d/kubevirt.conf << 'EOF'
-# KubeVirt virt-handler HostPath volumes — created here because Pelagos CRI
-# does not auto-create missing HostPath source dirs (pelagos#445).
-# Uses /run/ (canonical); /var/run/ is a symlink to /run/ on Ubuntu 26.04.
-# Remove once pelagos#445 is fixed.
-d /run/kubevirt                  0755 root root -
-d /run/kubevirt-private          0755 root root -
-d /run/kubevirt-libvirt-runtimes 0755 root root -
-EOF
-systemd-tmpfiles --create /etc/tmpfiles.d/kubevirt.conf
-echo "  /var/run/kubevirt*: ok (tmpfiles.d installed)"
 ENDSSH
   echo "  $node: done"
 }

@@ -10,15 +10,6 @@ spec:
     developerConfiguration:
       featureGates: []
     imagePullPolicy: IfNotPresent
-  customizeComponents:
-    patches:
-    # Workaround: Pelagos CRI does not bind-mount /sys/fs/cgroup into privileged
-    # containers (unlike containerd/CRI-O). virt-handler panics at startup when it
-    # can't statfs the cgroup root. Remove this patch once Pelagos is fixed.
-    - resourceName: virt-handler
-      resourceType: DaemonSet
-      patch: >-
-        {"spec":{"template":{"spec":{"volumes":[{"name":"cgroup-fs","hostPath":{"path":"/sys/fs/cgroup","type":"Directory"}}],"containers":[{"name":"virt-handler","volumeMounts":[{"name":"cgroup-fs","mountPath":"/sys/fs/cgroup"}]}]}}}}
-      type: strategic
+  customizeComponents: {}
   imagePullPolicy: IfNotPresent
   workloadUpdateStrategy: {}
