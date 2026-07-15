@@ -29,6 +29,8 @@ spec:
         app: spire-server
     spec:
       serviceAccountName: spire-server
+      nodeSelector:
+        kubernetes.io/hostname: ipc4
       containers:
         - name: spire-server
           image: ghcr.io/spiffe/spire-server:1.9.6
@@ -72,8 +74,8 @@ spec:
         # The sign BundlePublisher plugin retries on the 5m frequency if not ready yet.
         - name: signer-unix
           image: docker.io/library/busybox:1.36
-          command: ["/usr/local/bin/spire-server-attestor-tpm-signer-unix",
-                    "/etc/spire-sat/signer-unix.conf"]
+          command: ["/bin/sh", "-c",
+                    "rm -f /var/run/spire/server-attestor-tpm/signer-unix.sock && exec /usr/local/bin/spire-server-attestor-tpm-signer-unix /etc/spire-sat/signer-unix.conf"]
           securityContext:
             runAsUser: 0
           volumeMounts:
