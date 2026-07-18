@@ -21,14 +21,15 @@ spec:
             - --path.rootfs=/host
             - --path.sysfs=/host/sys
             - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/k3s/.+)($|/)
+            - --collector.textfile.directory=/textfile
           ports:
             - containerPort: 9100
           resources:
             requests:
               cpu: 10m
-              memory: 32Mi
-            limits:
               memory: 64Mi
+            limits:
+              memory: 192Mi
           volumeMounts:
             - name: sys
               mountPath: /host/sys
@@ -37,6 +38,9 @@ spec:
               mountPath: /host
               readOnly: true
               mountPropagation: HostToContainer
+            - name: textfile
+              mountPath: /textfile
+              readOnly: true
       volumes:
         - name: sys
           hostPath:
@@ -44,6 +48,10 @@ spec:
         - name: root
           hostPath:
             path: /
+        - name: textfile
+          hostPath:
+            path: /var/lib/node_exporter/textfile_collector
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
