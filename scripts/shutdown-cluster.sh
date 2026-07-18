@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-SSH="ssh -i $HOME/.ssh/Omen -o StrictHostKeyChecking=accept-new"
+SSH="ssh -i $HOME/.ssh/id_rsa -o StrictHostKeyChecking=accept-new"
 WORKERS="ipc7 ipc8 ipc9"
 CONTROL_PLANE_SECONDARY="ipc5 ipc6"
 CONTROL_PLANE_SEED="ipc4"

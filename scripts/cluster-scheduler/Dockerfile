@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# kubectl — pinned to match cluster k3s v1.35.5
+RUN curl -sLo /usr/local/bin/kubectl \
+        "https://dl.k8s.io/release/v1.35.2/bin/linux/amd64/kubectl" && \
+    chmod +x /usr/local/bin/kubectl
+
+RUN pip install --no-cache-dir python-kasa
+
+WORKDIR /scripts
+
+COPY silence-alerts.sh .
+COPY cluster-kasa-outlet.py .
+COPY shutdown-cluster.sh .
+COPY night-off.sh .
+COPY morning-on.sh .
+
+RUN chmod +x silence-alerts.sh cluster-kasa-outlet.py shutdown-cluster.sh night-off.sh morning-on.sh
+
+ENTRYPOINT ["/bin/bash"]
