@@ -1,209 +1,315 @@
-# Draft: SPIRE tpm_devid — persist SRK to avoid CreatePrimary on every attestation
+# Draft: SPIRE tpm_devid — reuse SRK across NewSession() to reduce CreatePrimary calls
 
-**Target repo:** spiffe/spire
-**File:** `pkg/agent/plugin/nodeattestor/tpmdevid/tpmutil/session.go`
+**Target repo:** spiffe/spire  
+**Target file:** `pkg/agent/plugin/nodeattestor/tpmdevid/tpmutil/session.go`  
+**Branch base:** v1.9.6
 
 ---
 
 ## Issue text (draft)
 
-**Title:** `tpm_devid: NewSession() calls TPM2_CreatePrimary 3× per attestation; persisting SRK would eliminate most of the cost`
+**Title:** `tpm_devid: NewSession() calls TPM2_CreatePrimary 3× per attestation — reusing one SRK reduces this to 1`
 
 ### Summary
 
-`NewSession()` in `tpmutil/session.go` creates three transient Storage Root Keys (SRKs)
-via `TPM2_CreatePrimary` on every node attestation, then flushes each one after use.
-`TPM2_CreatePrimary` requires a full on-chip RSA key generation every time — TPMs
-explicitly cannot use background pre-generated key pools for primary keys (confirmed in
-the Infineon SLB9672 datasheet: "Pre-generation of Primary and Derived keys are not
-supported because their generation depends on caller-provided data").
+`NewSession()` in `tpmutil/session.go` calls `TPM2_CreatePrimary` three times on every
+node attestation — once inside `loadKey()` for the DevID, once inside
+`createAttestationKey()` for the AK, and once inside `loadKey()` for the AK again. All
+three are owner-hierarchy SRKs using the same template and the same password. None of
+them needs to persist beyond `NewSession()`.
 
-On hardware where RSA key generation is slow, this compounds:
+`TPM2_CreatePrimary` cannot use the TPM's background pre-generation key pool (the
+Infineon SLB9672 datasheet is explicit: *"Pre-generation of Primary and Derived keys
+are not supported because their generation depends on caller-provided data."*). Every
+call is a full on-chip RSA key generation.
 
-| Node | TPM | Per-CreatePrimary | Total attestation |
-|------|-----|------------------|-------------------|
-| ipc7 | Nuvoton NPCT75x | ~7–8s | ~23s |
-| ipc8 | Infineon SLB9672 | ~10s | ~34s |
-| ipc9 | Infineon SLB9672 | ~24s | ~76s |
+On hardware where RSA primary key generation is slow, three calls compound:
 
-The delay is confirmed inside the kernel `write()` syscall — the hardware itself takes
-that long to respond. All other TPM operations in the attestation complete in under 300ms.
-Eliminating the three `CreatePrimary` calls is the only meaningful way to reduce
-attestation time.
+| Hardware | Per CreatePrimary | 3× cost | Total attestation |
+|---|---|---|---|
+| Nuvoton NPCT75x | ~8s | ~24s | ~27s |
+| Infineon SLB9672 | ~10s | ~30s | ~34s |
+| Infineon SLB9672 (degraded) | ~24s | ~72s | ~76s |
 
-### Evidence
+This was measured with bpftrace on `/dev/tpmrm0`. Three consecutive 99-byte writes, each
+blocking inside the kernel `write()` syscall for ~24 seconds, produced 490-byte RSA
+public key responses. Everything else in the attestation completes in under 300ms.
 
-bpftrace on ipc9 watching `/dev/tpmrm0` during agent restart captured three consecutive
-`write(99 bytes)` calls that each blocked for ~24.2 seconds before returning a 490-byte
-RSA public key response:
+Since all three calls use the same template and the same SRK password within a session,
+they can share a single SRK context. `tpm2.Load()` children are independent of their
+parent handle after `Load()` returns (per TPM 2.0 Part 1 §30), so the SRK can be
+flushed after all operations complete without affecting the loaded keys.
 
-```
-write(99 bytes) -> TPM command sent
-write done in 24171 ms
-read() returned 490 bytes in 0 ms
+### Proposed change
 
-write(99 bytes) -> TPM command sent
-write done in 24250 ms
-read() returned 490 bytes in 0 ms
+Lift SRK creation out of `loadKey()` and `createAttestationKey()` into `NewSession()`,
+passing the existing handle down. This eliminates two of the three CreatePrimary calls
+with no change to the attestation security model.
 
-write(99 bytes) -> TPM command sent
-write done in 24266 ms
-read() returned 490 bytes in 0 ms
-```
-
-3 × 24.2s = 72.6s of the 76s attestation time.
-
-Infineon SLB9672 datasheet (FW15.xx, p. XX):
-> "Pre-generation is only supported for (RSA 2k) Ordinary keys. Pre-generation of
-> Primary and Derived keys are not supported because their generation depends on
-> caller-provided data."
-
-### Proposed fix
-
-**Option A (minimal, no persistent state change): reuse one transient SRK**
-
-`NewSession()` currently creates three separate SRK contexts — one for loading the
-DevID key, one for creating the AK, and one for loading the AK. All three use the same
-`SRKTemplateHighRSA()` template. The three are independent only because each is flushed
-after the key operation that used it, but there is no reason they cannot share a single
-SRK context:
-
-```go
-// Instead of:
-srk1, _ := tpm2.CreatePrimaryEx(rw, tpm2.HandleOwner, ..., SRKTemplateHighRSA())
-devIDKey, _ := tpm2.Load(rw, srk1, ...)
-tpm2.FlushContext(rw, srk1)
-
-srk2, _ := tpm2.CreatePrimaryEx(rw, tpm2.HandleOwner, ..., SRKTemplateHighRSA())
-akPriv, akPub, _ := tpm2.CreateKey(rw, srk2, ..., AKTemplateRSA())
-tpm2.FlushContext(rw, srk2)
-
-srk3, _ := tpm2.CreatePrimaryEx(rw, tpm2.HandleOwner, ..., SRKTemplateHighRSA())
-ak, _ := tpm2.Load(rw, srk3, akPriv, akPub)
-tpm2.FlushContext(rw, srk3)
-
-// Do instead (one CreatePrimary, reuse the same srk):
-srk, _ := tpm2.CreatePrimaryEx(rw, tpm2.HandleOwner, ..., SRKTemplateHighRSA())
-defer tpm2.FlushContext(rw, srk)
-
-devIDKey, _ := tpm2.Load(rw, srk, ...)
-akPriv, akPub, _ := tpm2.CreateKey(rw, srk, ..., AKTemplateRSA())
-ak, _ := tpm2.Load(rw, srk, akPriv, akPub)
-```
-
-This requires no persistent state changes, no new configuration, and no NV handle
-management. It reduces `CreatePrimary` from 3 calls to 1 per attestation.
-
-**Option B (larger change): persist the SRK across sessions**
-
-On first attestation, create the SRK and persist it via `TPM2_EvictControl` to a stable
-handle (needs a configurable handle to avoid conflicting with OS tooling at 0x81000001).
-On subsequent attestations, use `tpm2.LoadExternal` or load from the handle directly.
-This reduces CreatePrimary to 0 calls after the first run. Requires:
-- A plugin config option for the persistent SRK handle
-- Handling the case where the handle doesn't exist (first run, or after TPM clear)
-- Coordination with the provisioning script so the handle is pre-populated
-
-Option A is a safe, low-risk improvement achievable in the same PR. Option B can follow
-as a separate enhancement.
-
-### Impact
-
-- Reduces attestation time for all tpm_devid users on any hardware where RSA primary
-  key generation is measurably slow (all Infineon discrete TPMs, Nuvoton fTPMs, and
-  any TPM where RSA generation takes >1s)
-- No behavioral change to the attestation security model — the SRK is used only as a
-  parent for transient operations; its identity is not part of the trust proof
-- No configuration changes required for Option A
-- Backward compatible
-
-### References
-
-- Infineon OPTIGA TPM SLB9672 FW15.xx Datasheet — pre-generation pool section
-- wolfTPM benchmarks: SLB9672 RSA 2048 keygen avg 1,568ms (ordinary key, uses pool);
-  CreatePrimary cannot use pool and takes 8–24s depending on chip lot
-- Infineon developer community thread on varied CreatePrimary timing across same-model chips
+For DevID keys using an ECC template (SRKTemplateHighECC), an ECC SRK is needed to
+load the DevID, while the AK always uses SRKTemplateHighRSA. In that case the reduction
+is from 3 to 2 CreatePrimary calls. For RSA DevID keys (the common case), it reduces
+from 3 to 1.
 
 ---
 
-## Patch sketch (Option A)
+## Actual patch
 
-The change is in `pkg/agent/plugin/nodeattestor/tpmdevid/tpmutil/session.go`.
+### Changes to `session.go`
 
-The current pattern (simplified from source):
+**1. Add `loadKeyWithSRK` — takes a caller-provided SRK handle instead of creating one:**
 
 ```go
-func NewSession(rwc io.ReadWriteCloser, ...) (*Session, error) {
-    // Load DevID under SRK 1
-    srkHandle1, _, err := tpm2.CreatePrimaryEx(rwc, tpm2.HandleOwner, ..., SRKTemplate)
-    devIDHandle, _, err := tpm2.Load(rwc, srkHandle1, devIDPriv, devIDPub)
-    if err := tpm2.FlushContext(rwc, srkHandle1); err != nil { ... }
+// loadKeyWithSRK loads a key pair into the TPM under an already-created SRK.
+// The caller is responsible for flushing srkHandle after all operations complete.
+func (c *Session) loadKeyWithSRK(
+	pubKey, privKey []byte,
+	srkHandle tpmutil.Handle,
+	parentKeyPassword, keyPassword string,
+) (*SigningKey, error) {
+	pub, err := tpm2.DecodePublic(pubKey)
+	if err != nil {
+		return nil, fmt.Errorf("tpm2.DecodePublic failed: %w", err)
+	}
 
-    // Create AK under SRK 2
-    srkHandle2, _, err := tpm2.CreatePrimaryEx(rwc, tpm2.HandleOwner, ..., SRKTemplate)
-    akPriv, akPub, _, _, _, err := tpm2.CreateKey(rwc, srkHandle2, ..., AKTemplate)
-    if err := tpm2.FlushContext(rwc, srkHandle2); err != nil { ... }
+	canSign := pub.Attributes&tpm2.FlagSign != 0
+	if !canSign {
+		return nil, errors.New("not a signing key")
+	}
 
-    // Load AK under SRK 3
-    srkHandle3, _, err := tpm2.CreatePrimaryEx(rwc, tpm2.HandleOwner, ..., SRKTemplate)
-    akHandle, _, err := tpm2.Load(rwc, srkHandle3, akPriv, akPub)
-    if err := tpm2.FlushContext(rwc, srkHandle3); err != nil { ... }
+	var sigHashAlg tpm2.Algorithm
+	switch pub.Type {
+	case tpm2.AlgRSA:
+		rsaParams := pub.RSAParameters
+		if rsaParams != nil {
+			sigHashAlg = rsaParams.Sign.Hash
+		}
+	case tpm2.AlgECC:
+		eccParams := pub.ECCParameters
+		if eccParams != nil {
+			sigHashAlg = eccParams.Sign.Hash
+		}
+	default:
+		return nil, fmt.Errorf("bad key type: 0x%04x", pub.Type)
+	}
 
-    // Create EK (on endorsement hierarchy — separate, keep as-is)
-    ekHandle, _, err := tpm2.CreatePrimaryEx(rwc, tpm2.HandleEndorsement, ..., EKTemplate)
-    ...
+	if sigHashAlg.IsNull() {
+		return nil, errors.New("signature hash algorithm is NULL")
+	}
+
+	keyHandle, _, err := tpm2.Load(c.rwc, srkHandle, parentKeyPassword, pubKey, privKey)
+	if err != nil {
+		return nil, fmt.Errorf("tpm2.Load failed: %w", err)
+	}
+
+	return &SigningKey{
+		Handle:     keyHandle,
+		sigHashAlg: sigHashAlg,
+		rw:         c.rwc,
+		log:        c.log,
+		password:   keyPassword,
+	}, nil
 }
 ```
 
-Proposed change — create a single SRK and reuse it:
+**2. Add `createAttestationKeyWithSRK` — same idea:**
 
 ```go
-func NewSession(rwc io.ReadWriteCloser, ...) (*Session, error) {
-    // Single SRK for all owner-hierarchy operations
-    srkHandle, _, err := tpm2.CreatePrimaryEx(rwc, tpm2.HandleOwner, ..., SRKTemplate)
-    if err != nil {
-        return nil, fmt.Errorf("creating SRK: %w", err)
-    }
-    defer func() {
-        // Flush SRK once all transient children are loaded; loaded children
-        // are independent of the parent handle after Load() returns.
-        tpm2.FlushContext(rwc, srkHandle)
-    }()
-
-    // Load DevID under the shared SRK
-    devIDHandle, _, err := tpm2.Load(rwc, srkHandle, devIDPriv, devIDPub)
-    if err != nil { ... }
-
-    // Create AK under the shared SRK
-    akPriv, akPub, _, _, _, err := tpm2.CreateKey(rwc, srkHandle, ..., AKTemplate)
-    if err != nil { ... }
-
-    // Load AK under the shared SRK
-    akHandle, _, err := tpm2.Load(rwc, srkHandle, akPriv, akPub)
-    if err != nil { ... }
-
-    // EK is on the endorsement hierarchy — unchanged
-    ekHandle, _, err := tpm2.CreatePrimaryEx(rwc, tpm2.HandleEndorsement, ..., EKTemplate)
-    ...
+// createAttestationKeyWithSRK creates an RSA attestation key under an existing SRK.
+// The caller is responsible for flushing srkHandle after all operations complete.
+func (c *Session) createAttestationKeyWithSRK(
+	srkHandle tpmutil.Handle,
+	parentKeyPassword, keyPassword string,
+) ([]byte, []byte, error) {
+	privBlob, pubBlob, _, _, _, err := tpm2.CreateKey(
+		c.rwc,
+		srkHandle,
+		tpm2.PCRSelection{},
+		parentKeyPassword,
+		keyPassword,
+		client.AKTemplateRSA(),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create AK: %w", err)
+	}
+	return privBlob, pubBlob, nil
 }
 ```
 
-Key correctness note: `tpm2.Load()` returns a handle that is independent of the parent
-SRK handle after the call returns. The loaded key lives in the TPM's transient object
-memory under its own handle. Flushing the SRK after all Load() calls does not invalidate
-the loaded children. This is standard TPM2 behavior.
+**3. Rewrite `NewSession()` to create SRKs once and share them:**
 
-The EK CreatePrimary (on `HandleEndorsement`, not `HandleOwner`) is left unchanged —
-it uses a different hierarchy and a different template, and must remain separate.
+```go
+func NewSession(scfg *SessionConfig) (*Session, error) {
+	if scfg.Log == nil {
+		return nil, errors.New("missing logger")
+	}
+
+	rwc, err := OpenTPM(scfg.DevicePath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open TPM at %q: %w", scfg.DevicePath, err)
+	}
+
+	tpm := &Session{
+		rwc:                          rwc,
+		log:                          scfg.Log,
+		endorsementHierarchyPassword: scfg.Passwords.EndorsementHierarchy,
+		ownerHierarchyPassword:       scfg.Passwords.OwnerHierarchy,
+	}
+
+	defer func() {
+		if err != nil {
+			tpm.Close()
+		}
+	}()
+
+	srkPassword, err := newRandomPassword()
+	if err != nil {
+		return nil, fmt.Errorf("cannot generate random password for storage root key: %w", err)
+	}
+
+	// Determine the SRK template required to load the DevID key.
+	// RSA DevID → SRKTemplateHighRSA; ECC DevID → SRKTemplateHighECC.
+	devIDPubDecoded, err := tpm2.DecodePublic(scfg.DevIDPub)
+	if err != nil {
+		return nil, fmt.Errorf("cannot decode DevID public key: %w", err)
+	}
+	var devIDSRKTemplate tpm2.Public
+	switch devIDPubDecoded.Type {
+	case tpm2.AlgRSA:
+		devIDSRKTemplate = SRKTemplateHighRSA()
+	case tpm2.AlgECC:
+		devIDSRKTemplate = SRKTemplateHighECC()
+	default:
+		return nil, fmt.Errorf("unsupported DevID key type: 0x%04x", devIDPubDecoded.Type)
+	}
+
+	// Create the DevID SRK once. For RSA DevIDs this same handle is reused for
+	// AK creation and loading, so CreatePrimary is called only once total.
+	devIDSRKHandle, _, _, _, _, _, err := tpm2.CreatePrimaryEx(
+		rwc, tpm2.HandleOwner,
+		tpm2.PCRSelection{},
+		scfg.Passwords.OwnerHierarchy,
+		srkPassword,
+		devIDSRKTemplate,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create owner SRK: %w", err)
+	}
+	defer tpm.flushContext(devIDSRKHandle)
+
+	// Load DevID under the shared SRK.
+	tpm.devID, err = tpm.loadKeyWithSRK(
+		scfg.DevIDPub, scfg.DevIDPriv,
+		devIDSRKHandle,
+		srkPassword, scfg.Passwords.DevIDKey,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load DevID key on TPM: %w", err)
+	}
+
+	akPassword, err := newRandomPassword()
+	if err != nil {
+		return nil, fmt.Errorf("cannot generate random password for attestation key: %w", err)
+	}
+
+	// For an RSA DevID the same SRK template works for AK creation (AK is always
+	// RSA). For an ECC DevID we need a separate RSA SRK for the AK.
+	akSRKHandle := devIDSRKHandle
+	if devIDPubDecoded.Type == tpm2.AlgECC {
+		akSRKHandle, _, _, _, _, _, err = tpm2.CreatePrimaryEx(
+			rwc, tpm2.HandleOwner,
+			tpm2.PCRSelection{},
+			scfg.Passwords.OwnerHierarchy,
+			srkPassword,
+			SRKTemplateHighRSA(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("cannot create RSA SRK for attestation key: %w", err)
+		}
+		defer tpm.flushContext(akSRKHandle)
+	}
+
+	akPriv, akPub, err := tpm.createAttestationKeyWithSRK(akSRKHandle, srkPassword, akPassword)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create attestation key: %w", err)
+	}
+	tpm.akPub = akPub
+
+	tpm.ak, err = tpm.loadKeyWithSRK(
+		akPub, akPriv,
+		akSRKHandle,
+		srkPassword, akPassword,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load attestation key: %w", err)
+	}
+
+	// EK is on the endorsement hierarchy — separate CreatePrimary, unchanged.
+	tpm.ekHandle, tpm.ekPub, _, _, _, _, err =
+		tpm2.CreatePrimaryEx(rwc, tpm2.HandleEndorsement,
+			tpm2.PCRSelection{},
+			scfg.Passwords.EndorsementHierarchy,
+			"",
+			client.DefaultEKTemplateRSA())
+	if err != nil {
+		return nil, fmt.Errorf("cannot create endorsement key: %w", err)
+	}
+
+	return tpm, nil
+}
+```
+
+The original `loadKey()` and `createAttestationKey()` methods remain unchanged so any
+other callers are unaffected.
 
 ---
 
-## Before submitting
+## What to verify before filing
 
-- [ ] Verify that tpm2.Load() children are truly independent of parent after Load()
-      returns (check go-tpm source or TPM2 spec Part 1 §30)
-- [ ] Confirm the SRK template used for devID load and AK create/load is identical
-      (if different templates are needed for different operations, shared SRK may not work)
-- [ ] Run SPIRE's tpm_devid integration tests with the change
-- [ ] Benchmark attestation time before/after on at least two chip types
-- [ ] Check if the go-tpm-tools library already provides a helper that does this pattern
+- [ ] Confirm with go-tpm source or TPM 2.0 spec Part 1 §30 that loaded children are
+      independent of the parent SRK handle after `tpm2.Load()` returns. (Almost
+      certainly true — this is the standard TPM object model — but worth citing.)
+- [ ] Check whether any other code in the tpmdevid package calls `loadKey()` or
+      `createAttestationKey()` directly and would need updating.
+- [ ] Run `go test ./pkg/agent/plugin/nodeattestor/tpmdevid/...` — confirm existing
+      tests pass with the new code paths.
+- [ ] Ideally: add a test that counts CreatePrimary calls and asserts ≤2 (RSA DevID)
+      or ≤3 (ECC DevID, including EK).
+- [ ] Benchmark attestation before/after on at least two chip types and include
+      timings in the PR description.
+
+---
+
+## Build and test plan
+
+**Prerequisites on omen:** Go 1.26.4 ✓, Docker 29.5.1 ✓
+
+```
+# Clone and patch
+git clone https://github.com/spiffe/spire.git --branch v1.9.6 /tmp/spire-patch
+# Apply the changes above to /tmp/spire-patch/pkg/agent/plugin/nodeattestor/tpmdevid/tpmutil/session.go
+
+# Build spire-agent (linux/amd64, static enough to drop into the official image)
+cd /tmp/spire-patch
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/spire-agent-patched ./cmd/agent
+
+# Wrap in image based on official
+cat > /tmp/Dockerfile.spire-agent-patched <<'EOF'
+FROM ghcr.io/spiffe/spire-agent:1.9.6
+COPY spire-agent /opt/spire/bin/spire-agent
+EOF
+docker buildx build --output type=oci,dest=/tmp/spire-agent-patched.tar \
+  --build-context bin=/tmp \
+  -f /tmp/Dockerfile.spire-agent-patched /tmp
+
+# Load, tag, push to cluster registry
+ssh root@192.168.89.2 "pelagos image load" < /tmp/spire-agent-patched.tar
+ssh root@192.168.89.2 "pelagos image tag <sha> localhost:5004/spire-agent:patched && pelagos image push --insecure localhost:5004/spire-agent:patched"
+```
+
+**Deploy to ipc9 only for testing** — add an override annotation or use a separate
+DaemonSet with a nodeSelector targeting only ipc9. Measure attestation time before
+deleting the pod and after it restarts. Compare to the pre-patch 76s baseline (now
+~27s post-handle-eviction; patch should bring it to ~9–10s).
+
+**Revert:** restore the original image tag in agent-daemonset.yaml and re-apply.
