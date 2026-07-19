@@ -1,0 +1,2 @@
+FROM ghcr.io/spiffe/spire-agent:1.9.6
+COPY spire-agent /opt/spire/bin/spire-agent

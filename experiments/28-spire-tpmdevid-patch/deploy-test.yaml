@@ -1,0 +1,109 @@
+---
+# Temporary DaemonSet that runs the patched spire-agent image on ipc9 only.
+# Runs alongside the production spire DaemonSet (different name, same socket dir).
+#
+# Usage:
+#   kubectl apply -f deploy-test.yaml
+#   kubectl delete pod -n spire -l app=spire-agent-patched --field-selector spec.nodeName=ipc9
+#   kubectl logs -n spire -l app=spire-agent-patched -f   # watch attestation time
+#
+# When done:
+#   kubectl delete -f deploy-test.yaml
+#
+# The production spire-agent DaemonSet is untouched. Only ipc9 runs the patched image.
+# Both agents share /run/spire/sockets — the patched one uses a different socket name
+# to avoid collision.
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent-patched
+  namespace: spire
+spec:
+  selector:
+    matchLabels:
+      app: spire-agent-patched
+  template:
+    metadata:
+      labels:
+        app: spire-agent-patched
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ipc9
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      serviceAccountName: spire-agent
+
+      volumes:
+        - name: spire-config
+          configMap:
+            name: spire-agent
+        - name: verified-bundle
+          emptyDir: {}
+        - name: spire-agent-socket-dir
+          hostPath:
+            path: /run/spire/sockets-patched
+            type: DirectoryOrCreate
+        - name: spire-devid
+          hostPath:
+            path: /etc/spire
+            type: Directory
+        - name: tpm-device
+          hostPath:
+            path: /dev/tpmrm0
+            type: CharDevice
+        - name: verifier-script
+          configMap:
+            name: spire-bundle-verifier-script
+
+      initContainers:
+        - name: verify-bundle
+          image: docker.io/library/python:3.12
+          command: ["python3", "/scripts/verify-bundle.py"]
+          volumeMounts:
+            - name: verifier-script
+              mountPath: /scripts
+              readOnly: true
+            - name: spire-devid
+              mountPath: /etc/spire
+              readOnly: true
+            - name: verified-bundle
+              mountPath: /run/spire/verified-bundle
+
+      containers:
+        - name: spire-agent
+          image: 192.168.89.2:5004/spire-agent:patched
+          args: ["-config", "/run/spire/config/agent.conf"]
+          securityContext:
+            privileged: true
+          ports:
+            - name: health
+              containerPort: 8080
+          volumeMounts:
+            - name: spire-config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: verified-bundle
+              mountPath: /run/spire/verified-bundle
+              readOnly: true
+            - name: spire-agent-socket-dir
+              mountPath: /run/spire/sockets
+            - name: spire-devid
+              mountPath: /etc/spire
+              readOnly: true
+            - name: tpm-device
+              mountPath: /dev/tpmrm0
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 60
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10

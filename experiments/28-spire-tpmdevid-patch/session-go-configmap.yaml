@@ -1,0 +1,469 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-tpmdevid-patched-session
+  namespace: default
+data:
+  session.go: |
+    package tpmutil
+
+    import (
+    	"encoding/asn1"
+    	"errors"
+    	"fmt"
+    	"io"
+
+    	"github.com/google/go-tpm-tools/client"
+    	"github.com/google/go-tpm/legacy/tpm2"
+    	"github.com/google/go-tpm/tpmutil"
+    	"github.com/hashicorp/go-hclog"
+    	"github.com/spiffe/spire/pkg/common/plugin/tpmdevid"
+    )
+
+    const EKCertificateHandleRSA = tpmutil.Handle(0x01c00002)
+    const randomPasswordSize = 32
+
+    type Session struct {
+    	devID    *SigningKey
+    	ak       *SigningKey
+    	ekHandle tpmutil.Handle
+    	ekPub    []byte
+    	akPub    []byte
+
+    	endorsementHierarchyPassword string
+    	ownerHierarchyPassword       string
+
+    	rwc io.ReadWriteCloser
+    	log hclog.Logger
+    }
+
+    type TPMPasswords struct {
+    	EndorsementHierarchy string
+    	OwnerHierarchy       string
+    	DevIDKey             string
+    }
+
+    type SessionConfig struct {
+    	DevicePath string
+    	DevIDPriv  []byte
+    	DevIDPub   []byte
+    	Passwords  TPMPasswords
+    	Log        hclog.Logger
+    }
+
+    var OpenTPM = openTPM
+
+    // NewSession opens a connection to a TPM and configures it to be used for
+    // node attestation.
+    //
+    // The original implementation called TPM2_CreatePrimary three times — once
+    // inside loadKey() for the DevID, once inside createAttestationKey(), and
+    // once inside loadKey() for the AK. All three used the same owner-hierarchy
+    // SRK template and the same password within a session. This implementation
+    // creates the SRK once and reuses it, reducing CreatePrimary calls from 3
+    // to 1 (RSA DevID) or 2 (ECC DevID). The EK CreatePrimary on the
+    // endorsement hierarchy is unchanged.
+    func NewSession(scfg *SessionConfig) (*Session, error) {
+    	if scfg.Log == nil {
+    		return nil, errors.New("missing logger")
+    	}
+
+    	rwc, err := OpenTPM(scfg.DevicePath)
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot open TPM at %q: %w", scfg.DevicePath, err)
+    	}
+
+    	tpm := &Session{
+    		rwc:                          rwc,
+    		log:                          scfg.Log,
+    		endorsementHierarchyPassword: scfg.Passwords.EndorsementHierarchy,
+    		ownerHierarchyPassword:       scfg.Passwords.OwnerHierarchy,
+    	}
+
+    	defer func() {
+    		if err != nil {
+    			tpm.Close()
+    		}
+    	}()
+
+    	srkPassword, err := newRandomPassword()
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot generate random password for storage root key: %w", err)
+    	}
+
+    	// Determine the SRK template required to load the DevID key.
+    	devIDPubDecoded, err := tpm2.DecodePublic(scfg.DevIDPub)
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot decode DevID public key: %w", err)
+    	}
+    	var devIDSRKTemplate tpm2.Public
+    	switch devIDPubDecoded.Type {
+    	case tpm2.AlgRSA:
+    		devIDSRKTemplate = SRKTemplateHighRSA()
+    	case tpm2.AlgECC:
+    		devIDSRKTemplate = SRKTemplateHighECC()
+    	default:
+    		return nil, fmt.Errorf("unsupported DevID key type: 0x%04x", devIDPubDecoded.Type)
+    	}
+
+    	// Create one SRK for all owner-hierarchy operations. For RSA DevIDs this
+    	// same handle is reused for AK creation and loading. tpm2.Load() children
+    	// are independent of the parent handle after Load() returns (TPM 2.0 Part
+    	// 1 §30), so the deferred flush does not affect loaded keys.
+    	devIDSRKHandle, _, _, _, _, _, err := tpm2.CreatePrimaryEx(
+    		rwc, tpm2.HandleOwner,
+    		tpm2.PCRSelection{},
+    		scfg.Passwords.OwnerHierarchy,
+    		srkPassword,
+    		devIDSRKTemplate,
+    	)
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot create owner SRK: %w", err)
+    	}
+    	defer tpm.flushContext(devIDSRKHandle)
+
+    	tpm.devID, err = tpm.loadKeyWithSRK(
+    		scfg.DevIDPub, scfg.DevIDPriv,
+    		devIDSRKHandle, srkPassword, scfg.Passwords.DevIDKey,
+    	)
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot load DevID key on TPM: %w", err)
+    	}
+
+    	akPassword, err := newRandomPassword()
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot generate random password for attestation key: %w", err)
+    	}
+
+    	// For RSA DevID the same SRK template works for the AK (AK is always RSA).
+    	// For ECC DevID we need a separate RSA SRK.
+    	akSRKHandle := devIDSRKHandle
+    	if devIDPubDecoded.Type == tpm2.AlgECC {
+    		akSRKHandle, _, _, _, _, _, err = tpm2.CreatePrimaryEx(
+    			rwc, tpm2.HandleOwner,
+    			tpm2.PCRSelection{},
+    			scfg.Passwords.OwnerHierarchy,
+    			srkPassword,
+    			SRKTemplateHighRSA(),
+    		)
+    		if err != nil {
+    			return nil, fmt.Errorf("cannot create RSA SRK for attestation key: %w", err)
+    		}
+    		defer tpm.flushContext(akSRKHandle)
+    	}
+
+    	akPriv, akPub, err := tpm.createAttestationKeyWithSRK(akSRKHandle, srkPassword, akPassword)
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot create attestation key: %w", err)
+    	}
+    	tpm.akPub = akPub
+
+    	tpm.ak, err = tpm.loadKeyWithSRK(
+    		akPub, akPriv,
+    		akSRKHandle, srkPassword, akPassword,
+    	)
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot load attestation key: %w", err)
+    	}
+
+    	tpm.ekHandle, tpm.ekPub, _, _, _, _, err =
+    		tpm2.CreatePrimaryEx(rwc, tpm2.HandleEndorsement,
+    			tpm2.PCRSelection{},
+    			scfg.Passwords.EndorsementHierarchy,
+    			"",
+    			client.DefaultEKTemplateRSA())
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot create endorsement key: %w", err)
+    	}
+
+    	return tpm, nil
+    }
+
+    func (c *Session) Close() {
+    	if c.devID != nil {
+    		if err := c.devID.Close(); err != nil {
+    			c.log.Warn(fmt.Sprintf("Failed to close DevID handle: %v", err))
+    		}
+    	}
+    	if c.ak != nil {
+    		if err := c.ak.Close(); err != nil {
+    			c.log.Warn(fmt.Sprintf("Failed to close attestation key handle: %v", err))
+    		}
+    	}
+    	if c.ekHandle != 0 {
+    		c.flushContext(c.ekHandle)
+    	}
+    	if c.rwc != nil {
+    		if closeTPM(c.rwc) {
+    			return
+    		}
+    		if err := c.rwc.Close(); err != nil {
+    			c.log.Warn(fmt.Sprintf("Failed to close TPM: %v", err))
+    		}
+    	}
+    }
+
+    func (c *Session) SolveDevIDChallenge(nonce []byte) ([]byte, error) {
+    	signedNonce, err := c.devID.Sign(nonce)
+    	if err != nil {
+    		return nil, fmt.Errorf("failed to sign nonce: %w", err)
+    	}
+    	return signedNonce, nil
+    }
+
+    func (c *Session) SolveCredActivationChallenge(credentialBlob, secret []byte) ([]byte, error) {
+    	hSession, err := c.createPolicySessionForEK()
+    	if err != nil {
+    		return nil, err
+    	}
+    	b, err := tpm2.ActivateCredentialUsingAuth(
+    		c.rwc,
+    		[]tpm2.AuthCommand{
+    			{Session: tpm2.HandlePasswordSession, Auth: []byte(c.ak.password)},
+    			{Session: hSession},
+    		},
+    		c.ak.Handle,
+    		c.ekHandle,
+    		credentialBlob,
+    		secret,
+    	)
+    	if err != nil {
+    		c.flushContext(hSession)
+    		return b, fmt.Errorf("failed to activate credential: %w", err)
+    	}
+    	return b, nil
+    }
+
+    func (c *Session) CertifyDevIDKey() ([]byte, []byte, error) {
+    	return c.ak.Certify(c.devID.Handle, c.devID.password)
+    }
+
+    func (c *Session) GetEKCert() ([]byte, error) {
+    	ekCertAndTrailingBytes, err := tpm2.NVRead(c.rwc, EKCertificateHandleRSA)
+    	if err != nil {
+    		return nil, fmt.Errorf("failed to read NV index %08x: %w", EKCertificateHandleRSA, err)
+    	}
+    	var ekCert asn1.RawValue
+    	_, err = asn1.Unmarshal(ekCertAndTrailingBytes, &ekCert)
+    	if err != nil {
+    		return nil, fmt.Errorf("failed to unmarshall certificate read from %08x: %w", EKCertificateHandleRSA, err)
+    	}
+    	return ekCert.FullBytes, nil
+    }
+
+    func (c *Session) GetEKPublic() ([]byte, error) {
+    	publicEK, _, _, err := tpm2.ReadPublic(c.rwc, c.ekHandle)
+    	if err != nil {
+    		return nil, fmt.Errorf("cannot read EK from handle: %w", err)
+    	}
+    	encodedPublicEK, err := publicEK.Encode()
+    	if err != nil {
+    		return nil, fmt.Errorf("encode failed: %w", err)
+    	}
+    	return encodedPublicEK, nil
+    }
+
+    func (c *Session) GetAKPublic() []byte {
+    	return c.akPub
+    }
+
+    // loadKeyWithSRK loads a key pair under a caller-provided SRK handle.
+    // The caller is responsible for flushing srkHandle after all operations complete.
+    func (c *Session) loadKeyWithSRK(
+    	pubKey, privKey []byte,
+    	srkHandle tpmutil.Handle,
+    	parentKeyPassword, keyPassword string,
+    ) (*SigningKey, error) {
+    	pub, err := tpm2.DecodePublic(pubKey)
+    	if err != nil {
+    		return nil, fmt.Errorf("tpm2.DecodePublic failed: %w", err)
+    	}
+    	canSign := pub.Attributes&tpm2.FlagSign != 0
+    	if !canSign {
+    		return nil, errors.New("not a signing key")
+    	}
+    	var sigHashAlg tpm2.Algorithm
+    	switch pub.Type {
+    	case tpm2.AlgRSA:
+    		if pub.RSAParameters != nil {
+    			sigHashAlg = pub.RSAParameters.Sign.Hash
+    		}
+    	case tpm2.AlgECC:
+    		if pub.ECCParameters != nil {
+    			sigHashAlg = pub.ECCParameters.Sign.Hash
+    		}
+    	default:
+    		return nil, fmt.Errorf("bad key type: 0x%04x", pub.Type)
+    	}
+    	if sigHashAlg.IsNull() {
+    		return nil, errors.New("signature hash algorithm is NULL")
+    	}
+    	keyHandle, _, err := tpm2.Load(c.rwc, srkHandle, parentKeyPassword, pubKey, privKey)
+    	if err != nil {
+    		return nil, fmt.Errorf("tpm2.Load failed: %w", err)
+    	}
+    	return &SigningKey{
+    		Handle:     keyHandle,
+    		sigHashAlg: sigHashAlg,
+    		rw:         c.rwc,
+    		log:        c.log,
+    		password:   keyPassword,
+    	}, nil
+    }
+
+    // loadKey retains the original per-call SRK creation for any callers outside
+    // NewSession that may rely on it.
+    func (c *Session) loadKey(pubKey, privKey []byte, parentKeyPassword, keyPassword string) (*SigningKey, error) {
+    	pub, err := tpm2.DecodePublic(pubKey)
+    	if err != nil {
+    		return nil, fmt.Errorf("tpm2.DecodePublic failed: %w", err)
+    	}
+    	canSign := pub.Attributes&tpm2.FlagSign != 0
+    	if !canSign {
+    		return nil, errors.New("not a signing key")
+    	}
+    	var sigHashAlg tpm2.Algorithm
+    	var srkTemplate tpm2.Public
+    	switch pub.Type {
+    	case tpm2.AlgRSA:
+    		srkTemplate = SRKTemplateHighRSA()
+    		if pub.RSAParameters != nil {
+    			sigHashAlg = pub.RSAParameters.Sign.Hash
+    		}
+    	case tpm2.AlgECC:
+    		srkTemplate = SRKTemplateHighECC()
+    		if pub.ECCParameters != nil {
+    			sigHashAlg = pub.ECCParameters.Sign.Hash
+    		}
+    	default:
+    		return nil, fmt.Errorf("bad key type: 0x%04x", pub.Type)
+    	}
+    	if sigHashAlg.IsNull() {
+    		return nil, errors.New("signature hash algorithm is NULL")
+    	}
+    	srkHandle, _, _, _, _, _, err :=
+    		tpm2.CreatePrimaryEx(c.rwc, tpm2.HandleOwner,
+    			tpm2.PCRSelection{},
+    			c.ownerHierarchyPassword,
+    			parentKeyPassword,
+    			srkTemplate)
+    	if err != nil {
+    		return nil, fmt.Errorf("tpm2.CreatePrimaryEx failed: %w", err)
+    	}
+    	defer c.flushContext(srkHandle)
+    	keyHandle, _, err := tpm2.Load(c.rwc, srkHandle, parentKeyPassword, pubKey, privKey)
+    	if err != nil {
+    		return nil, fmt.Errorf("tpm2.Load failed: %w", err)
+    	}
+    	return &SigningKey{
+    		Handle:     keyHandle,
+    		sigHashAlg: sigHashAlg,
+    		rw:         c.rwc,
+    		log:        c.log,
+    		password:   keyPassword,
+    	}, nil
+    }
+
+    // createAttestationKeyWithSRK creates an AK under a caller-provided SRK handle.
+    func (c *Session) createAttestationKeyWithSRK(
+    	srkHandle tpmutil.Handle,
+    	parentKeyPassword, keyPassword string,
+    ) ([]byte, []byte, error) {
+    	privBlob, pubBlob, _, _, _, err := tpm2.CreateKey(
+    		c.rwc,
+    		srkHandle,
+    		tpm2.PCRSelection{},
+    		parentKeyPassword,
+    		keyPassword,
+    		client.AKTemplateRSA(),
+    	)
+    	if err != nil {
+    		return nil, nil, fmt.Errorf("failed to create AK: %w", err)
+    	}
+    	return privBlob, pubBlob, nil
+    }
+
+    // createAttestationKey retains the original per-call SRK creation for
+    // any callers outside NewSession that may rely on it.
+    func (c *Session) createAttestationKey(parentKeyPassword, keyPassword string) ([]byte, []byte, error) {
+    	srkHandle, _, _, _, _, _, err :=
+    		tpm2.CreatePrimaryEx(c.rwc,
+    			tpm2.HandleOwner,
+    			tpm2.PCRSelection{},
+    			c.ownerHierarchyPassword,
+    			parentKeyPassword,
+    			SRKTemplateHighRSA())
+    	if err != nil {
+    		return nil, nil, fmt.Errorf("failed to create SRK: %w", err)
+    	}
+    	defer c.flushContext(srkHandle)
+    	privBlob, pubBlob, _, _, _, err := tpm2.CreateKey(
+    		c.rwc,
+    		srkHandle,
+    		tpm2.PCRSelection{},
+    		parentKeyPassword,
+    		keyPassword,
+    		client.AKTemplateRSA(),
+    	)
+    	if err != nil {
+    		return nil, nil, fmt.Errorf("failed to create AK: %w", err)
+    	}
+    	return privBlob, pubBlob, nil
+    }
+
+    func (c *Session) createPolicySessionForEK() (tpmutil.Handle, error) {
+    	hSession, _, err := tpm2.StartAuthSession(
+    		c.rwc,
+    		tpm2.HandleNull,
+    		tpm2.HandleNull,
+    		make([]byte, 16),
+    		nil,
+    		tpm2.SessionPolicy,
+    		tpm2.AlgNull,
+    		tpm2.AlgSHA256,
+    	)
+    	if err != nil {
+    		return 0, err
+    	}
+    	_, _, err = tpm2.PolicySecret(
+    		c.rwc,
+    		tpm2.HandleEndorsement,
+    		tpm2.AuthCommand{
+    			Session: tpm2.HandlePasswordSession,
+    			Auth:    []byte(c.endorsementHierarchyPassword),
+    		},
+    		hSession,
+    		nil, nil, nil,
+    		0,
+    	)
+    	if err != nil {
+    		c.flushContext(hSession)
+    		return 0, err
+    	}
+    	return hSession, nil
+    }
+
+    func (c *Session) flushContext(handle tpmutil.Handle) {
+    	if err := tpm2.FlushContext(c.rwc, handle); err != nil {
+    		c.log.Warn(fmt.Sprintf("Failed to flush handle %v: %v", handle, err))
+    	}
+    }
+
+    func newRandomPassword() (string, error) {
+    	rndBytes, err := tpmdevid.GetRandomBytes(randomPasswordSize)
+    	if err != nil {
+    		return "", err
+    	}
+    	return string(rndBytes), nil
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-agent-remfile
+  namespace: default
+data:
+  Remfile: |
+    FROM ghcr.io/spiffe/spire-agent:1.9.6
+    COPY spire-agent /opt/spire/bin/spire-agent

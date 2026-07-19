@@ -1,0 +1,117 @@
+---
+# Builds a patched spire-agent image on the cluster using pelagos build.
+#
+# What it does:
+#   1. init/clone-and-build: golang:1.26 container clones spire v1.9.6, overlays the
+#      patched session.go from a ConfigMap, builds spire-agent (CGO_ENABLED=0).
+#   2. init/stage-remfile: copies the Remfile into the workspace alongside the binary.
+#   3. build-and-push: alpine container with pelagos binary mounted from the host.
+#      Runs `pelagos build` then `pelagos image push` to 192.168.89.2:5004.
+#
+# Prerequisites:
+#   kubectl apply -f session-go-configmap.yaml   # patched session.go
+#   kubectl apply -f build-job.yaml
+#
+# After a successful run the image is available as:
+#   192.168.89.2:5004/spire-agent:patched
+#
+# To test on ipc9 only, apply deploy-test.yaml.
+#
+# Pinned to ipc4 so the pelagos hostPath mount is consistent and the node
+# is stable (control plane, never cordoned by shutdown-cluster.sh first).
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spire-agent-build
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: ipc4
+
+      volumes:
+        # Shared scratch space between init containers and main container
+        - name: workspace
+          emptyDir: {}
+        # Patched session.go — created from session-go-configmap.yaml
+        - name: patched-session
+          configMap:
+            name: spire-tpmdevid-patched-session
+        # Remfile for pelagos build
+        - name: remfile
+          configMap:
+            name: spire-agent-remfile
+        # pelagos binary from the host (statically linked — no other deps needed)
+        - name: pelagos-bin
+          hostPath:
+            path: /usr/local/bin/pelagos
+            type: File
+
+      initContainers:
+        - name: clone-and-build
+          image: golang:1.26
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eux
+              git clone --depth 1 --branch v1.9.6 \
+                https://github.com/spiffe/spire /tmp/spire
+              cp /patched-session/session.go \
+                /tmp/spire/pkg/agent/plugin/nodeattestor/tpmdevid/tpmutil/session.go
+              cd /tmp/spire
+              CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+                go build -trimpath -o /workspace/spire-agent ./cmd/agent
+              echo "build complete, binary size: $(du -sh /workspace/spire-agent)"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: patched-session
+              mountPath: /patched-session
+              readOnly: true
+          resources:
+            requests:
+              cpu: "2"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"
+
+        - name: stage-remfile
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "cp /remfile/Remfile /workspace/Remfile"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: remfile
+              mountPath: /remfile
+              readOnly: true
+
+      containers:
+        - name: build-and-push
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eux
+              /pelagos build \
+                --tag 192.168.89.2:5004/spire-agent:patched \
+                --network host \
+                /workspace
+              /pelagos image push --insecure 192.168.89.2:5004/spire-agent:patched
+              echo "pushed: 192.168.89.2:5004/spire-agent:patched"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: pelagos-bin
+              mountPath: /pelagos
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
