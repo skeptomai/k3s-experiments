@@ -305,18 +305,86 @@
       }
     },
     {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Object Counts Over Time (key resource types)",
+      "description": "Tracks growth in object counts over time. KubeVirt instance types and preferences are pre-populated at install and should be stable. Pods and secrets reflect actual workload. A climbing line here means something is creating objects.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"pods\"}",
+          "legendFormat": "pods",
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"secrets\"}",
+          "legendFormat": "secrets",
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"configmaps\"}",
+          "legendFormat": "configmaps",
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"virtualmachineclusterinstancetypes.instancetype.kubevirt.io\"}",
+          "legendFormat": "VM instance types (KubeVirt built-in)",
+          "instant": false
+        },
+        {
+          "refId": "E",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"virtualmachineclusterpreferences.instancetype.kubevirt.io\"}",
+          "legendFormat": "VM preferences (KubeVirt built-in)",
+          "instant": false
+        },
+        {
+          "refId": "F",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"customresourcedefinitions.apiextensions.k8s.io\"}",
+          "legendFormat": "CRDs (installed operators)",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 5,
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      }
+    },
+    {
       "id": 103,
       "type": "row",
       "title": "Watch Activity",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 }
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 }
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "Watch Event Rate by Resource (top 10)",
       "description": "Which resource types are actually generating churn vs just holding idle connections. Nodes generate the most events on an otherwise idle cluster.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 37 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
@@ -342,6 +410,60 @@
       "options": {
         "tooltip": { "mode": "multi", "sort": "desc" },
         "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Unexpected Watch Churn (total rate minus nodes + leases baseline)",
+      "description": "On a truly idle cluster, watch events should come almost entirely from nodes (kubelet heartbeats) and leases (leader election). This panel shows total event rate vs that expected baseline. A gap between the two lines means something is generating unexpected churn.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 46 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(apiserver_watch_events_total{job=\"k3s_server\"}[5m]))",
+          "legendFormat": "total",
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(apiserver_watch_events_total{job=\"k3s_server\", resource=~\"nodes|leases\"}[5m]))",
+          "legendFormat": "expected baseline (nodes + leases)",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 5,
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "expected baseline (nodes + leases)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "total" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] }
       }
     }
   ]
