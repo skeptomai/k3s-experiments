@@ -29,17 +29,19 @@ the call count and per-call cost with bpftrace on `/dev/tpmrm0`: three consecuti
 produced 490-byte RSA public key responses. Everything else in the attestation completes
 in under 300ms.
 
-Back-to-back attestation timing on Infineon SLB9672 (ipc9), same TPM state, same
-persistent handles (0x81000001 + 0x81000009):
+Observed attestation timing on Infineon SLB9672 (ipc9), sequential runs, same
+persistent handles present (0x81000001 + 0x81000009):
 
 | Agent | Attestation time |
 |---|---|
 | Unpatched (v1.9.6) | 77s |
 | Patched (SRK reused) | 28s |
 
-The 77s matches 3 × ~24s + overhead; the 28s matches 1 × ~24s + overhead. The
-reduction is 3 CreatePrimary calls → 1 for RSA DevIDs. Per-call time on this chip is
-~24s regardless of patch, confirmed by both runs arriving at the same per-call cost.
+The 77s is consistent with 3 × ~24s + overhead; the 28s is consistent with 1 × ~24s
++ overhead. However, this is one run of each — the TPM state between runs is not fully
+controlled, ipc9's per-call time has varied across sessions, and other Infineon SLB9672
+nodes have not shown the same ~24s/call baseline. A controlled comparison with multiple
+runs has not been done.
 
 Since all three calls use the same template and the same SRK password within a session,
 they can share a single SRK context. `tpm2.Load()` children are independent of their
@@ -292,9 +294,11 @@ other callers are unaffected.
       tests pass with the new code paths.
 - [ ] Ideally: add a test that counts CreatePrimary calls and asserts ≤2 (RSA DevID)
       or ≤3 (ECC DevID, including EK).
-- [x] Measured attestation time before/after on Infineon SLB9672: 77s → 28s
-      back-to-back, same TPM state. Consistent with 3× → 1× CreatePrimary at ~24s/call.
-- [ ] Measure on Nuvoton NPCT75x (ipc4-7, ~8s/call) — expected 24s → 8s.
+- [ ] Controlled timing measurement: multiple unpatched runs to establish a stable
+      baseline, then multiple patched runs, same node, same session. Single-run
+      observations on ipc9 (77s unpatched, 28s patched) are suggestive but not
+      conclusive — per-call time on ipc9 has varied and other Infineon nodes have
+      not reproduced the ~24s/call baseline.
 
 ---
 
