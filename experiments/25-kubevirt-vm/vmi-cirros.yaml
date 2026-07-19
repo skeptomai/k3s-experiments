@@ -4,6 +4,8 @@ metadata:
   name: cirros-test
   namespace: default
 spec:
+  nodeSelector:
+    kubernetes.io/hostname: ipc8
   domain:
     cpu:
       cores: 1
