@@ -9,10 +9,74 @@ are not needed.
 - No VMs or VMIs running: `kubectl get vmi -A` must return empty
 - Flux is managing KubeVirt via `clusters/ipc/kubevirt.yaml` with `prune: true`
 
+## How KubeVirt installs itself (why cleanup is non-obvious)
+
+The operator manifest (`manifests/kubevirt/kubevirt-operator.yaml`) only contains the
+operator deployment, RBAC, and the `kubevirts.kubevirt.io` CRD. When the operator first
+reconciles the KubeVirt CR, it dynamically installs the other 18 CRDs (all the
+`virtualmachine*.kubevirt.io` types), the virt-api/controller/handler deployments,
+webhooks, and ~119 built-in instance type/preference objects. None of that is in the
+manifest file.
+
+The clean uninstall path relies on the operator processing its CR's finalizer
+(`foregroundDeleteKubeVirt`) to undo all of that dynamic installation. This only works
+if virt-operator pods are Running. If they are Pending, the whole cleanup path breaks:
+the webhook call blocks CR deletion, the finalizer never gets processed, and the 18
+dynamically-installed CRDs are left behind orphaned.
+
+**Before suspending, check operator health:**
+
+```
+kubectl get pods -n kubevirt -l kubevirt.io=virt-operator
+```
+
+Both pods must be `Running`. If they are `Pending`, investigate and fix that first
+(`kubectl describe pod -n kubevirt <pod>` to see the scheduling failure). Proceeding
+with a Pending operator means all cleanup must be done manually.
+
 ## Suspend (remove from cluster)
+
+**Step 1 — suspend Flux** so it won't re-apply resources during cleanup:
 
 ```
 flux suspend kustomization kubevirt
+```
+
+**Step 2 — delete the KubeVirt CR** and wait for the operator to finish tearing down
+virt-api, virt-controller, virt-handler, all 18 dynamic CRDs, and their objects:
+
+```
+kubectl delete kubevirt kubevirt -n kubevirt
+kubectl get pods -n kubevirt -w
+```
+
+Wait until only virt-operator pods remain. The operator removes everything else, then
+removes itself last. This can take 60–90s.
+
+**Step 3 — delete the operator manifest resources:**
+
+```
+kubectl delete -f manifests/kubevirt/kubevirt-operator.yaml
+```
+
+This removes the virt-operator deployment, RBAC, the `kubevirts.kubevirt.io` CRD, and
+the `kubevirt` namespace.
+
+**Verify nothing remains:**
+
+```
+kubectl get crd | grep kubevirt
+kubectl get ns kubevirt
+```
+
+Both should return empty / not found.
+
+## Fallback: operator was Pending
+
+If the operator pods were Pending and you already ran `flux suspend`, the webhooks and
+finalizer must be removed manually before anything else can be deleted:
+
+```
 kubectl delete validatingwebhookconfiguration virt-operator-validator virt-api-validator
 kubectl delete mutatingwebhookconfiguration virt-api-mutator
 kubectl patch kubevirt kubevirt -n kubevirt --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]'
@@ -21,25 +85,13 @@ kubectl delete -f manifests/kubevirt/kubevirt-operator.yaml
 kubectl get crd -o name | grep -E "\.(kubevirt|backup\.kubevirt|clone\.kubevirt|export\.kubevirt|instancetype\.kubevirt|migrations\.kubevirt|pool\.kubevirt|snapshot\.kubevirt)\.io" | xargs kubectl delete
 ```
 
-**Why the manual steps:** The happy path (delete the CR, let the operator clean up)
-requires both virt-operator pods to be Running so they can process the CR's finalizer.
-In practice virt-operator pods are often Pending (node pressure or scheduling hiccups),
-which blocks the CR deletion at the webhook call and leaves the finalizer hanging.
+The last line deletes the 18 CRDs that the operator would have removed itself during
+normal CR finalizer processing. They are not in the operator manifest and will not be
+cleaned up otherwise — you'd need to notice them with `kubectl get crd | grep kubevirt`
+after thinking cleanup was complete.
 
-The safe sequence regardless of operator health:
-1. Suspend Flux so it won't re-apply anything during cleanup.
-2. Remove the three webhook configurations — these call into virt-operator and virt-api
-   and will block CR deletion if those pods aren't healthy.
-3. Patch the finalizer off the CR so the delete isn't gated on operator liveness.
-4. Delete the CR.
-5. Delete the operator manifest (removes virt-operator deployment, RBAC, the
-   `kubevirts.kubevirt.io` CRD, and the namespace).
-6. Delete the 18 additional CRDs that the operator installed dynamically when it
-   reconciled the CR — these are not in the operator manifest and must be removed
-   explicitly.
-
-If the namespace gets stuck in Terminating (stale API group discovery from the removed
-CRDs), clear it with:
+If the namespace gets stuck in Terminating (stale API group discovery from removed
+CRDs):
 
 ```
 kubectl get ns kubevirt -o json | python3 -c "import sys,json; ns=json.load(sys.stdin); ns['spec']['finalizers']=[]; print(json.dumps(ns))" | kubectl replace --raw /api/v1/namespaces/kubevirt/finalize -f -
@@ -47,18 +99,16 @@ kubectl get ns kubevirt -o json | python3 -c "import sys,json; ns=json.load(sys.
 
 ## Resume (restore to cluster)
 
-Flux holds the full desired state in git. Resuming reconciliation is sufficient —
-Flux re-applies the operator deployment and the KubeVirt CR in one pass, and the
-operator reinstalls all components (virt-api, virt-controller, virt-handler DaemonSet,
-CRDs, built-in instance types, and preferences).
-
 ```
 flux resume kustomization kubevirt
 flux get kustomization kubevirt
 kubectl get pods -n kubevirt -w
 ```
 
-Operator startup takes ~30s; full component rollout another ~60s.
+Flux re-applies the operator manifest and KubeVirt CR in one pass. The operator
+reinstalls all 18 dynamic CRDs, virt-api, virt-controller, the virt-handler DaemonSet,
+and the 119 built-in instance type/preference objects. Operator startup takes ~30s;
+full component rollout another ~60s.
 
 ## What is preserved vs removed
 
@@ -66,9 +116,8 @@ Operator startup takes ~30s; full component rollout another ~60s.
 |------|-----------------|-----------------|
 | virt-operator, virt-api, virt-controller pods | Yes | Yes (Flux) |
 | virt-handler DaemonSet (6 pods) | Yes | Yes (Flux) |
-| All 19 CRDs (kubevirt.io family) | Yes (operator finalizer) | Yes (operator) |
+| All 19 CRDs (kubevirt.io family) | Yes | Yes (operator) |
 | 65 VirtualMachineClusterInstanceTypes | Yes | Yes (operator) |
 | 54 VirtualMachineClusterPreferences | Yes | Yes (operator) |
-| `kubevirt` namespace | No | — |
 | Git state (`clusters/ipc/kubevirt.yaml`) | No | — |
 | Any VM/VMI objects | Yes (none present) | Not restored |
