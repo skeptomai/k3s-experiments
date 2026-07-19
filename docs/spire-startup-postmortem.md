@@ -145,10 +145,40 @@ The liveness probe (`initialDelaySeconds: 15, periodSeconds: 60, failureThreshol
 allows up to ~135 seconds before killing the container. At 76 seconds, ipc9 attests
 comfortably within this window and runs stably afterwards.
 
-### Investigation needed
+### Eviction test results (2026-07-19)
 
-1. Identify the origin of persistent handle `0x81000002` on ipc9.
-2. Test whether evicting that handle reduces `CreatePrimary` time on ipc9.
-3. Run the same bpftrace on ipc8 to confirm its `CreatePrimary` time is ~10s.
-4. Consider whether pre-provisioning a persistent SRK at a fixed handle would let
-   SPIRE skip the three transient CreatePrimary calls entirely.
+The persistent handle `0x81000002` was evicted from ipc9 and CreatePrimary timed
+5 consecutive times:
+
+| Run | Time |
+|-----|------|
+| 1 (immediately after eviction) | 51.7s |
+| 2 | 10.6s |
+| 3 | 9.1s |
+| 4 | 8.5s |
+| 5 | 8.5s |
+
+Before eviction: 24s consistently. After eviction: ~9s in steady state. The first
+call after eviction was slower still (51s), consistent with the chip completing
+internal cleanup of the evicted key's state before settling.
+
+The handle was an RSA 2048-bit `restricted|sign` key with an authorization policy —
+the attribute pattern of an Attestation Identity Key (AIK) provisioned by external
+software (Windows Hello, HP BIOS attestation, or similar). Its presence appears to
+have created background crypto coprocessor contention that competed with CreatePrimary.
+We do not have a datasheet explanation for the exact mechanism; the improvement is
+empirical.
+
+ipc9's attestation time after eviction: ~27s (1 CreatePrimary × 9s + other ops).
+This is now in the same range as ipc8 (~34s).
+
+**The handle has been permanently evicted.** `scripts/provision-tpm-devid.sh` does
+not create anything at this address, so it will not return on reinstall.
+
+### Remaining investigation
+
+1. Run the same bpftrace on ipc8 to confirm its CreatePrimary time is ~10s and
+   understand the 34s vs 27s gap between the two Infineon nodes.
+2. Patch SPIRE's `tpm_devid` plugin to reuse a single SRK across the three
+   owner-hierarchy operations in `NewSession()`, reducing CreatePrimary from 3 calls
+   to 1. Draft in `docs/drafts/spire-tpmdevid-persist-srk.md`.
