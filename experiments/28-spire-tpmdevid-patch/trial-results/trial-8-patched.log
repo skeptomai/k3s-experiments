@@ -1,0 +1,39 @@
+=== Trial 8 (patched) ===
+Start: 2026-07-19T23:05:03Z
+--- TPM state (pre) ---
+- 0x81000001
+- 0x81000009
+bpftrace PID on ipc9: 2100543
+DaemonSet applied at 23:05:07Z
+Pod running: spire-agent-trial-patched-pqxx7
+time="2026-07-19T23:05:08Z" level=info msg="SVID is not found. Starting node attestation" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
+time="2026-07-19T23:05:36Z" level=info msg="Node attestation was successful" rettestable=true spiffe_id="spiffe://ipc.local/spire/agent/tpm_devid/dd04bfbf9dbfb604b0fdc1bf1d42d03e73788417" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
+bpftrace output: experiments/28-spire-tpmdevid-patch/trial-results/trial-8-patched.bt (129 lines)
+--- CreatePrimary calls (read() duration > 5s) ---
+[121182660] read() returned 27 bytes in 0 ms
+[121206960] read() returned 490 bytes in 0 ms
+[121207087] read() returned 59 bytes in 0 ms
+[121207363] read() returned 732 bytes in 0 ms
+[121207557] read() returned 59 bytes in 0 ms
+[121207729] read() returned 10 bytes in 0 ms
+[121207923] read() returned 522 bytes in 0 ms
+[121208124] read() returned 27 bytes in 0 ms
+[121208322] read() returned 62 bytes in 0 ms
+[121208527] read() returned 789 bytes in 0 ms
+[121208727] read() returned 682 bytes in 0 ms
+[121208927] read() returned 398 bytes in 0 ms
+[121209210] read() returned 429 bytes in 0 ms
+[121209419] read() returned 100 bytes in 0 ms
+[121209698] read() returned 281 bytes in 0 ms
+[121209915] read() returned 32 bytes in 0 ms
+[121210150] read() returned 29 bytes in 0 ms
+[121210469] read() returned 74 bytes in 0 ms
+[121210648] read() returned 10 bytes in 0 ms
+[121210753] read() returned 10 bytes in 0 ms
+[121210794] read() returned 10 bytes in 0 ms
+Pod terminated
+--- TPM state (post) ---
+- 0x81000001
+- 0x81000009
+End: 2026-07-19T23:05:44Z
+=== Trial 8 done ===

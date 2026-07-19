@@ -29,19 +29,39 @@ the call count and per-call cost with bpftrace on `/dev/tpmrm0`: three consecuti
 produced 490-byte RSA public key responses. Everything else in the attestation completes
 in under 300ms.
 
-Observed attestation timing on Infineon SLB9672 (ipc9), sequential runs, same
-persistent handles present (0x81000001 + 0x81000009):
+**Controlled interleaved trial results on Infineon SLB9672 (ipc9)**, same node,
+same persistent handles (`0x81000001` + `0x81000009`) confirmed before and after every
+trial, 60s cooldown between trials, production spire-agent excluded via nodeAffinity:
 
-| Agent | Attestation time |
-|---|---|
-| Unpatched (v1.9.6) | 77s |
-| Patched (SRK reused) | 28s |
+| Trial | Variant | Duration |
+|---|---|---|
+| 1 | unpatched | 77s |
+| 2 | patched | 28s |
+| 3 | unpatched | 153s |
+| 4 | patched | 28s |
+| 5 | unpatched | 77s |
+| 6 | patched | 28s |
 
-The 77s is consistent with 3 × ~24s + overhead; the 28s is consistent with 1 × ~24s
-+ overhead. However, this is one run of each — the TPM state between runs is not fully
-controlled, ipc9's per-call time has varied across sessions, and other Infineon SLB9672
-nodes have not shown the same ~24s/call baseline. A controlled comparison with multiple
-runs has not been done.
+**bpftrace confirmation** (trials 7 and 8, same controls) captured write() durations on
+`/dev/tpmrm0` keyed to the spire-agent process:
+
+| Trial | Variant | write(99 bytes) calls | Duration each |
+|---|---|---|---|
+| 7 | unpatched | 3 | 24,294ms / 24,353ms / 24,400ms |
+| 8 | patched | 1 | 24,300ms |
+
+The 99-byte write is the `TPM2_CreatePrimary` owner-hierarchy SRK command; the 490-byte
+response is the RSA 2048-bit public key. All other TPM operations complete in under
+320ms. The EK (`CreatePrimaryEx` on the endorsement hierarchy) does not appear as a
+slow 99-byte write — either it uses a different command size or the Infineon SLB9672
+handles the endorsement hierarchy faster.
+
+**Patched: 28s every trial (n=4).** **Unpatched: 77s, 153s, 77s, 77s (n=4).**
+
+The per-call CreatePrimary time (~24s) is identical between unpatched and patched,
+confirming the speedup is entirely due to call count reduction (3→1 for RSA DevIDs).
+The 153s outlier in trial 3 shows that per-call time is itself variable on this chip;
+that variance compounds with 3 calls but is absorbed by a single call.
 
 Since all three calls use the same template and the same SRK password within a session,
 they can share a single SRK context. `tpm2.Load()` children are independent of their
@@ -294,11 +314,12 @@ other callers are unaffected.
       tests pass with the new code paths.
 - [ ] Ideally: add a test that counts CreatePrimary calls and asserts ≤2 (RSA DevID)
       or ≤3 (ECC DevID, including EK).
-- [ ] Controlled timing measurement: multiple unpatched runs to establish a stable
-      baseline, then multiple patched runs, same node, same session. Single-run
-      observations on ipc9 (77s unpatched, 28s patched) are suggestive but not
-      conclusive — per-call time on ipc9 has varied and other Infineon nodes have
-      not reproduced the ~24s/call baseline.
+- [x] Controlled timing: 4 trials each, interleaved U/P/U/P/U/P, same node, same
+      handles, 60s cooldown. Patched: 28s ± 0 (n=4). Unpatched: 77/153/77/77s (n=4).
+- [x] bpftrace call-count confirmation: 3 × write(99 bytes) at ~24.3s each (unpatched)
+      vs 1 × write(99 bytes) at 24.3s (patched). Raw traces in trial-results/.
+- [ ] Measure on Nuvoton NPCT75x (ipc4-7) — expected 3× ~8s → ~24s unpatched,
+      ~8s patched.
 
 ---
 

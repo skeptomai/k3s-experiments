@@ -1,0 +1,19 @@
+=== Trial 4 (patched) ===
+Start: 2026-07-19T22:53:15Z
+--- TPM state (pre) ---
+- 0x81000001
+- 0x81000009
+bpftrace PID on ipc9: 2078098
+DaemonSet applied at 22:53:18Z
+Pod running: spire-agent-trial-patched-7fvzk
+time="2026-07-19T22:53:20Z" level=info msg="SVID is not found. Starting node attestation" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
+time="2026-07-19T22:53:48Z" level=info msg="Node attestation was successful" rettestable=true spiffe_id="spiffe://ipc.local/spire/agent/tpm_devid/dd04bfbf9dbfb604b0fdc1bf1d42d03e73788417" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
+bpftrace output: experiments/28-spire-tpmdevid-patch/trial-results/trial-4-patched.bt (1 lines)
+--- CreatePrimary calls (read() duration > 5s) ---
+(none captured)
+Pod terminated
+--- TPM state (post) ---
+- 0x81000001
+- 0x81000009
+End: 2026-07-19T22:54:41Z
+=== Trial 4 done ===

@@ -1,0 +1,83 @@
+---
+# Controlled timing trial — patched spire-agent (SRK reuse).
+# Requires ipc9 to be tainted: kubectl taint node ipc9 spire-test=true:NoSchedule
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent-trial-patched
+  namespace: spire
+spec:
+  selector:
+    matchLabels:
+      app: spire-agent-trial-patched
+  template:
+    metadata:
+      labels:
+        app: spire-agent-trial-patched
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ipc9
+      tolerations:
+        - key: spire-test
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      serviceAccountName: spire-agent
+      volumes:
+        - name: spire-config
+          configMap:
+            name: spire-agent
+        - name: verified-bundle
+          emptyDir: {}
+        - name: spire-agent-socket-dir
+          hostPath:
+            path: /run/spire/sockets-trial
+            type: DirectoryOrCreate
+        - name: spire-devid
+          hostPath:
+            path: /etc/spire
+            type: Directory
+        - name: tpm-device
+          hostPath:
+            path: /dev/tpmrm0
+            type: CharDevice
+        - name: verifier-script
+          configMap:
+            name: spire-bundle-verifier-script
+      initContainers:
+        - name: verify-bundle
+          image: docker.io/library/python:3.12
+          command: ["python3", "/scripts/verify-bundle.py"]
+          volumeMounts:
+            - name: verifier-script
+              mountPath: /scripts
+              readOnly: true
+            - name: spire-devid
+              mountPath: /etc/spire
+              readOnly: true
+            - name: verified-bundle
+              mountPath: /run/spire/verified-bundle
+      containers:
+        - name: spire-agent
+          image: 192.168.89.2:5004/spire-agent:patched
+          imagePullPolicy: Always
+          args: ["-config", "/run/spire/config/agent.conf"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: spire-config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: verified-bundle
+              mountPath: /run/spire/verified-bundle
+              readOnly: true
+            - name: spire-agent-socket-dir
+              mountPath: /run/spire/sockets
+            - name: spire-devid
+              mountPath: /etc/spire
+              readOnly: true
+            - name: tpm-device
+              mountPath: /dev/tpmrm0
