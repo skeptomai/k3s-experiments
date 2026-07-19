@@ -1,0 +1,106 @@
+#!/usr/bin/env bpftrace
+// bpftrace-spire-tpm-stall.bt
+//
+// Traces TPM device ioctl calls from the SPIRE agent process on ipc9 to isolate
+// which operation causes the ~76-second stall during tpm_devid attestation.
+//
+// Run on ipc9 during a SPIRE agent restart:
+//
+//   # Find the SPIRE agent container PID from the host:
+//   sudo grep -r spire-agent /proc/*/comm 2>/dev/null | head -3
+//   # OR:
+//   sudo pelagos container ls  (then nsenter or note the PID from /proc)
+//
+//   # Then run this script:
+//   sudo bpftrace -c "pidof spire-agent" bpftrace-spire-tpm-stall.bt
+//   # OR target by comm name (catches the process regardless of PID):
+//   sudo bpftrace bpftrace-spire-tpm-stall.bt
+//
+// What to look for:
+//   - An ioctl entry that is NOT immediately followed by an exit
+//   - The gap between entry and exit on a specific request code is the stall
+//   - tpmrm0 uses ioctl request 0 (TPM_IOC_TRANSMIT is via write/read, not ioctl)
+//   - The actual TPM command bytes go through write() / read() on /dev/tpmrm0
+//   - Look for a write() that has no corresponding read() for ~60 seconds
+
+// Track open calls to /dev/tpmrm0 to find the file descriptor
+tracepoint:syscalls:sys_enter_openat
+/comm == "spire-agent" && str(args->filename) == "/dev/tpmrm0"/
+{
+    @opening[tid] = nsecs;
+    printf("[%llu] openat /dev/tpmrm0 (tid=%d)\n", nsecs / 1000000, tid);
+}
+
+tracepoint:syscalls:sys_exit_openat
+/@opening[tid]/
+{
+    @tpmrm0_fd[tid] = args->ret;
+    printf("[%llu] openat → fd=%d\n", nsecs / 1000000, args->ret);
+    delete(@opening[tid]);
+}
+
+// Track write() to tpmrm0 (sending a TPM command)
+tracepoint:syscalls:sys_enter_write
+/comm == "spire-agent" && args->fd == @tpmrm0_fd[tid]/
+{
+    @write_start[tid] = nsecs;
+    @write_bytes[tid] = args->count;
+    printf("[%llu] write(%d bytes) → TPM command sent\n",
+           nsecs / 1000000, (uint32)args->count);
+}
+
+tracepoint:syscalls:sys_exit_write
+/@write_start[tid]/
+{
+    printf("[%llu] write done in %llu ms\n",
+           nsecs / 1000000, (nsecs - @write_start[tid]) / 1000000);
+    delete(@write_start[tid]);
+}
+
+// Track read() from tpmrm0 (receiving TPM response)
+tracepoint:syscalls:sys_enter_read
+/comm == "spire-agent" && args->fd == @tpmrm0_fd[tid]/
+{
+    @read_start[tid] = nsecs;
+    printf("[%llu] read() waiting for TPM response...\n", nsecs / 1000000);
+}
+
+tracepoint:syscalls:sys_exit_read
+/@read_start[tid]/
+{
+    $elapsed = (nsecs - @read_start[tid]) / 1000000;
+    printf("[%llu] read() returned %d bytes in %llu ms%s\n",
+           nsecs / 1000000, (int32)args->ret, $elapsed,
+           $elapsed > 5000 ? "  <== SLOW" : "");
+    delete(@read_start[tid]);
+}
+
+// Also catch futex/sleep waits to distinguish TPM blocking from Go runtime parking
+tracepoint:syscalls:sys_enter_futex
+/comm == "spire-agent"/
+{
+    @futex_start[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_exit_futex
+/@futex_start[tid] && (nsecs - @futex_start[tid]) > 1000000000/  // > 1s
+{
+    printf("[%llu] LONG futex wait: %llu ms (tid=%d) — Go runtime park or mutex\n",
+           nsecs / 1000000, (nsecs - @futex_start[tid]) / 1000000, tid);
+    delete(@futex_start[tid]);
+}
+tracepoint:syscalls:sys_exit_futex
+/@futex_start[tid]/
+{
+    delete(@futex_start[tid]);
+}
+
+END
+{
+    clear(@opening);
+    clear(@tpmrm0_fd);
+    clear(@write_start);
+    clear(@write_bytes);
+    clear(@read_start);
+    clear(@futex_start);
+}
