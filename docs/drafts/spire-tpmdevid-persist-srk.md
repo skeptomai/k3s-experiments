@@ -25,18 +25,21 @@ call is a full on-chip RSA key generation.
 
 On hardware where RSA primary key generation is slow, three calls compound. We measured
 the call count and per-call cost with bpftrace on `/dev/tpmrm0`: three consecutive
-99-byte writes, each blocking inside the kernel `write()` syscall, produced 490-byte RSA
-public key responses. Everything else in the attestation completes in under 300ms.
+99-byte writes, each blocking inside the kernel `write()` syscall for ~24 seconds each,
+produced 490-byte RSA public key responses. Everything else in the attestation completes
+in under 300ms.
 
-| Hardware | Per CreatePrimary | 3× cost |
-|---|---|---|
-| Nuvoton NPCT75x | ~8s | ~24s |
-| Infineon SLB9672 (normal) | ~9–10s | ~27–30s |
-| Infineon SLB9672 (degraded¹) | ~24s | ~72s |
+Back-to-back attestation timing on Infineon SLB9672 (ipc9), same TPM state, same
+persistent handles (0x81000001 + 0x81000009):
 
-¹ A mystery persistent handle (0x81000002) was present on the test node, causing
-degraded CreatePrimary times. Evicting it restored normal ~9s times. This is a separate
-issue; the redundant calls are the concern here regardless of per-call cost.
+| Agent | Attestation time |
+|---|---|
+| Unpatched (v1.9.6) | 77s |
+| Patched (SRK reused) | 28s |
+
+The 77s matches 3 × ~24s + overhead; the 28s matches 1 × ~24s + overhead. The
+reduction is 3 CreatePrimary calls → 1 for RSA DevIDs. Per-call time on this chip is
+~24s regardless of patch, confirmed by both runs arriving at the same per-call cost.
 
 Since all three calls use the same template and the same SRK password within a session,
 they can share a single SRK context. `tpm2.Load()` children are independent of their
@@ -289,10 +292,9 @@ other callers are unaffected.
       tests pass with the new code paths.
 - [ ] Ideally: add a test that counts CreatePrimary calls and asserts ≤2 (RSA DevID)
       or ≤3 (ECC DevID, including EK).
-- [ ] Measure attestation time before/after on at least two chip types with the
-      same node state (no confounding handle evictions between runs). The expected
-      improvement is 3× CreatePrimary → 1× for RSA DevIDs, but end-to-end timing
-      is dominated by CreatePrimary cost which varies by chip and health state.
+- [x] Measured attestation time before/after on Infineon SLB9672: 77s → 28s
+      back-to-back, same TPM state. Consistent with 3× → 1× CreatePrimary at ~24s/call.
+- [ ] Measure on Nuvoton NPCT75x (ipc4-7, ~8s/call) — expected 24s → 8s.
 
 ---
 
