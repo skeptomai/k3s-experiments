@@ -99,6 +99,79 @@ All 19 types are watched by all controllers at all times, even with zero VMs run
 KubeVirt-specific watches on ipc5 alone totalled ~60, with `virtualmachineinstances`
 holding 11 watchers and `kubevirts` holding 8.
 
+## Object counts: what actually scales with objects vs what doesn't
+
+The intuition that "empty CRDs don't cost anything" is only partially right.
+
+**What does NOT scale with object count:**
+- Goroutines — each watch connection is one goroutine regardless of how many objects
+  exist in that resource type. A controller watching an empty CRD uses the same goroutine
+  as one watching a CRD with 10,000 objects. The controller opens the watch to be
+  notified the moment something is *created* — that's the whole point.
+- TCP connections — same logic: one connection per watch stream.
+
+**What does scale with object count:**
+- Watch cache memory — the API server maintains an in-memory ring buffer of recent
+  events per resource type, sized by object count. An empty CRD's cache is essentially
+  zero.
+- CPU for event dispatch — zero events dispatched if nothing is changing.
+- etcd storage — only stores actual objects.
+
+### The current picture (86 registered resource types)
+
+52 types have actual objects; 34 are zero. The goroutine cost is identical for both
+groups. The 34 empty ones are all overhead with no current benefit — they exist only
+because the operator that installed them might someday need them.
+
+The non-zero counts that matter most:
+
+| Resource | Count | Notes |
+|----------|-------|-------|
+| events | 166 | Kubernetes event objects; normal churn |
+| clusterroles | 113 | RBAC; grows with every operator install |
+| clusterrolebindings | 91 | same |
+| CRDs | 85 | the full registered CRD count itself |
+| serviceaccounts | 81 | one or more per namespace per operator |
+| **virtualmachineclusterinstancetypes** | **65** | KubeVirt built-in VM size library — installed automatically |
+| **virtualmachineclusterpreferences** | **54** | KubeVirt built-in preference profiles — installed automatically |
+| pods | 54 | infrastructure pods |
+| apiservices | 54 | one per registered API group |
+
+The KubeVirt rows are notable: those 119 objects (65 instance types + 54 preferences)
+are a built-in library of VM sizes and configuration profiles that KubeVirt populates
+at install time whether you asked for them or not. They sit in the watch cache of every
+KubeVirt controller, for zero VMs running. That is real cache weight, not just a
+connection on an empty pipe.
+
+### What metrics to actually watch
+
+Given the above, the metrics worth tracking split into two tiers:
+
+**Structural cost** (driven by what's *installed*, not what's *running*):
+- `sum by (node) (apiserver_longrunning_requests{verb="WATCH"})` — total watch burden;
+  grows when you install a new operator, shrinks when you uninstall one. Alert if it
+  climbs outside a restart cycle.
+- `count(apiserver_storage_objects)` — registered resource type count; a proxy for
+  "how much operator surface area is installed."
+- `go_goroutines{job="k3s_server"}` — tracks the above linearly; useful for spotting
+  genuine leaks only in context (compare the ratio to watches, not the absolute number).
+
+**Object-driven cost** (driven by what's *running*):
+- `apiserver_storage_objects` per resource — which types actually have objects. The ones
+  to watch over time are the KubeVirt instance type/preference counts (stable unless
+  you add more) and normal churn resources like pods, secrets, configmaps, events.
+- `rate(apiserver_watch_events_total[5m])` by resource — which resources are actively
+  generating cache churn. On a truly idle cluster this should be near zero for
+  everything except nodes (kubelet heartbeats) and leases (leader election).
+- `go_memstats_heap_inuse_bytes{job="k3s_server"}` — heap grows with object-driven
+  cache population, not just with watch count. Unbounded growth here over days (not
+  hours) would be the signal to investigate.
+
+**What to ignore:**
+- Absolute goroutine count in isolation — only meaningful relative to watch count.
+- Heap at a static high watermark — Go won't GC when there's 28 GB free. Only care
+  about the slope over days, not the level at any given moment.
+
 ## The honest conclusion
 
 Nothing is wrong. Nothing needs fixing. This is the cost of the platform.
