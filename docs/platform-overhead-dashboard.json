@@ -4,93 +4,143 @@
   "schemaVersion": 36,
   "version": 1,
   "refresh": "1m",
-  "time": { "from": "now-3h", "to": "now" },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
-  "tags": ["k3s", "platform", "overhead"],
+  "tags": [
+    "k3s",
+    "platform",
+    "overhead"
+  ],
   "panels": [
     {
       "id": 100,
       "type": "row",
       "title": "Watch Burden",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
     },
     {
       "id": 1,
       "type": "timeseries",
       "title": "Active WATCHes by System",
-      "description": "Persistent WATCH connections open against the API server, grouped by the component that owns the API group. Stacked — total height is the full watch burden on the VIP node.",
-      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Persistent WATCH connections open against the API server, grouped by the component that owns the API group. Stacked \u2014 total height is the full watch burden on the VIP node.",
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"kubevirt\\.io|backup\\.kubevirt\\.io|clone\\.kubevirt\\.io|export\\.kubevirt\\.io|instancetype\\.kubevirt\\.io|migrations\\.kubevirt\\.io|pool\\.kubevirt\\.io|snapshot\\.kubevirt\\.io\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"kubevirt.io|backup.kubevirt.io|clone.kubevirt.io|export.kubevirt.io|instancetype.kubevirt.io|migrations.kubevirt.io|pool.kubevirt.io|snapshot.kubevirt.io\"})",
           "legendFormat": "KubeVirt",
           "instant": false
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=\"\"})",
           "legendFormat": "Core k8s",
           "instant": false
         },
         {
           "refId": "C",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"apps|batch|autoscaling|policy|rbac\\.authorization\\.k8s\\.io|admissionregistration\\.k8s\\.io|apiextensions\\.k8s\\.io|apiregistration\\.k8s\\.io|coordination\\.k8s\\.io|networking\\.k8s\\.io|discovery\\.k8s\\.io|storage\\.k8s\\.io|node\\.k8s\\.io|scheduling\\.k8s\\.io|certificates\\.k8s\\.io|resource\\.k8s\\.io|flowcontrol\\.apiserver\\.k8s\\.io\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"apps|batch|autoscaling|policy|rbac.authorization.k8s.io|admissionregistration.k8s.io|apiextensions.k8s.io|apiregistration.k8s.io|coordination.k8s.io|networking.k8s.io|discovery.k8s.io|storage.k8s.io|node.k8s.io|scheduling.k8s.io|certificates.k8s.io|resource.k8s.io|flowcontrol.apiserver.k8s.io\"})",
           "legendFormat": "k8s extensions",
           "instant": false
         },
         {
           "refId": "D",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"helm\\.toolkit\\.fluxcd\\.io|kustomize\\.toolkit\\.fluxcd\\.io|notification\\.toolkit\\.fluxcd\\.io|source\\.toolkit\\.fluxcd\\.io\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"helm.toolkit.fluxcd.io|kustomize.toolkit.fluxcd.io|notification.toolkit.fluxcd.io|source.toolkit.fluxcd.io\"})",
           "legendFormat": "Flux",
           "instant": false
         },
         {
           "refId": "E",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=\"metallb.io\"})",
           "legendFormat": "MetalLB",
           "instant": false
         },
         {
           "refId": "F",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"cert-manager\\.io|acme\\.cert-manager\\.io\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"cert-manager.io|acme.cert-manager.io\"})",
           "legendFormat": "cert-manager",
           "instant": false
         },
         {
           "refId": "G",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"traefik\\.io|hub\\.traefik\\.io\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"traefik.io|hub.traefik.io\"})",
           "legendFormat": "Traefik",
           "instant": false
         },
         {
           "refId": "H",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=\"tailscale.com\"})",
           "legendFormat": "Tailscale",
           "instant": false
         },
         {
           "refId": "I",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=\"gateway.networking.k8s.io\"})",
           "legendFormat": "Gateway API",
           "instant": false
         },
         {
           "refId": "J",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"k3s\\.cattle\\.io|helm\\.cattle\\.io\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\", group=~\"k3s.cattle.io|helm.cattle.io\"})",
           "legendFormat": "k3s",
           "instant": false
         }
@@ -98,7 +148,10 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "stacking": { "mode": "normal", "group": "A" },
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
             "fillOpacity": 60,
             "lineWidth": 1,
             "spanNulls": false
@@ -109,21 +162,41 @@
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Active WATCHes per Control-Plane Node",
-      "description": "The node holding the kube-vip VIP (192.168.88.58) will show roughly 2× the others, because all controllers connecting to the HA endpoint land on that node.",
-      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "The node holding the kube-vip VIP (192.168.88.58) will show roughly 2\u00d7 the others, because all controllers connecting to the HA endpoint land on that node.",
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (node) (apiserver_longrunning_requests{job=\"k3s_server\", verb=\"WATCH\"})",
           "legendFormat": "{{node}}",
           "instant": false
@@ -142,8 +215,17 @@
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
@@ -151,19 +233,35 @@
       "type": "row",
       "title": "Runtime Overhead",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      }
     },
     {
       "id": 3,
       "type": "timeseries",
       "title": "Goroutines per Control-Plane Node",
       "description": "Tracks linearly with active WATCH connections. Divergence between nodes is the VIP effect, not a leak.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "go_goroutines{job=\"k3s_server\"}",
           "legendFormat": "{{node}}",
           "instant": false
@@ -182,8 +280,17 @@
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
@@ -191,12 +298,23 @@
       "type": "timeseries",
       "title": "API Server Heap per Node",
       "description": "Go does not GC aggressively with 28GB free RAM. A high watermark is normal; watch for unbounded growth over days.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "go_memstats_heap_inuse_bytes{job=\"k3s_server\"}",
           "legendFormat": "{{node}}",
           "instant": false
@@ -215,8 +333,17 @@
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
@@ -224,19 +351,35 @@
       "type": "row",
       "title": "CRD Footprint",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      }
     },
     {
       "id": 5,
       "type": "stat",
       "title": "Registered Resource Types",
       "description": "Total number of resource types registered in the API server (built-in + CRDs). Grows as you install operators.",
-      "gridPos": { "h": 8, "w": 4, "x": 0, "y": 20 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "count(apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\"})",
           "legendFormat": "",
           "instant": true
@@ -244,13 +387,24 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "red", "value": 100 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
             ]
           },
           "unit": "short",
@@ -263,7 +417,13 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       }
     },
@@ -271,13 +431,24 @@
       "id": 6,
       "type": "bargauge",
       "title": "Objects per Resource Type (non-zero)",
-      "description": "How many objects exist for each resource type. Most CRDs show 0 — they exist only to hold watches open even with no instances running.",
-      "gridPos": { "h": 8, "w": 20, "x": 4, "y": 20 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "How many objects exist for each resource type. Most CRDs show 0 \u2014 they exist only to hold watches open even with no instances running.",
+      "gridPos": {
+        "h": 8,
+        "w": 20,
+        "x": 4,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sort_desc(apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\"} > 0)",
           "legendFormat": "{{resource}}",
           "instant": true
@@ -285,12 +456,19 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "unit": "short",
           "min": 0,
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "blue", "value": null }]
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
@@ -298,7 +476,13 @@
       "options": {
         "displayMode": "basic",
         "orientation": "horizontal",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "showUnfilled": true,
         "valueMode": "color",
         "text": {}
@@ -309,47 +493,73 @@
       "type": "timeseries",
       "title": "Object Counts Over Time (key resource types)",
       "description": "Tracks growth in object counts over time. KubeVirt instance types and preferences are pre-populated at install and should be stable. Pods and secrets reflect actual workload. A climbing line here means something is creating objects.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"pods\"}",
           "legendFormat": "pods",
           "instant": false
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"secrets\"}",
           "legendFormat": "secrets",
           "instant": false
         },
         {
           "refId": "C",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"configmaps\"}",
           "legendFormat": "configmaps",
           "instant": false
         },
         {
           "refId": "D",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"virtualmachineclusterinstancetypes.instancetype.kubevirt.io\"}",
           "legendFormat": "VM instance types (KubeVirt built-in)",
           "instant": false
         },
         {
           "refId": "E",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"virtualmachineclusterpreferences.instancetype.kubevirt.io\"}",
           "legendFormat": "VM preferences (KubeVirt built-in)",
           "instant": false
         },
         {
           "refId": "F",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "apiserver_storage_objects{job=\"k3s_server\", node=\"ipc4\", resource=\"customresourcedefinitions.apiextensions.k8s.io\"}",
           "legendFormat": "CRDs (installed operators)",
           "instant": false
@@ -368,8 +578,18 @@
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
       }
     },
     {
@@ -377,19 +597,35 @@
       "type": "row",
       "title": "Watch Activity",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      }
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "Watch Event Rate by Resource (top 10)",
       "description": "Which resource types are actually generating churn vs just holding idle connections. Nodes generate the most events on an otherwise idle cluster.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 37 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "topk(10, sum by (resource, group) (rate(apiserver_watch_events_total{job=\"k3s_server\"}[5m])))",
           "legendFormat": "{{resource}}",
           "instant": false
@@ -408,8 +644,18 @@
         "overrides": []
       },
       "options": {
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
       }
     },
     {
@@ -417,19 +663,33 @@
       "type": "timeseries",
       "title": "Unexpected Watch Churn (total rate minus nodes + leases baseline)",
       "description": "On a truly idle cluster, watch events should come almost entirely from nodes (kubelet heartbeats) and leases (leader election). This panel shows total event rate vs that expected baseline. A gap between the two lines means something is generating unexpected churn.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 46 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(rate(apiserver_watch_events_total{job=\"k3s_server\"}[5m]))",
           "legendFormat": "total",
           "instant": false
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(rate(apiserver_watch_events_total{job=\"k3s_server\", resource=~\"nodes|leases\"}[5m]))",
           "legendFormat": "expected baseline (nodes + leases)",
           "instant": false
@@ -447,23 +707,59 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "expected baseline (nodes + leases)" },
+            "matcher": {
+              "id": "byName",
+              "options": "expected baseline (nodes + leases)"
+            },
             "properties": [
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    4
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "total" },
+            "matcher": {
+              "id": "byName",
+              "options": "total"
+            },
             "properties": [
-              { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
             ]
           }
         ]
       },
       "options": {
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     }
   ]
