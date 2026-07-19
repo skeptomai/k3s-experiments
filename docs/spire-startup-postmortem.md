@@ -71,75 +71,73 @@ level=info msg="SVID is not found. Starting node attestation"
 level=info msg="Node attestation was successful"
 ```
 
-### Root cause: different TPM hardware + Nuvoton ActivateCredential anomaly
+### TPM hardware map (corrected)
 
-ipc9 has a **Nuvoton NPCT75x** firmware TPM, while ipc7 and ipc8 have **Infineon
-SLB9** discrete chips:
+The cluster has two different TPM vendors across the six nodes:
 
-| Node | Manufacturer | Chip | Type |
-|------|-------------|------|------|
-| ipc7 | `0x49465800` IFX | Infineon OPTIGA SLB9 | Discrete |
-| ipc8 | `0x49465800` IFX | Infineon OPTIGA SLB9 | Discrete |
-| ipc9 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) |
+| Node | Manufacturer | Chip | Type | Attestation time |
+|------|-------------|------|------|-----------------|
+| ipc4 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
+| ipc5 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
+| ipc6 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
+| ipc7 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
+| ipc8 | `0x49465800` IFX | Infineon SLB9672 | Discrete | ~34s |
+| ipc9 | `0x49465800` IFX | Infineon SLB9672 | Discrete | ~76s |
 
-The HP Elite Mini 800 G9 ships with either Infineon SLB9672 or Nuvoton NPCT760HABYX.
-This cluster is split exactly along that boundary.
+The HP Elite Mini 800 G9 (ipc4-6) ships with either Infineon SLB9672 or Nuvoton
+NPCT760HABYX depending on production lot. ipc7-9 are the Intel Core i5-12500 (non-T)
+machines; ipc7 received a Nuvoton chip, ipc8 and ipc9 received Infineon.
 
-Raw TPM operation speeds (hash, ECC keygen, RSA EK creation) are comparable between
-ipc9 and the Infineon nodes. The 76-second delay is in the SPIRE attestation flow itself.
+### Root cause: TPM2_CreatePrimary takes 24 seconds on ipc9's chip
 
-### SPIRE tpm_devid attestation sequence (source-verified)
+Traced with bpftrace on ipc9 during a SPIRE agent pod restart. The trace watched
+`write()`/`read()` syscalls on `/dev/tpmrm0` from the `spire-agent` process and timed
+each one.
 
-`NewSession()` — called once per attestation — executes these TPM operations in order:
+The entire 76-second delay comes from three `write()` calls, each 99 bytes, each
+blocking inside the kernel `write()` syscall for ~24.2 seconds:
 
-1. `CreatePrimaryEx(HandleOwner, SRKTemplateHighRSA)` — SRK to load DevID key
-2. `Load()` — load pre-provisioned DevID key
-3. `FlushContext()` — flush SRK 1
-4. `CreatePrimaryEx(HandleOwner, SRKTemplateHighRSA)` — SRK for AK creation
-5. `CreateKey(AKTemplateRSA)` — create new RSA attestation key
-6. `FlushContext()` — flush SRK 2
-7. `CreatePrimaryEx(HandleOwner, SRKTemplateHighRSA)` — SRK to load AK
-8. `Load()` — load the AK
-9. `FlushContext()` — flush SRK 3
-10. `CreatePrimaryEx(HandleEndorsement, DefaultEKTemplateRSA)` — create RSA 2048 EK
+```
+write(99 bytes) -> TPM command sent
+write done in 24171 ms
+read() returned 490 bytes in 0 ms
 
-Then for the proof-of-residency challenge:
+write(99 bytes) -> TPM command sent
+write done in 24250 ms
+read() returned 490 bytes in 0 ms
 
-11. `StartAuthSession()` + `PolicySecret(HandleEndorsement)` — policy session for EK access
-12. `ActivateCredentialUsingAuth()` — decrypt server challenge using AK + EK
+write(99 bytes) -> TPM command sent
+write done in 24266 ms
+read() returned 490 bytes in 0 ms
+```
 
-Note: the temporary AK is always RSA regardless of DevID key type.
+A 99-byte command returning a 490-byte response is `TPM2_CreatePrimary` generating an
+RSA 2048-bit Storage Root Key (SRK). SPIRE's tpm_devid plugin calls `CreatePrimary`
+three times per attestation (to load the DevID key, create the attestation key, and
+load the attestation key into separate transient SRK contexts).
 
-### Most likely cause: Nuvoton ActivateCredential anomaly
+3 × 24.2s = 72.6 seconds. The remaining ~3.4 seconds are all other TPM operations
+(key loads, flushes, the ActivateCredential challenge) which complete in milliseconds.
 
-**go-attestation issue #171** documents a confirmed bug on Nuvoton NPCT (firmware 1.3)
-where `ActivateCredential` returns `TSS2_BASE_RC_INSUFFICIENT_CONTEXT` ("Context not
-large enough"). Our firmware (7.2) does not hard-fail, but the underlying cause —
-non-standard context buffer handling — may still be present, causing significantly
-more round-trips through the kernel TPM resource manager to complete the same operation.
+The blocking happens inside the kernel `write()` — the TPM hardware on ipc9 takes
+24 seconds to generate/return an RSA 2048-bit SRK. This is hardware behavior, not a
+software timeout or retry loop.
 
-The endorsement hierarchy `PolicySecret` session combined with `ActivateCredential` is
-the operation that touches the most TPM state simultaneously (EK + AK + policy session).
-On Nuvoton, the firmware's context management for this operation appears to be
-substantially slower than on Infineon hardware.
+### Why ipc8 is faster despite same model and firmware
 
-The 4 RSA `CreatePrimary` calls at ~1.5–2s each account for ~6–8 seconds. The remaining
-~46-second gap (76s Nuvoton vs ~30s Infineon) most likely comes from step 12
-(`ActivateCredentialUsingAuth`) or step 11 (`PolicySecret`).
+ipc8 also has an Infineon SLB9672 with the same firmware version (`0xF0016`) and
+attests in ~34s, implying its `CreatePrimary` takes ~10s per call rather than ~24s.
+Both are the same chip model. The difference is likely one of:
 
-### Ruled out
+- Different silicon production lots with different RSA key generation performance
+- ipc9's chip is in a partially degraded state (NV storage wear, etc.)
+- Some prior provisioning put ipc9's TPM in a state that makes RSA operations slower
+  (ipc9 has an extra persistent handle at `0x81000002` — an RSA signing key with an
+  authorization policy — that ipc8 does not have)
 
-- **Network calls**: `GetEKCert()` reads from TPM NVRAM only; `verifyEKSignature()`
-  uses a local CA pool; Go's `crypto/x509` does not automatically fetch OCSP/CRL/AIA.
-- **EK cert ASN.1 issues**: Nuvoton EK certs have known issuer DN ordering violations
-  (keylime issue #944) but SPIRE uses pre-loaded `ekRoots`, not dynamic chain building.
-- **Nuvoton AIA URL bug**: The broken AIA URL in Nuvoton EK certs (tpm2-tss issue #2046)
-  would only matter if something fetched it over HTTP — nothing in the verified code path
-  does.
-- **Raw RSA speed**: Confirmed comparable between ipc9 and Infineon nodes.
-
-The exact call has not yet been isolated. See the GitHub issue for the active
-investigation with bpftrace/strace.
+The extra handle `0x81000002` on ipc9 is worth investigating: it has
+`fixedtpm|fixedparent|restricted|sign` attributes and an authorization policy, and was
+not placed there by `provision-tpm-devid.sh`. Its origin is unknown.
 
 ### Current status
 
@@ -147,12 +145,10 @@ The liveness probe (`initialDelaySeconds: 15, periodSeconds: 60, failureThreshol
 allows up to ~135 seconds before killing the container. At 76 seconds, ipc9 attests
 comfortably within this window and runs stably afterwards.
 
-The 4371 restart count on the pre-2026-07-19 agent was caused by Problem 1 (stale
-bundle preventing connection entirely), not by the 76-second delay. With the bundle now
-properly maintained by a running Notifier, ipc9 is expected to be stable between
-cluster restarts.
-
 ### Investigation needed
 
-Trace the Go TPM library calls inside the running SPIRE agent on ipc9 to identify
-which operation stalls. See the GitHub issue for the bpftrace/strace methodology.
+1. Identify the origin of persistent handle `0x81000002` on ipc9.
+2. Test whether evicting that handle reduces `CreatePrimary` time on ipc9.
+3. Run the same bpftrace on ipc8 to confirm its `CreatePrimary` time is ~10s.
+4. Consider whether pre-provisioning a persistent SRK at a fixed handle would let
+   SPIRE skip the three transient CreatePrimary calls entirely.

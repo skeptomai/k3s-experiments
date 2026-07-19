@@ -35,7 +35,7 @@ tracepoint:syscalls:sys_exit_openat
 /@opening[tid]/
 {
     @tpmrm0_fd[tid] = args->ret;
-    printf("[%llu] openat → fd=%d\n", nsecs / 1000000, args->ret);
+    printf("[%llu] openat -> fd=%d\n", nsecs / 1000000, args->ret);
     delete(@opening[tid]);
 }
 
@@ -45,7 +45,7 @@ tracepoint:syscalls:sys_enter_write
 {
     @write_start[tid] = nsecs;
     @write_bytes[tid] = args->count;
-    printf("[%llu] write(%d bytes) → TPM command sent\n",
+    printf("[%llu] write(%d bytes) -> TPM command sent\n",
            nsecs / 1000000, (uint32)args->count);
 }
 
@@ -83,15 +83,13 @@ tracepoint:syscalls:sys_enter_futex
 }
 
 tracepoint:syscalls:sys_exit_futex
-/@futex_start[tid] && (nsecs - @futex_start[tid]) > 1000000000/  // > 1s
-{
-    printf("[%llu] LONG futex wait: %llu ms (tid=%d) — Go runtime park or mutex\n",
-           nsecs / 1000000, (nsecs - @futex_start[tid]) / 1000000, tid);
-    delete(@futex_start[tid]);
-}
-tracepoint:syscalls:sys_exit_futex
 /@futex_start[tid]/
 {
+    $elapsed = (nsecs - @futex_start[tid]) / 1000000;
+    if ($elapsed > 1000) {
+        printf("[%llu] LONG futex wait: %llu ms (tid=%d) -- Go runtime park or mutex\n",
+               nsecs / 1000000, $elapsed, tid);
+    }
     delete(@futex_start[tid]);
 }
 
