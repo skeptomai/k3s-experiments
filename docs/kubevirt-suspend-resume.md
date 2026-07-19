@@ -62,14 +62,17 @@ kubectl delete -f manifests/kubevirt/kubevirt-operator.yaml
 This removes the virt-operator deployment, RBAC, the `kubevirts.kubevirt.io` CRD, and
 the `kubevirt` namespace.
 
-**Verify nothing remains:**
+**Verify nothing remains — do not skip this:**
 
 ```
 kubectl get crd | grep kubevirt
 kubectl get ns kubevirt
 ```
 
-Both should return empty / not found.
+Both must return empty / not found. KubeVirt installs resources dynamically at runtime
+that are not listed in any manifest file. The only way to confirm they are gone is to
+check directly. Do not assume the operator cleaned up everything just because the pods
+are gone.
 
 ## Fallback: operator was Pending
 
