@@ -23,17 +23,20 @@ Infineon SLB9672 datasheet is explicit: *"Pre-generation of Primary and Derived 
 are not supported because their generation depends on caller-provided data."*). Every
 call is a full on-chip RSA key generation.
 
-On hardware where RSA primary key generation is slow, three calls compound:
-
-| Hardware | Per CreatePrimary | 3× cost | Total attestation |
-|---|---|---|---|
-| Nuvoton NPCT75x | ~8s | ~24s | ~27s |
-| Infineon SLB9672 | ~10s | ~30s | ~34s |
-| Infineon SLB9672 (degraded) | ~24s | ~72s | ~76s |
-
-This was measured with bpftrace on `/dev/tpmrm0`. Three consecutive 99-byte writes, each
-blocking inside the kernel `write()` syscall for ~24 seconds, produced 490-byte RSA
+On hardware where RSA primary key generation is slow, three calls compound. We measured
+the call count and per-call cost with bpftrace on `/dev/tpmrm0`: three consecutive
+99-byte writes, each blocking inside the kernel `write()` syscall, produced 490-byte RSA
 public key responses. Everything else in the attestation completes in under 300ms.
+
+| Hardware | Per CreatePrimary | 3× cost |
+|---|---|---|
+| Nuvoton NPCT75x | ~8s | ~24s |
+| Infineon SLB9672 (normal) | ~9–10s | ~27–30s |
+| Infineon SLB9672 (degraded¹) | ~24s | ~72s |
+
+¹ A mystery persistent handle (0x81000002) was present on the test node, causing
+degraded CreatePrimary times. Evicting it restored normal ~9s times. This is a separate
+issue; the redundant calls are the concern here regardless of per-call cost.
 
 Since all three calls use the same template and the same SRK password within a session,
 they can share a single SRK context. `tpm2.Load()` children are independent of their
@@ -286,8 +289,10 @@ other callers are unaffected.
       tests pass with the new code paths.
 - [ ] Ideally: add a test that counts CreatePrimary calls and asserts ≤2 (RSA DevID)
       or ≤3 (ECC DevID, including EK).
-- [ ] Benchmark attestation before/after on at least two chip types and include
-      timings in the PR description.
+- [ ] Measure attestation time before/after on at least two chip types with the
+      same node state (no confounding handle evictions between runs). The expected
+      improvement is 3× CreatePrimary → 1× for RSA DevIDs, but end-to-end timing
+      is dominated by CreatePrimary cost which varies by chip and health state.
 
 ---
 
@@ -320,7 +325,9 @@ ssh root@192.168.89.2 "pelagos image tag <sha> localhost:5004/spire-agent:patche
 
 **Deploy to ipc9 only for testing** — add an override annotation or use a separate
 DaemonSet with a nodeSelector targeting only ipc9. Measure attestation time before
-deleting the pod and after it restarts. Compare to the pre-patch 76s baseline (now
-~27s post-handle-eviction; patch should bring it to ~9–10s).
+deleting the pod and after it restarts. Note: a clean before/after requires the
+same TPM state on both runs — any handle eviction between runs will confound
+the timing. The patch was validated as correct on Infineon SLB9672 (ipc9);
+a controlled timing comparison still needs to be done.
 
 **Revert:** restore the original image tag in agent-daemonset.yaml and re-apply.
