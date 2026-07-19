@@ -195,7 +195,6 @@ func NewSession(scfg *SessionConfig) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot create owner SRK: %w", err)
 	}
-	defer tpm.flushContext(devIDSRKHandle)
 
 	// Load DevID under the shared SRK.
 	tpm.devID, err = tpm.loadKeyWithSRK(
@@ -204,11 +203,13 @@ func NewSession(scfg *SessionConfig) (*Session, error) {
 		srkPassword, scfg.Passwords.DevIDKey,
 	)
 	if err != nil {
+		tpm.flushContext(devIDSRKHandle)
 		return nil, fmt.Errorf("cannot load DevID key on TPM: %w", err)
 	}
 
 	akPassword, err := newRandomPassword()
 	if err != nil {
+		tpm.flushContext(devIDSRKHandle)
 		return nil, fmt.Errorf("cannot generate random password for attestation key: %w", err)
 	}
 
@@ -224,13 +225,17 @@ func NewSession(scfg *SessionConfig) (*Session, error) {
 			SRKTemplateHighRSA(),
 		)
 		if err != nil {
+			tpm.flushContext(devIDSRKHandle)
 			return nil, fmt.Errorf("cannot create RSA SRK for attestation key: %w", err)
 		}
-		defer tpm.flushContext(akSRKHandle)
 	}
 
 	akPriv, akPub, err := tpm.createAttestationKeyWithSRK(akSRKHandle, srkPassword, akPassword)
 	if err != nil {
+		tpm.flushContext(devIDSRKHandle)
+		if akSRKHandle != devIDSRKHandle {
+			tpm.flushContext(akSRKHandle)
+		}
 		return nil, fmt.Errorf("cannot create attestation key: %w", err)
 	}
 	tpm.akPub = akPub
@@ -240,6 +245,12 @@ func NewSession(scfg *SessionConfig) (*Session, error) {
 		akSRKHandle,
 		srkPassword, akPassword,
 	)
+	// SRK(s) no longer needed — flush before creating EK to stay within the
+	// TPM's transient object limit (3 slots on Infineon SLB9672).
+	tpm.flushContext(devIDSRKHandle)
+	if akSRKHandle != devIDSRKHandle {
+		tpm.flushContext(akSRKHandle)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("cannot load attestation key: %w", err)
 	}

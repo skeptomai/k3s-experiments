@@ -51,6 +51,12 @@ spec:
           hostPath:
             path: /usr/local/bin/pelagos
             type: File
+        # pelagos layer/state store — required for nested `pelagos build` to
+        # pull FROM images and store intermediate layers (repro-nested-build.sh)
+        - name: pelagos-store
+          hostPath:
+            path: /var/lib/pelagos
+            type: Directory
 
       initContainers:
         - name: clone-and-build
@@ -65,7 +71,7 @@ spec:
                 /tmp/spire/pkg/agent/plugin/nodeattestor/tpmdevid/tpmutil/session.go
               cd /tmp/spire
               CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-                go build -trimpath -o /workspace/spire-agent ./cmd/agent
+                go build -trimpath -o /workspace/spire-agent ./cmd/spire-agent
               echo "build complete, binary size: $(du -sh /workspace/spire-agent)"
           volumeMounts:
             - name: workspace
@@ -76,10 +82,10 @@ spec:
           resources:
             requests:
               cpu: "2"
-              memory: "2Gi"
+              memory: "4Gi"
             limits:
               cpu: "4"
-              memory: "4Gi"
+              memory: "8Gi"
 
         - name: stage-remfile
           image: busybox:1.36
@@ -111,6 +117,8 @@ spec:
               mountPath: /workspace
             - name: pelagos-bin
               mountPath: /pelagos
+            - name: pelagos-store
+              mountPath: /var/lib/pelagos
           resources:
             requests:
               cpu: "1"

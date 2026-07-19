@@ -74,6 +74,7 @@ spec:
       containers:
         - name: spire-agent
           image: 192.168.89.2:5004/spire-agent:patched
+          imagePullPolicy: Always
           args: ["-config", "/run/spire/config/agent.conf"]
           securityContext:
             privileged: true
