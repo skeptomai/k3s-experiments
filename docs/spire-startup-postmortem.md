@@ -169,16 +169,51 @@ have created background crypto coprocessor contention that competed with CreateP
 We do not have a datasheet explanation for the exact mechanism; the improvement is
 empirical.
 
-ipc9's attestation time after eviction: ~27s (1 CreatePrimary × 9s + other ops).
-This is now in the same range as ipc8 (~34s).
-
 **The handle has been permanently evicted.** `scripts/provision-tpm-devid.sh` does
 not create anything at this address, so it will not return on reinstall.
+
+**Correction (2026-07-19, controlled trials):** The 9s per-call times observed
+immediately after eviction did not persist. Subsequent controlled trials (see below)
+show ipc9's CreatePrimary still takes ~24s per call. The eviction test data showing
+9s was transient — likely the chip was still in a warm state from the just-completed
+eviction operation. The eviction did not fix the underlying slowness.
+
+### Controlled trial results (2026-07-19)
+
+An 8-trial controlled experiment was run to measure the impact of the SRK-reuse patch
+(see `docs/drafts/spire-tpmdevid-persist-srk.md` and `experiments/28-spire-tpmdevid-patch/`).
+
+**Controls:** ipc9 isolated via nodeAffinity (production DaemonSet excluded), taint to
+prevent other scheduling, TPM handles verified before and after every trial, 60s cooldown
+between trials.
+
+**Interleaved timing results (trials 1–6):**
+
+| Trial | Variant | Duration |
+|---|---|---|
+| 1 | unpatched | 77s |
+| 2 | patched | 28s |
+| 3 | unpatched | 153s |
+| 4 | patched | 28s |
+| 5 | unpatched | 77s |
+| 6 | patched | 28s |
+
+**bpftrace call-count confirmation (trials 7–8):**
+
+| Trial | Variant | write(99 bytes) calls | Duration each |
+|---|---|---|---|
+| 7 | unpatched | 3 | 24,294ms / 24,353ms / 24,400ms |
+| 8 | patched | 1 | 24,300ms |
+
+The unpatched per-call time (~24s) is unchanged from the original trace. The eviction
+did not affect it. The patch reduces calls from 3 to 1, giving a consistent 28s
+attestation time. The 153s outlier in trial 3 shows per-call time is variable on this
+chip; that variance compounds with 3 calls but is absorbed by a single call.
 
 ### Remaining investigation
 
 1. Run the same bpftrace on ipc8 to confirm its CreatePrimary time is ~10s and
    understand the 34s vs 27s gap between the two Infineon nodes.
-2. Patch SPIRE's `tpm_devid` plugin to reuse a single SRK across the three
-   owner-hierarchy operations in `NewSession()`, reducing CreatePrimary from 3 calls
-   to 1. Draft in `docs/drafts/spire-tpmdevid-persist-srk.md`.
+2. ~~Patch SPIRE's `tpm_devid` plugin~~ — **DONE.** Patch reduces CreatePrimary from
+   3 calls to 1 for RSA DevIDs. Proven correct and effective. Draft upstream issue +
+   patch in `docs/drafts/spire-tpmdevid-persist-srk.md`. Not yet filed.
