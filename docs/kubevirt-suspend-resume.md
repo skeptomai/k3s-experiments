@@ -113,6 +113,28 @@ reinstalls all 18 dynamic CRDs, virt-api, virt-controller, the virt-handler Daem
 and the 119 built-in instance type/preference objects. Operator startup takes ~30s;
 full component rollout another ~60s.
 
+## Operator lifecycle pattern — applies beyond KubeVirt
+
+KubeVirt uses a common operator pattern: a CR with a finalizer gates all dynamic
+installation and uninstall. The operator manifest ships the minimum needed to get the
+operator running (its own deployment, RBAC, and one CRD). Everything else — additional
+CRDs, deployments, webhooks, built-in objects — is installed by the operator at runtime
+when it reconciles the CR.
+
+This means:
+- Static manifests do not reflect the full cluster footprint of an operator.
+- Uninstall only works cleanly if the operator is healthy enough to process its CR's
+  finalizer. A Pending or CrashLooping operator leaves all dynamically-installed
+  resources orphaned when you delete the CR.
+- After any operator removal, verify with `kubectl get crd | grep <operator-domain>`
+  and `kubectl get all -n <operator-namespace>`. Do not assume pods disappearing means
+  everything is gone.
+
+Other operators in this cluster that follow the same pattern and carry the same risk:
+cert-manager, Vault (Raft cluster init), and any Flux HelmRelease-managed operator that
+installs CRDs via a hook. The gap between "pods gone" and "cluster fully clean" varies
+by operator but is never zero.
+
 ## What is preserved vs removed
 
 | Item | Suspend removes? | Resume restores? |
