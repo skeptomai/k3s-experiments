@@ -28,6 +28,21 @@ done
 echo "    All 6 nodes Ready."
 
 echo ""
+echo "==> Restarting pelagos-cri on all nodes to clear stale overlay state from power cut..."
+SSH="ssh -i /root/.ssh/id_rsa -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+declare -A NODE_IP=(
+    [ipc4]=192.168.88.55 [ipc5]=192.168.88.56 [ipc6]=192.168.88.57
+    [ipc7]=192.168.88.63 [ipc8]=192.168.88.64 [ipc9]=192.168.88.65
+)
+for node in $ALL_NODES; do
+    echo "    restarting pelagos-cri on $node"
+    $SSH "cb@${NODE_IP[$node]}" sudo systemctl restart pelagos-cri \
+        || echo "    WARNING: failed to restart pelagos-cri on $node"
+done
+echo "    Waiting 10s for CRI to settle..."
+sleep 10
+
+echo ""
 echo "==> Uncordoning all nodes..."
 for node in $ALL_NODES; do
     echo "    uncordoning $node"
