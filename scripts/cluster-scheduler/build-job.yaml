@@ -1,0 +1,85 @@
+---
+# Builds the cluster-scheduler image on the cluster using pelagos build.
+#
+# What it does:
+#   1. init/stage-context: copies all scripts + Remfile from ConfigMap into workspace.
+#   2. build-and-push: alpine container with pelagos binary + store mounted from ipc4.
+#      Runs `pelagos build` then `pelagos image push` to 192.168.89.2:5004.
+#
+# Prerequisites:
+#   kubectl create configmap cluster-scheduler-build-ctx \
+#     --from-file=scripts/cluster-scheduler/ --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f scripts/cluster-scheduler/build-job.yaml
+#
+# After a successful run refresh on nazgul:
+#   pelagos image rm localhost:5004/cluster-scheduler:latest
+#   pelagos image pull --insecure localhost:5004/cluster-scheduler:latest
+#
+# Pinned to ipc4 so the pelagos hostPath mount is consistent.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cluster-scheduler-build
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: ipc4
+
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: context
+          configMap:
+            name: cluster-scheduler-build-ctx
+        - name: pelagos-bin
+          hostPath:
+            path: /usr/local/bin/pelagos
+            type: File
+        - name: pelagos-store
+          hostPath:
+            path: /var/lib/pelagos
+            type: Directory
+
+      initContainers:
+        - name: stage-context
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "cp /ctx/* /workspace/ && ls -la /workspace/"]
+          volumeMounts:
+            - name: context
+              mountPath: /ctx
+              readOnly: true
+            - name: workspace
+              mountPath: /workspace
+
+      containers:
+        - name: build-and-push
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eux
+              /pelagos build \
+                --tag 192.168.89.2:5004/cluster-scheduler:latest \
+                --network host \
+                /workspace
+              /pelagos image push --insecure 192.168.89.2:5004/cluster-scheduler:latest
+              echo "pushed: 192.168.89.2:5004/cluster-scheduler:latest"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: pelagos-bin
+              mountPath: /pelagos
+            - name: pelagos-store
+              mountPath: /var/lib/pelagos
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
