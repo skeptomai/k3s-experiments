@@ -2,13 +2,11 @@
 # Builds the cluster-scheduler image on the cluster using pelagos build.
 #
 # What it does:
-#   1. init/stage-context: copies all scripts + Remfile from ConfigMap into workspace.
+#   1. init/clone: git clones k3s-experiments (depth 1) into workspace.
 #   2. build-and-push: alpine container with pelagos binary + store mounted from ipc4.
-#      Runs `pelagos build` then `pelagos image push` to 192.168.89.2:5004.
+#      Runs `pelagos build` on scripts/cluster-scheduler/ then `pelagos image push`.
 #
-# Prerequisites:
-#   kubectl create configmap cluster-scheduler-build-ctx \
-#     --from-file=scripts/cluster-scheduler/ --dry-run=client -o yaml | kubectl apply -f -
+# Usage:
 #   kubectl apply -f scripts/cluster-scheduler/build-job.yaml
 #
 # After a successful run refresh on nazgul:
@@ -34,9 +32,6 @@ spec:
       volumes:
         - name: workspace
           emptyDir: {}
-        - name: context
-          configMap:
-            name: cluster-scheduler-build-ctx
         - name: pelagos-bin
           hostPath:
             path: /usr/local/bin/pelagos
@@ -47,13 +42,15 @@ spec:
             type: Directory
 
       initContainers:
-        - name: stage-context
-          image: busybox:1.36
-          command: ["/bin/sh", "-c", "cp /ctx/* /workspace/ && ls -la /workspace/"]
+        - name: clone
+          image: alpine/git:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              git clone --depth 1 https://github.com/skeptomai/k3s-experiments /workspace/repo
+              echo "cloned, context at /workspace/repo/scripts/cluster-scheduler/"
+              ls /workspace/repo/scripts/cluster-scheduler/
           volumeMounts:
-            - name: context
-              mountPath: /ctx
-              readOnly: true
             - name: workspace
               mountPath: /workspace
 
@@ -67,7 +64,7 @@ spec:
               /pelagos build \
                 --tag 192.168.89.2:5004/cluster-scheduler:latest \
                 --network host \
-                /workspace
+                /workspace/repo/scripts/cluster-scheduler
               /pelagos image push --insecure 192.168.89.2:5004/cluster-scheduler:latest
               echo "pushed: 192.168.89.2:5004/cluster-scheduler:latest"
           securityContext:
