@@ -10,7 +10,7 @@ RUN curl -sLo /usr/local/bin/kubectl \
         "https://dl.k8s.io/release/v1.35.2/bin/linux/amd64/kubectl" && \
     chmod +x /usr/local/bin/kubectl
 
-RUN pip install --no-cache-dir python-kasa
+RUN pip install --no-cache-dir python-kasa tzdata
 
 WORKDIR /scripts
 

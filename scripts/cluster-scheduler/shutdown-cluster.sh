@@ -47,6 +47,10 @@ for node in $CONTROL_PLANE_SECONDARY; do
 done
 
 echo ""
+echo "==> Removing KubeVirt PodDisruptionBudgets (recreated by virt-operator on restart)..."
+kubectl delete pdb -n kubevirt --all --ignore-not-found
+
+echo ""
 echo "==> Draining seed control-plane (ipc4)..."
 kubectl drain "$CONTROL_PLANE_SEED" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
 
