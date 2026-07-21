@@ -49,7 +49,7 @@ changes immediately. On this cluster, those controllers are:
 |-----------|------|-------|
 | KubeVirt | 12 | virt-operator, virt-api, virt-controller, virt-handler ×6; watches 19 CRD types |
 | SPIRE | 7 | server + agents + controllers |
-| Monitoring | 7 | Prometheus, Grafana, Alertmanager |
+| Monitoring | 7 | kube-state-metrics + node-exporter ×6 (Prometheus/Grafana/Alertmanager run on nazgul, not in cluster) |
 | MetalLB | 7 | controller + speaker per node |
 | kube-system | 7 | Traefik, CoreDNS, kube-vip, etc. |
 | Flux | 4 | source/kustomize/helm/notification controllers |
@@ -117,7 +117,7 @@ The intuition that "empty CRDs don't cost anything" is only partially right.
 - CPU for event dispatch — zero events dispatched if nothing is changing.
 - etcd storage — only stores actual objects.
 
-### The current picture (86 registered resource types)
+### The picture at time of investigation (85 CRDs, KubeVirt installed, ipc5 held VIP)
 
 52 types have actual objects; 34 are zero. The goroutine cost is identical for both
 groups. The 34 empty ones are all overhead with no current benefit — they exist only
