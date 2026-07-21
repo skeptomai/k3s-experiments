@@ -50,4 +50,16 @@ for node in $ALL_NODES; do
 done
 
 echo ""
+echo "==> Recycling SPIRE agent pods to force fresh bootstrap bundle fetch..."
+# SPIRE CA rotates every ~12h. Agent pod objects persist across power cycles and the
+# init container (which fetches the trust bundle) only runs once per pod creation.
+# After one or more CA rotations, the stale bootstrap bundle causes TLS handshake
+# failure on reconnect. Deleting pods here is cheap: init container takes <30s.
+kubectl delete pods -n spire -l app=spire-agent --ignore-not-found
+echo "    Waiting 45s for SPIRE agents to re-attest..."
+sleep 45
+SPIRE_READY=$(kubectl get pods -n spire -l app=spire-agent --no-headers 2>/dev/null | grep -c "1/1" || true)
+echo "    $SPIRE_READY/6 SPIRE agents Ready"
+
+echo ""
 echo "==> [$(date)] Done. Cluster is up and scheduling. Alerts resume at 05:30."
