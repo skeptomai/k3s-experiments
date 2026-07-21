@@ -189,45 +189,70 @@ If the overhead is genuinely a concern, the only lever is uninstalling component
 actively in use. KubeVirt is the heaviest single contributor if VMs are not currently
 needed.
 
-## Baseline: KubeVirt suspended (2026-07-20)
+## Controlled A/B: KubeVirt cost (2026-07-20)
 
-KubeVirt was subsequently suspended (Flux kustomization suspended, all pods and CRDs
-removed, namespace deleted). Measurements taken with gruesome + Vault (3 pods) running
-— the same application workload as the original investigation.
+Proper before/after taken on the same day with ipc4 holding the VIP in both cases,
+same application workload (gruesome + Vault). KubeVirt suspended first, measurements
+taken, KubeVirt resumed, measurements taken again after all 12 pods reached Ready and
+watch connections stabilised.
 
-| Node | Goroutines | Heap | Notes |
-|------|-----------|------|-------|
-| ipc4 | 8,422 | ~557 MB | **holds VIP** |
-| ipc5 | 3,878 | ~358 MB | |
-| ipc6 | 5,188 | ~502 MB | |
-| **Total WATCH connections (cluster)** | **307** | | |
+### Per-node goroutines and memory
 
-### Comparison caveats
+| Node | Without KubeVirt | With KubeVirt | Δ goroutines | Δ heap |
+|------|-----------------|---------------|-------------|--------|
+| ipc4 **(VIP)** | 8,423 / 638 MB heap / 67 MB stack | 9,852 / 746 MB heap / 73 MB stack | +1,429 (+17%) | +108 MB (+17%) |
+| ipc5 | 3,876 / 387 MB heap / 28 MB stack | 5,004 / 693 MB heap / 34 MB stack | +1,128 (+29%) | +306 MB (+79%) |
+| ipc6 | 5,178 / 469 MB heap / 40 MB stack | 5,686 / 592 MB heap / 43 MB stack | +508 (+10%) | +123 MB (+26%) |
 
-This is not a perfectly controlled A/B. Two variables changed between measurements:
+Note: goroutine stacks are separate from heap in Go. The heap is dominated by the API
+server's watch cache ring buffers, not goroutine stacks (stacks are ~65–73 MB; heap
+is 469–746 MB).
 
-1. **VIP holder shifted.** The original measurement caught ipc5 holding the VIP
-   (11,013 goroutines, 444 watches). Now ipc4 holds it (8,422 goroutines). The VIP
-   holder always carries ~2× the watch load of the others; comparing the VIP-holder
-   role between measurements is directionally valid but not node-identical.
+### Cluster-wide metrics
 
-2. **Old measurement captured only one node's watch count.** The 444 was ipc5 alone.
-   The current 307 is the cluster-wide total. These are not the same metric.
+| Metric | Without KubeVirt | With KubeVirt | Δ |
+|--------|-----------------|---------------|---|
+| CRDs | 66 | 85 | +19 |
+| Registered storage types (`apiserver_storage_objects`) | 122 | 141 | +19 |
+| Total WATCH connections | 307 | 384 | +77 (+25%) |
+| Infrastructure pods | 42 | 54 | +12 |
+| Admission webhooks | 2 (cert-manager, MetalLB) | 5 (+virt-api-validator 22 rules, virt-operator-validator 3 rules, virt-api-mutator 4 rules) | +3 |
+| etcd in-use storage | 8.7 MB | 16.8 MB | +8.1 MB |
+| etcd total allocated | 35.8 MB | 35.8 MB | 0 (bolt doesn't shrink) |
+| etcd proposals pending | 0 | 0 | — |
 
-### What the numbers do show
+### What drives each number
 
-- VIP-holder goroutines dropped from ~11,000 to ~8,400 (~24%) with KubeVirt removed.
-- VIP-holder heap dropped from ~652 MB to ~557 MB (~15%).
-- Non-VIP nodes dropped from ~5,500–6,300 goroutines to ~3,900–5,200.
-- The cluster-wide watch total (307) is plausibly lower than the old per-node VIP count
-  (444 on ipc5 alone), suggesting KubeVirt's 19 CRDs and 12 pods were responsible for
-  a meaningful fraction of the watch load — but a precise delta requires re-running the
-  original measurement with KubeVirt installed, which was not done.
+- **+19 CRDs / +19 storage types**: KubeVirt's full virtualization API surface, registered
+  whether or not any VMs exist.
+- **+77 WATCH connections**: each of the 12 KubeVirt pods opens watches on most of the 19
+  CRD types; virt-handler × 6 nodes contributes significantly here even though per-pod
+  watch count is low.
+- **+8.1 MB etcd in-use**: the 119 built-in VM instance type and preference objects
+  KubeVirt installs automatically (`virtualmachineclusterinstancetypes` × 65,
+  `virtualmachineclusterpreferences` × 54). These are stored in etcd and loaded into
+  the watch cache of every KubeVirt controller.
+- **+3 admission webhooks**: virt-api adds 22-rule validating + 4-rule mutating webhooks;
+  any API call touching a covered resource goes through virt-api. These add admission
+  latency to VM operations but are not in the critical path for non-VM workloads.
+- **Heap growth is uneven across nodes**: ipc5's heap grew +79% despite not holding the
+  VIP. This reflects Go's lazy GC — the allocator sits at a new high watermark until
+  memory pressure forces collection. The absolute numbers should not be compared across
+  nodes at different times; the delta is what matters.
 
-### Honest conclusion on KubeVirt overhead
+### KubeVirt cost summary
 
-KubeVirt removal produced a measurable reduction in goroutines and heap on all nodes.
-The reduction is real but modest relative to the total platform baseline — the cluster
-still runs 54 infrastructure pods across the remaining operators (SPIRE, Flux, Vault,
-MetalLB, monitoring, cert-manager, Tailscale, Traefik). KubeVirt was the heaviest
-single component but not the majority of the load.
+| Resource | KubeVirt cost |
+|----------|--------------|
+| Goroutines (VIP holder) | +1,429 (+17%) |
+| Heap (VIP holder) | +108 MB (+17%) |
+| WATCH connections | +77 (+25%) |
+| etcd storage in use | +8.1 MB |
+| Infrastructure pods | +12 |
+| Admission webhooks | +3 (29 rules total) |
+| CRDs | +19 |
+
+KubeVirt is the single largest operator overhead on this cluster. Suspending it when
+no VMs are running is a meaningful reduction — but the remaining platform (SPIRE, Flux,
+Vault, MetalLB, monitoring, cert-manager, Tailscale, Traefik) still accounts for the
+majority of baseline load.
