@@ -188,3 +188,46 @@ controllers require.
 If the overhead is genuinely a concern, the only lever is uninstalling components not
 actively in use. KubeVirt is the heaviest single contributor if VMs are not currently
 needed.
+
+## Baseline: KubeVirt suspended (2026-07-20)
+
+KubeVirt was subsequently suspended (Flux kustomization suspended, all pods and CRDs
+removed, namespace deleted). Measurements taken with gruesome + Vault (3 pods) running
+— the same application workload as the original investigation.
+
+| Node | Goroutines | Heap | Notes |
+|------|-----------|------|-------|
+| ipc4 | 8,422 | ~557 MB | **holds VIP** |
+| ipc5 | 3,878 | ~358 MB | |
+| ipc6 | 5,188 | ~502 MB | |
+| **Total WATCH connections (cluster)** | **307** | | |
+
+### Comparison caveats
+
+This is not a perfectly controlled A/B. Two variables changed between measurements:
+
+1. **VIP holder shifted.** The original measurement caught ipc5 holding the VIP
+   (11,013 goroutines, 444 watches). Now ipc4 holds it (8,422 goroutines). The VIP
+   holder always carries ~2× the watch load of the others; comparing the VIP-holder
+   role between measurements is directionally valid but not node-identical.
+
+2. **Old measurement captured only one node's watch count.** The 444 was ipc5 alone.
+   The current 307 is the cluster-wide total. These are not the same metric.
+
+### What the numbers do show
+
+- VIP-holder goroutines dropped from ~11,000 to ~8,400 (~24%) with KubeVirt removed.
+- VIP-holder heap dropped from ~652 MB to ~557 MB (~15%).
+- Non-VIP nodes dropped from ~5,500–6,300 goroutines to ~3,900–5,200.
+- The cluster-wide watch total (307) is plausibly lower than the old per-node VIP count
+  (444 on ipc5 alone), suggesting KubeVirt's 19 CRDs and 12 pods were responsible for
+  a meaningful fraction of the watch load — but a precise delta requires re-running the
+  original measurement with KubeVirt installed, which was not done.
+
+### Honest conclusion on KubeVirt overhead
+
+KubeVirt removal produced a measurable reduction in goroutines and heap on all nodes.
+The reduction is real but modest relative to the total platform baseline — the cluster
+still runs 54 infrastructure pods across the remaining operators (SPIRE, Flux, Vault,
+MetalLB, monitoring, cert-manager, Tailscale, Traefik). KubeVirt was the heaviest
+single component but not the majority of the load.
