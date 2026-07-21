@@ -33,6 +33,10 @@ for node in $ALL_NODES; do
 done
 
 echo ""
+echo "==> Removing KubeVirt PodDisruptionBudgets before drain (recreated by virt-operator on restart)..."
+kubectl delete pdb -n kubevirt --all --ignore-not-found 2>/dev/null || true
+
+echo ""
 echo "==> Draining worker nodes..."
 for node in $WORKERS; do
     echo "    draining $node"
@@ -45,10 +49,6 @@ for node in $CONTROL_PLANE_SECONDARY; do
     echo "    draining $node"
     kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
 done
-
-echo ""
-echo "==> Removing KubeVirt PodDisruptionBudgets (recreated by virt-operator on restart)..."
-kubectl delete pdb -n kubevirt --all --ignore-not-found
 
 echo ""
 echo "==> Draining seed control-plane (ipc4)..."
