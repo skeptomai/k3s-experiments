@@ -141,6 +141,10 @@ echo "$REGISTRIES_CONFIG" | sudo tee /etc/pelagos/registries.toml >/dev/null
 echo "Registries config written:"
 sudo cat /etc/pelagos/registries.toml
 
+echo "--- Stopping $K3S_SERVICE before CRI restart (prevents container process orphaning) ---"
+sudo systemctl stop "$K3S_SERVICE" || true
+sleep 3
+
 echo "--- Enabling and starting pelagos-cri ---"
 sudo systemctl daemon-reload
 sudo systemctl enable pelagos-cri
@@ -148,8 +152,8 @@ sudo systemctl restart pelagos-cri
 sleep 5
 sudo systemctl is-active pelagos-cri
 
-echo "--- Restarting $K3S_SERVICE ---"
-sudo systemctl restart "$K3S_SERVICE"
+echo "--- Starting $K3S_SERVICE ---"
+sudo systemctl start "$K3S_SERVICE"
 
 pelagos --version
 echo "Done"
