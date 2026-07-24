@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-scraping
+  namespace: flux-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}       # any in-cluster pod (original intent)
+        - ipBlock:
+            cidr: 192.168.88.0/23    # LAN nodes (.88.x) + nazgul (.89.x)
+      ports:
+        - port: 8080
+          protocol: TCP
