@@ -1,0 +1,62 @@
+#!/usr/bin/bpftrace
+// Trace rpc-virtqemud forks, exec'd children, and their exit codes.
+// Specifically catches the /etc/libvirt/hooks/qemu exit code.
+// Run as root on ipc8 BEFORE applying the VMI.
+
+BEGIN { printf("Watching virtqemud forks and hook exits...\n"); }
+
+// Track ALL forks from UID 107 processes
+tracepoint:sched:sched_process_fork
+/uid == 107/
+{
+    @all_children[args->child_pid] = args->parent_pid;
+    printf("[%llu] FORK pid=%d comm=%s -> child=%d\n",
+           elapsed/1000000, pid, comm, args->child_pid);
+}
+
+// Track exec - update comm tracking
+tracepoint:sched:sched_process_exec
+/uid == 107/
+{
+    if (@all_children[pid]) {
+        printf("[%llu] EXEC pid=%d comm=%s file=%s (parent=%d)\n",
+               elapsed/1000000, pid, comm, str(args->filename),
+               @all_children[pid]);
+    }
+}
+
+// Track exit_group calls from children (captures exit code for clean exits)
+tracepoint:syscalls:sys_enter_exit_group
+/uid == 107 && @all_children[pid]/
+{
+    printf("[%llu] EXIT_GROUP pid=%d comm=%s code=%d (parent=%d)\n",
+           elapsed/1000000, pid, comm, args->error_code,
+           @all_children[pid]);
+}
+
+// Track sched exit (catches signal-killed processes that didn't call exit)
+tracepoint:sched:sched_process_exit
+/uid == 107 && @all_children[pid]/
+{
+    printf("[%llu] SCHED_EXIT pid=%d comm=%s group_dead=%d (parent=%d)\n",
+           elapsed/1000000, pid, comm, args->group_dead,
+           @all_children[pid]);
+    delete(@all_children[pid]);
+}
+
+// Catch failed syscalls from children that have NOT yet exec'd (pre-exec phase)
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && @all_children[pid] && args->ret < 0/
+{
+    printf("[%llu] CHILD_FAIL pid=%d comm=%s syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, comm, args->id, args->ret);
+}
+
+// Catch writes to stderr from ALL UID=107 children
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && args->fd == 2 && @all_children[pid]/
+{
+    printf("[%llu] CHILD_STDERR pid=%d comm=%s: %s\n",
+           elapsed/1000000, pid, comm,
+           str(args->buf, args->count < 500 ? args->count : 500));
+}

@@ -1,0 +1,58 @@
+#!/usr/bin/bpftrace
+// Trace ALL failed syscalls from UID 107 (qemu) processes.
+// Catches the pre-exec child regardless of its comm/thread name.
+// Run as root on ipc8 BEFORE applying the VMI.
+
+BEGIN { printf("Watching UID=107 processes for failed syscalls...\n"); }
+
+// Track all forks from UID 107 processes
+tracepoint:sched:sched_process_fork
+/uid == 107/
+{
+    @children[args->child_pid] = args->parent_pid;
+    printf("[%llu] FORK pid=%d comm=%s -> child=%d\n",
+           elapsed/1000000, pid, comm, args->child_pid);
+}
+
+// Track exec in UID 107 children
+tracepoint:sched:sched_process_exec
+/uid == 107/
+{
+    printf("[%llu] EXEC pid=%d comm=%s file=%s\n",
+           elapsed/1000000, pid, comm, str(args->filename));
+    delete(@children[pid]);
+}
+
+// Catch ALL failed syscalls from UID 107 NON-exec'd children
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->ret < 0 && @children[pid]/
+{
+    printf("[%llu] CHILD_FAIL pid=%d comm=%s syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, comm, args->id, args->ret);
+}
+
+// Also catch ALL failed syscalls from any UID 107 process (wider net)
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->ret < 0 && args->ret != -11 && args->ret != -4/
+{
+    printf("[%llu] UID107_FAIL pid=%d comm=%s syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, comm, args->id, args->ret);
+}
+
+// Catch exit from UID 107 children (non-zero = failure)
+tracepoint:syscalls:sys_enter_exit_group
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] CHILD_EXIT pid=%d comm=%s status=%d\n",
+           elapsed/1000000, pid, comm, args->error_code);
+    delete(@children[pid]);
+}
+
+// Catch writes to stderr from UID 107 children
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && args->fd == 2 && @children[pid]/
+{
+    printf("[%llu] CHILD_STDERR pid=%d comm=%s: %s\n",
+           elapsed/1000000, pid, comm,
+           str(args->buf, args->count < 300 ? args->count : 300));
+}

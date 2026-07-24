@@ -1,0 +1,77 @@
+#!/usr/bin/bpftrace
+// Deep trace of virtqemud pre-exec children: capture last 20 syscalls per child.
+// This finds what the pre-exec child does right before exiting without exec'ing.
+// The previous run showed child exits cleanly (code=0) with 'access' as last syscall.
+// Run as root on ipc8 BEFORE applying the VMI.
+
+BEGIN { printf("Deep tracing virtqemud children...\n"); }
+
+tracepoint:sched:sched_process_fork
+/uid == 107/
+{
+    @children[args->child_pid] = args->parent_pid;
+    @idx[args->child_pid] = 0;
+    printf("[%llu] FORK pid=%d comm=%s -> child=%d\n",
+           elapsed/1000000, pid, comm, args->child_pid);
+}
+
+tracepoint:sched:sched_process_exec
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] EXEC pid=%d comm=%s file=%s PARENT=%d\n",
+           elapsed/1000000, pid, comm, str(args->filename), @children[pid]);
+    delete(@children[pid]);
+    delete(@idx[pid]);
+}
+
+// Record ALL syscall entries for tracked children (rolling ring of 20)
+tracepoint:raw_syscalls:sys_enter
+/uid == 107 && @children[pid]/
+{
+    $i = @idx[pid] % 20;
+    @ring[pid, $i] = args->id;
+    @idx[pid] = @idx[pid] + 1;
+}
+
+// Capture ALL failures (not just negative ret; also capture arg1 for context)
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && @children[pid] && args->ret < 0/
+{
+    printf("[%llu] CHILD_FAIL pid=%d comm=%s syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, comm, args->id, args->ret);
+}
+
+// Writes to stderr
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && args->fd == 2 && @children[pid]/
+{
+    printf("[%llu] CHILD_STDERR pid=%d: %s\n",
+           elapsed/1000000, pid,
+           str(args->buf, args->count < 400 ? args->count : 400));
+}
+
+// On exit: dump the ring buffer (last up to 20 syscalls)
+tracepoint:syscalls:sys_enter_exit_group
+/uid == 107 && @children[pid]/
+{
+    $n = @idx[pid] < 20 ? @idx[pid] : 20;
+    $start = @idx[pid] > 20 ? (@idx[pid] % 20) : 0;
+    printf("[%llu] EXIT_GROUP pid=%d comm=%s code=%d total_syscalls=%d ring=[",
+           elapsed/1000000, pid, comm, args->error_code, @idx[pid]);
+    printf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]\n",
+           @ring[pid,0], @ring[pid,1], @ring[pid,2], @ring[pid,3], @ring[pid,4],
+           @ring[pid,5], @ring[pid,6], @ring[pid,7], @ring[pid,8], @ring[pid,9],
+           @ring[pid,10], @ring[pid,11], @ring[pid,12], @ring[pid,13], @ring[pid,14],
+           @ring[pid,15], @ring[pid,16], @ring[pid,17], @ring[pid,18], @ring[pid,19]);
+    delete(@children[pid]);
+    delete(@idx[pid]);
+}
+
+tracepoint:sched:sched_process_exit
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] SCHED_EXIT pid=%d comm=%s group_dead=%d total_syscalls=%d\n",
+           elapsed/1000000, pid, comm, args->group_dead, @idx[pid]);
+    delete(@children[pid]);
+    delete(@idx[pid]);
+}

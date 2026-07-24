@@ -1,0 +1,57 @@
+#!/usr/bin/bpftrace
+// Trace virtqemud's fork+pre-exec children to find why they fail before execve.
+// The pre-exec child has comm="virtqemud" until it either execs or fails+exits.
+// Run as root BEFORE applying the VMI.
+
+BEGIN { printf("Watching for virtqemud forks...\n"); }
+
+// Track when virtqemud forks a child
+tracepoint:sched:sched_process_fork
+/comm == "virtqemud"/
+{
+    @virtqemud_children[args->child_pid] = 1;
+    printf("[%llu] FORK pid=%d -> child=%d\n", elapsed/1000000, pid, args->child_pid);
+}
+
+// Watch all failed syscalls from virtqemud children (pre-exec helpers)
+tracepoint:raw_syscalls:sys_exit
+/comm == "virtqemud" && args->ret < 0 && @virtqemud_children[pid]/
+{
+    printf("[%llu] PREEXEC_FAIL pid=%d syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, args->id, args->ret);
+}
+
+// Watch for virtqemud children calling exit (failure path)
+tracepoint:syscalls:sys_enter_exit_group
+/comm == "virtqemud" && @virtqemud_children[pid]/
+{
+    printf("[%llu] PREEXEC_EXIT pid=%d status=%d\n",
+           elapsed/1000000, pid, args->error_code);
+    delete(@virtqemud_children[pid]);
+}
+
+// Watch for virtqemud children exec'ing (success path)
+tracepoint:sched:sched_process_exec
+/@virtqemud_children[pid]/
+{
+    printf("[%llu] PREEXEC_EXEC pid=%d (became qemu-kvm)\n", elapsed/1000000, pid);
+    delete(@virtqemud_children[pid]);
+}
+
+// Watch virtqemud's own writes to stderr (fd=2) for error messages
+tracepoint:syscalls:sys_enter_write
+/comm == "virtqemud" && args->fd == 2 && !@virtqemud_children[pid]/
+{
+    printf("[%llu] VIRTQEMUD_STDERR pid=%d: %s\n",
+           elapsed/1000000, pid,
+           str(args->buf, args->count < 400 ? args->count : 400));
+}
+
+// Also trace writes from pre-exec child (it might write errors somewhere)
+tracepoint:syscalls:sys_enter_write
+/comm == "virtqemud" && @virtqemud_children[pid]/
+{
+    printf("[%llu] PREEXEC_WRITE fd=%d pid=%d: %s\n",
+           elapsed/1000000, args->fd, pid,
+           str(args->buf, args->count < 200 ? args->count : 200));
+}

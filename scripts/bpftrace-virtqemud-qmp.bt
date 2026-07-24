@@ -1,0 +1,148 @@
+#!/usr/bin/bpftrace
+// Trace virtqemud's socket operations around domain creation.
+// Specifically captures: socketpair, socket, connect, accept, close,
+// write/read failures, and any process exits from the qemu user (UID=107).
+//
+// Run on ipc8 BEFORE applying the VMI. Keep running through domain creation.
+// The QMP failure "libvirtd quit during handshake" should appear as a
+// close() or error on a socket fd within virtqemud during domain creation.
+
+BEGIN { printf("Tracing virtqemud socket ops for UID=107...\n"); }
+
+// Track all UID=107 processes (virtqemud, virtlogd, qemu-kvm)
+tracepoint:sched:sched_process_exec
+/ uid == 107 /
+{
+    @track[pid] = 1;
+    printf("[%llu] EXEC pid=%d comm=%s file=%s\n",
+           elapsed/1000000, pid, comm, str(args->filename));
+}
+
+// Track children of UID=107 processes
+tracepoint:sched:sched_process_fork
+/ uid == 107 || @track[pid] == 1 /
+{
+    @track[args->child_pid] = 1;
+    @track[pid] = 1;
+}
+
+// socketpair(AF_UNIX, ...) - how virtqemud creates the QMP socket pair
+tracepoint:syscalls:sys_enter_socketpair
+/ @track[pid] == 1 /
+{
+    @spvec[tid] = args->usockvec;
+}
+
+tracepoint:syscalls:sys_exit_socketpair
+/ @track[pid] == 1 && args->ret == 0 /
+{
+    $sv = @spvec[tid];
+    printf("[%llu] SOCKETPAIR pid=%d comm=%s fds=[%d,%d]\n",
+           elapsed/1000000, pid, comm,
+           *(int32*)$sv, *(int32*)($sv + 4));
+    delete(@spvec[tid]);
+}
+
+tracepoint:syscalls:sys_exit_socketpair
+/ @track[pid] == 1 && args->ret != 0 /
+{
+    printf("[%llu] SOCKETPAIR_FAIL pid=%d comm=%s ret=%d\n",
+           elapsed/1000000, pid, comm, args->ret);
+    delete(@spvec[tid]);
+}
+
+// socket() calls
+tracepoint:syscalls:sys_enter_socket
+/ @track[pid] == 1 /
+{
+    @sdom[tid] = args->family;
+    @styp[tid] = args->type;
+}
+
+tracepoint:syscalls:sys_exit_socket
+/ @track[pid] == 1 /
+{
+    if (args->ret >= 0) {
+        printf("[%llu] SOCKET pid=%d comm=%s domain=%d type=%d fd=%d\n",
+               elapsed/1000000, pid, comm, @sdom[tid], @styp[tid], args->ret);
+    }
+    delete(@sdom[tid]);
+    delete(@styp[tid]);
+}
+
+// connect() calls - virtqemud connecting to QEMU's socket
+tracepoint:syscalls:sys_exit_connect
+/ @track[pid] == 1 /
+{
+    if (args->ret < 0) {
+        printf("[%llu] CONNECT_FAIL pid=%d comm=%s ret=%d\n",
+               elapsed/1000000, pid, comm, args->ret);
+    } else {
+        printf("[%llu] CONNECT_OK pid=%d comm=%s\n",
+               elapsed/1000000, pid, comm);
+    }
+}
+
+// accept() - QEMU accepting connection on QMP socket
+tracepoint:syscalls:sys_exit_accept4
+/ @track[pid] == 1 /
+{
+    if (args->ret >= 0) {
+        printf("[%llu] ACCEPT pid=%d comm=%s new_fd=%d\n",
+               elapsed/1000000, pid, comm, args->ret);
+    } else {
+        printf("[%llu] ACCEPT_FAIL pid=%d comm=%s ret=%d\n",
+               elapsed/1000000, pid, comm, args->ret);
+    }
+}
+
+// close() - track what fds are being closed (especially after QMP failure)
+tracepoint:syscalls:sys_enter_close
+/ @track[pid] == 1 /
+{
+    // Only log close on what appears to be socket-range fds (>= 4)
+    if (args->fd >= 4) {
+        printf("[%llu] CLOSE pid=%d comm=%s fd=%d\n",
+               elapsed/1000000, pid, comm, args->fd);
+    }
+}
+
+// write/read failures on any fd for UID=107
+tracepoint:syscalls:sys_exit_write
+/ @track[pid] == 1 && args->ret < 0 /
+{
+    printf("[%llu] WRITE_FAIL pid=%d comm=%s ret=%d\n",
+           elapsed/1000000, pid, comm, args->ret);
+}
+
+tracepoint:syscalls:sys_exit_read
+/ @track[pid] == 1 && args->ret < 0 /
+{
+    printf("[%llu] READ_FAIL pid=%d comm=%s ret=%d\n",
+           elapsed/1000000, pid, comm, args->ret);
+}
+
+// All stderr writes - catch virtqemud error messages
+tracepoint:syscalls:sys_enter_write
+/ @track[pid] == 1 && args->fd <= 2 /
+{
+    printf("[%llu] WRITE_STDERR pid=%d comm=%s fd=%d: %s\n",
+           elapsed/1000000, pid, comm, args->fd,
+           str(args->buf, args->count < 300 ? args->count : 300));
+}
+
+// Process exits
+tracepoint:sched:sched_process_exit
+/ @track[pid] == 1 /
+{
+    printf("[%llu] EXIT pid=%d comm=%s\n", elapsed/1000000, pid, comm);
+    delete(@track[pid]);
+}
+
+// Signals
+tracepoint:signal:signal_deliver
+/ @track[pid] == 1 && args->sig != 0 /
+{
+    printf("[%llu] SIGNAL pid=%d comm=%s sig=%d\n",
+           elapsed/1000000, pid, comm, args->sig);
+}

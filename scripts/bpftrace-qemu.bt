@@ -1,0 +1,57 @@
+#!/usr/bin/bpftrace
+// Trace qemu-kvm startup failures without ptrace interference.
+// Run as root BEFORE applying the VMI.
+// Captures: stderr writes, failed syscalls, exit code.
+
+BEGIN {
+    printf("Watching for qemu-kvm (Ctrl-C to stop)...\n");
+}
+
+// Detect qemu-kvm exec (after the binary replaces the forked child)
+tracepoint:sched:sched_process_exec
+/comm == "qemu-kvm"/
+{
+    printf("[%llu] EXEC pid=%d\n", elapsed / 1000000, pid);
+}
+
+// Catch ALL failed syscalls from qemu-kvm
+tracepoint:raw_syscalls:sys_exit
+/comm == "qemu-kvm" && args->ret < 0/
+{
+    printf("[%llu] SYSCALL_FAIL pid=%d syscall=%d ret=%ld\n",
+           elapsed / 1000000, pid, args->id, args->ret);
+}
+
+// Intercept writes to stderr (fd=2) — QEMU error messages before it dies
+tracepoint:syscalls:sys_enter_write
+/comm == "qemu-kvm" && args->fd == 2/
+{
+    printf("[%llu] QEMU_STDERR pid=%d: %s\n",
+           elapsed / 1000000, pid,
+           str(args->buf, args->count < 512 ? args->count : 512));
+}
+
+// Intercept writes to stdout (fd=1)
+tracepoint:syscalls:sys_enter_write
+/comm == "qemu-kvm" && args->fd == 1/
+{
+    printf("[%llu] QEMU_STDOUT pid=%d: %s\n",
+           elapsed / 1000000, pid,
+           str(args->buf, args->count < 512 ? args->count : 512));
+}
+
+// Catch when qemu-kvm calls exit_group (always the real exit)
+tracepoint:syscalls:sys_enter_exit_group
+/comm == "qemu-kvm"/
+{
+    printf("[%llu] EXIT_GROUP pid=%d status=%d\n",
+           elapsed / 1000000, pid, args->error_code);
+}
+
+// Catch SIGSYS (seccomp kills) sent to qemu-kvm
+tracepoint:signal:signal_generate
+/args->sig == 31 && args->comm == "qemu-kvm"/
+{
+    printf("[%llu] SIGSYS sent to qemu-kvm pid=%d from=%d\n",
+           elapsed / 1000000, args->pid, pid);
+}

@@ -1,0 +1,30 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+metadata:
+  name: cirros-hostdisk
+  namespace: default
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ipc8
+  domain:
+    cpu:
+      cores: 1
+    memory:
+      guest: 256Mi
+    devices:
+      disks:
+        - name: hostdisk
+          disk:
+            bus: virtio
+      interfaces:
+        - name: default
+          masquerade: {}
+  networks:
+    - name: default
+      pod: {}
+  volumes:
+    - name: hostdisk
+      hostDisk:
+        path: /tmp/cirros.img
+        type: DiskOrCreate
+        capacity: 256Mi

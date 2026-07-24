@@ -1,0 +1,67 @@
+#!/usr/bin/bpftrace
+// Capture ALL failed openat/open calls from UID=107 processes.
+// Shows what files are failing to open (permission, not found, etc.)
+// Run BEFORE applying VMI. Captures the master-key.aes access failure.
+
+BEGIN { printf("Watching for UID=107 openat failures...\n"); }
+
+// Track UID=107 pids
+tracepoint:sched:sched_process_fork
+/ uid == 107 || @track[pid] == 1 /
+{
+    @track[args->child_pid] = 1;
+    @track[pid] = 1;
+}
+
+tracepoint:sched:sched_process_exec
+/ uid == 107 /
+{
+    @track[pid] = 1;
+    printf("[%llu] EXEC pid=%d file=%s\n", elapsed/1000000, pid, str(args->filename));
+}
+
+// Capture openat path before the call
+tracepoint:syscalls:sys_enter_openat
+/ @track[pid] == 1 /
+{
+    @path[tid] = str(args->filename);
+}
+
+// Capture failed openat results
+tracepoint:syscalls:sys_exit_openat
+/ @track[pid] == 1 && args->ret < 0 /
+{
+    printf("[%llu] OPENAT_FAIL pid=%d ret=%d path=%s\n",
+           elapsed/1000000, pid, args->ret, @path[tid]);
+    delete(@path[tid]);
+}
+
+// Also clean up path on success
+tracepoint:syscalls:sys_exit_openat
+/ @track[pid] == 1 && args->ret >= 0 /
+{
+    delete(@path[tid]);
+}
+
+// Catch any write to stderr from UID=107
+tracepoint:syscalls:sys_enter_write
+/ @track[pid] == 1 && args->fd <= 2 /
+{
+    printf("[%llu] WRITE pid=%d fd=%d: %s\n", elapsed/1000000, pid, args->fd,
+           str(args->buf, args->count < 300 ? args->count : 300));
+}
+
+// Track process exits
+tracepoint:sched:sched_process_exit
+/ @track[pid] == 1 /
+{
+    printf("[%llu] EXIT pid=%d (%s)\n", elapsed/1000000, pid, comm);
+    delete(@track[pid]);
+}
+
+// Track signals
+tracepoint:signal:signal_deliver
+/ @track[pid] == 1 && args->sig != 0 /
+{
+    printf("[%llu] SIGNAL pid=%d sig=%d\n", elapsed/1000000, pid, args->sig);
+}

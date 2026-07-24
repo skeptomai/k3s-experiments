@@ -1,0 +1,73 @@
+#!/usr/bin/bpftrace
+// Trace QEMU startup failures: capture access() paths and stderr output.
+// Run on ipc8 BEFORE triggering virsh create.
+// Shows: what files QEMU checks (access/openat ENOENT) and QEMU stderr.
+
+BEGIN { printf("Watching for qemu-kvm startup...\n"); }
+
+// Track when qemu-kvm execs (captures the PID we need to watch)
+tracepoint:sched:sched_process_exec
+/str(args->filename) == "/usr/libexec/qemu-kvm"/
+{
+    @qemu[pid] = 1;
+    printf("[%llu] QEMU EXEC pid=%d\n", elapsed/1000000, pid);
+}
+
+// Track QEMU's children
+tracepoint:sched:sched_process_fork
+/@qemu[pid]/
+{
+    @qemu[args->child_pid] = 1;
+    printf("[%llu] QEMU FORK %d -> %d\n", elapsed/1000000, pid, args->child_pid);
+}
+
+// Capture ALL access() calls from QEMU (shows what files it checks)
+tracepoint:syscalls:sys_enter_faccessat
+/@qemu[pid]/
+{
+    printf("[%llu] ACCESS pid=%d path=%s\n", elapsed/1000000, pid, str(args->filename));
+}
+
+// Capture failed access() (ENOENT specifically)
+tracepoint:raw_syscalls:sys_exit
+/@qemu[pid] && (args->id == 21 || args->id == 269) && args->ret == -2/
+{
+    printf("[%llu] ACCESS_FAIL pid=%d ret=-2(ENOENT)\n", elapsed/1000000, pid);
+}
+
+// Capture openat() calls (to see what QEMU tries to open)
+tracepoint:syscalls:sys_enter_openat
+/@qemu[pid]/
+{
+    printf("[%llu] OPENAT pid=%d path=%s flags=%d\n", elapsed/1000000, pid, str(args->filename), args->flags);
+}
+
+// Capture ALL ioctl() calls from QEMU (to see what ioctls are used)
+tracepoint:raw_syscalls:sys_exit
+/@qemu[pid] && args->id == 16 && args->ret < 0/
+{
+    printf("[%llu] IOCTL_FAIL pid=%d ret=%ld\n", elapsed/1000000, pid, args->ret);
+}
+
+// Capture QEMU stderr writes
+tracepoint:syscalls:sys_enter_write
+/@qemu[pid] && args->fd == 2/
+{
+    printf("[%llu] QEMU_STDERR pid=%d: %s\n", elapsed/1000000, pid,
+           str(args->buf, args->count < 400 ? args->count : 400));
+}
+
+// Track QEMU process exits
+tracepoint:sched:sched_process_exit
+/@qemu[pid]/
+{
+    printf("[%llu] QEMU EXIT pid=%d\n", elapsed/1000000, pid);
+    delete(@qemu[pid]);
+}
+
+// Track when QEMU receives signals
+tracepoint:signal:signal_deliver
+/@qemu[pid]/
+{
+    printf("[%llu] SIGNAL pid=%d sig=%d\n", elapsed/1000000, pid, args->sig);
+}

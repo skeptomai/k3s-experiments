@@ -1,0 +1,90 @@
+---
+# Build script — clone skeptomai/kubevirt, go build virt-controller, stage context for kaniko
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: virt-controller-build-script
+  namespace: default
+data:
+  build.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "==> Cloning skeptomai/kubevirt @ fix/virt-controller-two-pod-race"
+    git clone --depth 1 --single-branch \
+      --branch fix/virt-controller-two-pod-race \
+      https://github.com/skeptomai/kubevirt.git /workspace/src
+
+    echo "==> Building virt-controller (CGO_ENABLED=0, static)"
+    cd /workspace/src
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+      go build -mod=vendor \
+      -o /workspace/context/virt-controller \
+      ./cmd/virt-controller/
+
+    echo "==> Staging Dockerfile"
+    mkdir -p /workspace/context
+    cat > /workspace/context/Dockerfile <<'EOF'
+    FROM quay.io/kubevirt/virt-controller:v1.8.4
+    COPY virt-controller /usr/bin/virt-controller
+    EOF
+
+    echo "==> Build complete: $(ls -lh /workspace/context/virt-controller)"
+---
+# Job: init container builds the binary, kaniko packages and pushes the image
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: virt-controller-build
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 2400   # 40 min max (clone + build + push)
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+      - name: build
+        image: docker.io/library/golang:1.24
+        command: ["/bin/bash", "/scripts/build.sh"]
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: build-script
+          mountPath: /scripts
+        resources:
+          requests:
+            cpu: "4"
+            memory: 4Gi
+          limits:
+            cpu: "6"
+            memory: 6Gi
+      containers:
+      - name: push
+        image: gcr.io/kaniko-project/executor:latest
+        args:
+        - --context=/workspace/context
+        - --dockerfile=/workspace/context/Dockerfile
+        - --destination=192.168.89.2:5004/kubevirt/virt-controller:skeptomai-v1.8.4
+        - --insecure
+        - --skip-tls-verify
+        - --cache=false
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        resources:
+          requests:
+            cpu: "1"
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+      volumes:
+      - name: workspace
+        emptyDir:
+          sizeLimit: 10Gi
+      - name: build-script
+        configMap:
+          name: virt-controller-build-script
+          defaultMode: 0755

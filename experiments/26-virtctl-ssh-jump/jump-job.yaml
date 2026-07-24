@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vm-ssh-jump
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: vm-jump
+      restartPolicy: Never
+      containers:
+        - name: jump
+          image: 192.168.89.2:5004/kubevirt/virtctl-jump:v1.8.4-ssh
+          command:
+            - virtctl
+            - ssh
+            - "--identity-file=/ssh/id_rsa"
+            - "--known-hosts=/dev/null"
+            - "--namespace=default"
+            - "--username=cirros"
+            - "-t=-o StrictHostKeyChecking=no"
+            - "-t=-o PubkeyAcceptedAlgorithms=+ssh-rsa"
+            - "--command=uname -a && uptime && echo SSH-jump-success"
+            - "vmi/cirros-ssh"
+          volumeMounts:
+            - name: ssh-key
+              mountPath: /ssh
+              readOnly: true
+      volumes:
+        - name: ssh-key
+          secret:
+            secretName: vm-ssh-key
+            defaultMode: 0400

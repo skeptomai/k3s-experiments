@@ -1,0 +1,153 @@
+#!/usr/bin/env bpftrace
+// Trace all syscalls made by the QEMU pre-exec child after it's forked from
+// a UID=107 process (rpc-virtqemud thread). This catches what the child does
+// between fork and exit without exec'ing QEMU.
+//
+// Run on ipc8 as root BEFORE applying the VMI:
+//   sudo bpftrace /tmp/bpftrace-preexec-syscalls.bt > /tmp/preexec-syscalls.log 2>&1 &
+
+BEGIN {
+    @tracing = 0;
+    printf("Waiting for UID=107 fork...\n");
+}
+
+// Catch the fork from any UID=107 process (rpc-virtqemud thread)
+tracepoint:sched:sched_process_fork
+/ uid == 107 /
+{
+    @child_pids[args->child_pid] = 1;
+    printf("FORK parent=%d (%s) -> child=%d\n",
+           args->parent_pid, comm, args->child_pid);
+}
+
+// Trace ALL syscalls from any forked child (they start with same UID)
+// We trace by checking if the TID is in our child set
+tracepoint:raw_syscalls:sys_enter
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] ENTER syscall=%d\n", tid, args->id);
+}
+
+tracepoint:raw_syscalls:sys_exit
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] EXIT  syscall=%d ret=%d\n", tid, args->id, args->ret);
+}
+
+// Capture exec attempts
+tracepoint:syscalls:sys_enter_execve
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] EXECVE: %s\n", tid, str(args->filename));
+}
+
+// Capture open/openat to see what files child tries to access
+tracepoint:syscalls:sys_enter_openat
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] OPENAT: %s flags=%d\n", tid, str(args->filename), args->flags);
+}
+
+tracepoint:syscalls:sys_exit_openat
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] OPENAT ret=%d\n", tid, args->ret);
+}
+
+// Capture write (to see what child writes before dying)
+tracepoint:syscalls:sys_enter_write
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] WRITE fd=%d len=%d\n", tid, args->fd, args->count);
+}
+
+// Capture capability operations
+tracepoint:syscalls:sys_enter_capset
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] CAPSET\n", tid);
+}
+
+tracepoint:syscalls:sys_exit_capset
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] CAPSET ret=%d\n", tid, args->ret);
+}
+
+// Capture setuid/setgid/setgroups
+tracepoint:syscalls:sys_enter_setuid
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] SETUID uid=%d\n", tid, args->uid);
+}
+
+tracepoint:syscalls:sys_exit_setuid
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] SETUID ret=%d\n", tid, args->ret);
+}
+
+tracepoint:syscalls:sys_enter_setgid
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] SETGID gid=%d\n", tid, args->gid);
+}
+
+tracepoint:syscalls:sys_exit_setgid
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] SETGID ret=%d\n", tid, args->ret);
+}
+
+tracepoint:syscalls:sys_enter_setgroups
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] SETGROUPS size=%d\n", tid, args->gidsetsize);
+}
+
+tracepoint:syscalls:sys_exit_setgroups
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] SETGROUPS ret=%d\n", tid, args->ret);
+}
+
+// Capture prctl (no-new-privs, secbits)
+tracepoint:syscalls:sys_enter_prctl
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] PRCTL option=%d arg2=%d\n", tid, args->option, args->arg2);
+}
+
+tracepoint:syscalls:sys_exit_prctl
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] PRCTL ret=%d\n", tid, args->ret);
+}
+
+// Capture dup2 (fd setup before exec)
+tracepoint:syscalls:sys_enter_dup2
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] DUP2 oldfd=%d newfd=%d\n", tid, args->oldfd, args->newfd);
+}
+
+// Capture pipe creation
+tracepoint:syscalls:sys_enter_pipe2
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] PIPE2 flags=%d\n", tid, args->flags);
+}
+
+tracepoint:syscalls:sys_exit_pipe2
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] PIPE2 ret=%d\n", tid, args->ret);
+}
+
+// Catch child exit (sched_process_exit has no exit_code field; get it from task struct)
+tracepoint:sched:sched_process_exit
+/ @child_pids[tid] == 1 /
+{
+    printf("CHILD[%d] EXIT comm=%s exit_signal=%d\n", tid, comm, args->prio);
+    delete(@child_pids[tid]);
+}

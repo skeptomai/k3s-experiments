@@ -1,0 +1,115 @@
+#!/usr/bin/bpftrace
+// Deep trace specifically targeting the pre-exec child that opens the QEMU PID file.
+// From previous runs: the pre-exec child opens /var/run/libvirt/qemu/run/default_cirros-test.pid
+// then exits without exec'ing. This script captures its full syscall ring (last 30).
+// Also captures ALL openat calls and their failure codes.
+// Run as root on ipc8 BEFORE applying the VMI.
+
+BEGIN { printf("Watching pre-exec child syscalls...\n"); }
+
+tracepoint:sched:sched_process_fork
+/uid == 107/
+{
+    @children[args->child_pid] = args->parent_pid;
+    @idx[args->child_pid] = 0;
+}
+
+tracepoint:sched:sched_process_exec
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] EXEC pid=%d comm=%s file=%s\n",
+           elapsed/1000000, pid, comm, str(args->filename));
+    delete(@children[pid]);
+    delete(@idx[pid]);
+}
+
+// Track ALL syscall entries for children (30-entry ring)
+tracepoint:raw_syscalls:sys_enter
+/uid == 107 && @children[pid]/
+{
+    $i = @idx[pid] % 30;
+    @ring[pid, $i] = args->id;
+    @idx[pid] = @idx[pid] + 1;
+}
+
+// ALL failed syscalls
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && @children[pid] && args->ret < 0/
+{
+    printf("[%llu] FAIL pid=%d comm=%s syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, comm, args->id, args->ret);
+}
+
+// ALL openat calls with path and result
+tracepoint:syscalls:sys_enter_openat
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] OPENAT pid=%d comm=%s path=%s flags=0x%x\n",
+           elapsed/1000000, pid, comm, str(args->filename), args->flags);
+}
+
+tracepoint:syscalls:sys_exit_openat
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] OPENAT_RET pid=%d ret=%d\n", elapsed/1000000, pid, args->ret);
+}
+
+// access() calls
+tracepoint:syscalls:sys_enter_access
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] ACCESS pid=%d comm=%s path=%s mode=%d\n",
+           elapsed/1000000, pid, comm, str(args->filename), args->mode);
+}
+
+// dup2/dup3 calls (fd setup before exec)
+tracepoint:syscalls:sys_enter_dup2
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] DUP2 pid=%d comm=%s oldfd=%d newfd=%d\n",
+           elapsed/1000000, pid, comm, args->oldfd, args->newfd);
+}
+
+// execve attempts
+tracepoint:syscalls:sys_enter_execve
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] EXECVE_ENTER pid=%d comm=%s filename=%s\n",
+           elapsed/1000000, pid, comm, str(args->filename));
+}
+
+// writes to stderr
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && args->fd == 2 && @children[pid]/
+{
+    printf("[%llu] STDERR pid=%d: %s\n",
+           elapsed/1000000, pid,
+           str(args->buf, args->count < 400 ? args->count : 400));
+}
+
+// On exit: dump last 30 syscalls
+tracepoint:syscalls:sys_enter_exit_group
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] EXIT pid=%d comm=%s code=%d total=%d ring=[",
+           elapsed/1000000, pid, comm, args->error_code, @idx[pid]);
+    printf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,",
+           @ring[pid,0], @ring[pid,1], @ring[pid,2], @ring[pid,3], @ring[pid,4],
+           @ring[pid,5], @ring[pid,6], @ring[pid,7], @ring[pid,8], @ring[pid,9],
+           @ring[pid,10], @ring[pid,11], @ring[pid,12], @ring[pid,13], @ring[pid,14]);
+    printf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]\n",
+           @ring[pid,15], @ring[pid,16], @ring[pid,17], @ring[pid,18], @ring[pid,19],
+           @ring[pid,20], @ring[pid,21], @ring[pid,22], @ring[pid,23], @ring[pid,24],
+           @ring[pid,25], @ring[pid,26], @ring[pid,27], @ring[pid,28], @ring[pid,29]);
+    delete(@children[pid]);
+    delete(@idx[pid]);
+}
+
+tracepoint:sched:sched_process_exit
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] SCHED_EXIT pid=%d comm=%s total=%d\n",
+           elapsed/1000000, pid, comm, @idx[pid]);
+    delete(@children[pid]);
+    delete(@idx[pid]);
+}

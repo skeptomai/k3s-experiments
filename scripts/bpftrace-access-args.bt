@@ -1,0 +1,65 @@
+#!/usr/bin/bpftrace
+// Capture the argument to access() for UID=107 children of rpc-virtqemud.
+// The pre-exec child does: reset_signals → rt_sigprocmask → access(???) → exit(0)
+// This script finds WHAT path is being access()'d right before exit.
+// Run as root on ipc8 BEFORE applying the VMI.
+
+BEGIN { printf("Watching access() calls from UID=107 children...\n"); }
+
+tracepoint:sched:sched_process_fork
+/uid == 107/
+{
+    @children[args->child_pid] = args->parent_pid;
+}
+
+tracepoint:sched:sched_process_exec
+/uid == 107 && @children[pid]/
+{
+    delete(@children[pid]);
+}
+
+// Capture access() arguments from tracked children
+tracepoint:syscalls:sys_enter_access
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] ACCESS pid=%d comm=%s path=%s mode=%d\n",
+           elapsed/1000000, pid, comm, str(args->filename), args->mode);
+}
+
+// Also catch faccessat() which is the modern access() form
+tracepoint:syscalls:sys_enter_faccessat
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] FACCESSAT pid=%d comm=%s path=%s mode=%d\n",
+           elapsed/1000000, pid, comm, str(args->filename), args->mode);
+}
+
+// Capture ALL openat() calls to track what files are opened
+tracepoint:syscalls:sys_enter_openat
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] OPENAT pid=%d comm=%s path=%s flags=0x%x\n",
+           elapsed/1000000, pid, comm, str(args->filename), args->flags);
+}
+
+// Capture open failures
+tracepoint:syscalls:sys_exit_openat
+/uid == 107 && @children[pid] && args->ret < 0/
+{
+    printf("[%llu] OPENAT_FAIL pid=%d comm=%s ret=%d\n",
+           elapsed/1000000, pid, comm, args->ret);
+}
+
+tracepoint:syscalls:sys_enter_exit_group
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] EXIT pid=%d comm=%s code=%d\n",
+           elapsed/1000000, pid, comm, args->error_code);
+    delete(@children[pid]);
+}
+
+tracepoint:sched:sched_process_exit
+/uid == 107 && @children[pid]/
+{
+    delete(@children[pid]);
+}

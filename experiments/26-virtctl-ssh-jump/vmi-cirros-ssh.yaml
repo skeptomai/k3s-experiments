@@ -1,0 +1,37 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+metadata:
+  name: cirros-ssh
+  namespace: default
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ipc8
+  domain:
+    cpu:
+      cores: 1
+    memory:
+      guest: 256Mi
+    devices:
+      disks:
+        - name: containerdisk
+          disk:
+            bus: virtio
+        - name: cloudinitdisk
+          disk:
+            bus: virtio
+      interfaces:
+        - name: default
+          masquerade: {}
+  networks:
+    - name: default
+      pod: {}
+  volumes:
+    - name: containerdisk
+      containerDisk:
+        image: quay.io/kubevirt/cirros-container-disk-demo:v1.8.4
+    - name: cloudinitdisk
+      cloudInitNoCloud:
+        userData: |
+          #cloud-config
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCf/WvLPNt9qQDt8CH5G7r03nY291ZawMgKEzafunD7jTQ4meWBzE4itdtQlptJ3fRqiHZlPsZUunMM1WsR9uAfNYtSsN7TwMAtPE16dyISF9sc20JP7az+PPy6fiTh2eSxtdfh9i2ZNq7NuXoFY9BgLiMH2HSdKkyolu1UBpBtPfAG+y08cZs9lkcb9zxmPvTstSZRbXZrSuUlis1CvaCPONaxzMkZ3rE0N/i04k3xahAAKGDASFXb/G0YbO4GmkR8aLMRCYiix6JVCkB4LjE9j1KwWsUfnoXkP0oeEfC957ELGdLTDyloWCDHap5EDZimJY5fqGudOEgwijyCpBoD vm-jump-experiment

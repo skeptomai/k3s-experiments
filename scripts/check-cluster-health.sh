@@ -4,6 +4,13 @@
 # non-ready DaemonSets, stuck Flux kustomizations.
 # Exit 0 = all healthy. Exit 1 = one or more checks failed.
 
+# Must run on a k3s node (ipc4-9), not on omen.
+# Use the /check-cluster-health skill, which SSHes to ipc4.
+if [ ! -f /etc/rancher/k3s/k3s.yaml ]; then
+    echo "ERROR: This script must run on a k3s node. Use the /check-cluster-health skill." >&2
+    exit 2
+fi
+
 KUBECTL="sudo kubectl"
 FAIL=0
 

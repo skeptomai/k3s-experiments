@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ubuntu-ssh-jump
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: vm-jump
+      restartPolicy: Never
+      containers:
+        - name: jump
+          image: 192.168.89.2:5004/kubevirt/virtctl-jump:v1.8.4-ssh
+          command:
+            - virtctl
+            - ssh
+            - "--identity-file=/ssh/id_rsa"
+            - "--known-hosts=/dev/null"
+            - "--namespace=default"
+            - "--username=ubuntu"
+            - "-t=-o StrictHostKeyChecking=no"
+            - "--command=uname -a && cloud-init status && echo SSH-jump-success"
+            - "vmi/ubuntu-cloud"
+          volumeMounts:
+            - name: ssh-key
+              mountPath: /ssh
+              readOnly: true
+      volumes:
+        - name: ssh-key
+          secret:
+            secretName: vm-ssh-key
+            defaultMode: 0400

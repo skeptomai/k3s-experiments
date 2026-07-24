@@ -1,0 +1,104 @@
+#!/usr/bin/bpftrace
+// Capture QMP JSON traffic from virtqemud's qmp-kvm thread.
+// This shows what commands virtqemud sends to QEMU and what responses cause
+// QEMU to be killed. Run on ipc8 host BEFORE applying the VMI.
+//
+// Usage:
+//   sudo bpftrace scripts/bpftrace-qmp-traffic.bt > /tmp/qmp-trace.log 2>&1
+
+BEGIN { printf("Watching for qmp-kvm thread I/O...\n"); }
+
+// Save read buffer address at entry (for any UID=107 process)
+tracepoint:syscalls:sys_enter_read
+/uid == 107/
+{
+    @rbuf[tid] = args->buf;
+    @rfd[tid] = args->fd;
+    @rmax[tid] = args->count;
+}
+
+// On read exit: if this is qmp-kvm and we got data, print it
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->id == 0 && args->ret > 0 && comm == "qmp-kvm" && @rbuf[tid]/
+{
+    $len = args->ret < 800 ? args->ret : 800;
+    printf("[%llu] QMP_READ pid=%d fd=%d len=%d: %s\n",
+           elapsed/1000000, pid, @rfd[tid], args->ret,
+           str(@rbuf[tid], $len));
+    delete(@rbuf[tid]);
+    delete(@rfd[tid]);
+    delete(@rmax[tid]);
+}
+
+// Also clean up for non-qmp-kvm threads
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->id == 0 && comm != "qmp-kvm" && @rbuf[tid]/
+{
+    delete(@rbuf[tid]);
+    delete(@rfd[tid]);
+    delete(@rmax[tid]);
+}
+
+// Save write buffer address at entry
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && comm == "qmp-kvm"/
+{
+    $len = args->count < 800 ? args->count : 800;
+    printf("[%llu] QMP_WRITE pid=%d fd=%d len=%d: %s\n",
+           elapsed/1000000, pid, args->fd, args->count,
+           str(args->buf, $len));
+}
+
+// Also capture writes from rpc-virtqemud (might handle QMP on different thread)
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && comm == "rpc-virtqemud" && args->count > 5/
+{
+    $len = args->count < 800 ? args->count : 800;
+    printf("[%llu] RPC_WRITE pid=%d fd=%d len=%d: %s\n",
+           elapsed/1000000, pid, args->fd, args->count,
+           str(args->buf, $len));
+}
+
+// Also capture reads from rpc-virtqemud
+tracepoint:syscalls:sys_enter_read
+/uid == 107 && comm == "rpc-virtqemud"/
+{
+    @rpcbuf[tid] = args->buf;
+    @rpcfd[tid] = args->fd;
+}
+
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->id == 0 && args->ret > 5 && comm == "rpc-virtqemud" && @rpcbuf[tid]/
+{
+    $len = args->ret < 800 ? args->ret : 800;
+    printf("[%llu] RPC_READ pid=%d fd=%d len=%d: %s\n",
+           elapsed/1000000, pid, @rpcfd[tid], args->ret,
+           str(@rpcbuf[tid], $len));
+    delete(@rpcbuf[tid]);
+    delete(@rpcfd[tid]);
+}
+
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->id == 0 && comm != "rpc-virtqemud" && @rpcbuf[tid]/
+{
+    delete(@rpcbuf[tid]);
+    delete(@rpcfd[tid]);
+}
+
+// Track signals sent to QEMU (uid=107 process)
+tracepoint:signal:signal_generate
+/uid == 107 && args->sig == 15/
+{
+    printf("[%llu] SIGTERM_SENT from pid=%d comm=%s to pid=%d\n",
+           elapsed/1000000, pid, comm, args->pid);
+}
+
+// Track QEMU stderr (any uid=107 proc writing to fd=2)
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && args->fd == 2/
+{
+    $len = args->count < 400 ? args->count : 400;
+    printf("[%llu] STDERR pid=%d comm=%s: %s\n",
+           elapsed/1000000, pid, comm,
+           str(args->buf, $len));
+}

@@ -1,0 +1,136 @@
+#!/usr/bin/bpftrace
+// Trace ALL syscalls from the VM QEMU process during its first 100ms.
+// Captures every failed syscall + key successful ones (open/kvm/socket).
+// Run before applying VMI. Ignores -daemonize probe QEMU.
+
+BEGIN { printf("Waiting for VM QEMU exec...\n"); }
+
+// Catch qemu-kvm exec, skip probe (has 'daemonize' in args)
+tracepoint:syscalls:sys_enter_execve
+/ str(args->filename) == "/usr/libexec/qemu-kvm" /
+{
+    // We can't check args here easily, track all and filter later
+    @qemu_start[tid] = elapsed;
+    @is_qemu[tid] = 1;
+}
+
+// On exec return, start tracking the new process
+tracepoint:syscalls:sys_exit_execve
+/ @is_qemu[tid] == 1 && args->ret == 0 /
+{
+    @track[pid] = elapsed;
+    printf("[0] QEMU_EXEC pid=%d\n", pid);
+    delete(@is_qemu[tid]);
+    delete(@qemu_start[tid]);
+}
+
+// Track children
+tracepoint:sched:sched_process_fork
+/ @track[pid] != 0 /
+{
+    @track[args->child_pid] = @track[pid];
+    printf("[%llu] FORK parent=%d child=%d\n",
+           (elapsed - @track[pid]) / 1000000, pid, args->child_pid);
+}
+
+// Capture ALL openat calls from QEMU
+tracepoint:syscalls:sys_enter_openat
+/ @track[pid] != 0 /
+{
+    @opath[tid] = str(args->filename);
+    @oflags[tid] = args->flags;
+}
+
+tracepoint:syscalls:sys_exit_openat
+/ @track[pid] != 0 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    if (args->ret < 0) {
+        printf("[%llu] OPENAT_FAIL pid=%d ret=%d flags=0x%x path=%s\n",
+               $ms, pid, args->ret, @oflags[tid], @opath[tid]);
+    } else if (strncmp(@opath[tid], "/dev", 4) == 0 ||
+               strncmp(@opath[tid], "/proc", 5) == 0 ||
+               strncmp(@opath[tid], "/var/run/kubevirt", 17) == 0) {
+        printf("[%llu] OPENAT_OK pid=%d fd=%d path=%s\n",
+               $ms, pid, args->ret, @opath[tid]);
+    }
+    delete(@opath[tid]);
+    delete(@oflags[tid]);
+}
+
+// Catch ioctl failures (KVM, tun, etc.)
+tracepoint:syscalls:sys_enter_ioctl
+/ @track[pid] != 0 /
+{
+    @ifd[tid] = args->fd;
+    @ireq[tid] = args->cmd;
+}
+
+tracepoint:syscalls:sys_exit_ioctl
+/ @track[pid] != 0 && args->ret < 0 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    printf("[%llu] IOCTL_FAIL pid=%d fd=%d req=0x%lx ret=%d\n",
+           $ms, pid, @ifd[tid], @ireq[tid], args->ret);
+    delete(@ifd[tid]);
+    delete(@ireq[tid]);
+}
+
+tracepoint:syscalls:sys_exit_ioctl
+/ @track[pid] != 0 && args->ret >= 0 /
+{
+    delete(@ifd[tid]);
+    delete(@ireq[tid]);
+}
+
+// Catch write failures + stderr writes
+tracepoint:syscalls:sys_enter_write
+/ @track[pid] != 0 && args->fd <= 2 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    printf("[%llu] WRITE_STDERR pid=%d fd=%d: %s\n",
+           $ms, pid, args->fd,
+           str(args->buf, args->count < 200 ? args->count : 200));
+}
+
+// Catch connect failures (QMP socket)
+tracepoint:syscalls:sys_exit_connect
+/ @track[pid] != 0 && args->ret < 0 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    printf("[%llu] CONNECT_FAIL pid=%d ret=%d\n", $ms, pid, args->ret);
+}
+
+// Catch prctl failures
+tracepoint:syscalls:sys_exit_prctl
+/ @track[pid] != 0 && args->ret < 0 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    printf("[%llu] PRCTL_FAIL pid=%d ret=%d\n", $ms, pid, args->ret);
+}
+
+// Catch mmap failures
+tracepoint:syscalls:sys_exit_mmap
+/ @track[pid] != 0 && args->ret < 0 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    printf("[%llu] MMAP_FAIL pid=%d ret=%lld\n", $ms, pid, args->ret);
+}
+
+// Track signals delivered to QEMU
+tracepoint:signal:signal_deliver
+/ @track[pid] != 0 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    printf("[%llu] SIGNAL pid=%d sig=%d\n", $ms, pid, args->sig);
+}
+
+// Track exits
+tracepoint:sched:sched_process_exit
+/ @track[pid] != 0 /
+{
+    $ms = (elapsed - @track[pid]) / 1000000;
+    printf("[%llu] EXIT pid=%d (%s) after %llums\n",
+           $ms, pid, comm, $ms);
+    delete(@track[pid]);
+}

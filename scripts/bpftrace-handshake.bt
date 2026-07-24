@@ -1,0 +1,82 @@
+#!/usr/bin/bpftrace
+// Trace the libvirt handshake pipe operations and monitor socket connect.
+// Run on ipc8 BEFORE triggering virsh create.
+// Shows: who reads/writes small amounts (handshake signals) + all connects.
+
+BEGIN { printf("Watching UID=107 handshake + connect ops...\n"); }
+
+// Track forks from UID 107
+tracepoint:sched:sched_process_fork
+/uid == 107/
+{
+    @children[args->child_pid] = args->parent_pid;
+    printf("[%llu] FORK pid=%d -> child=%d comm=%s\n",
+           elapsed/1000000, pid, args->child_pid, comm);
+}
+
+// Track exec (to distinguish hooks from QEMU waiter)
+tracepoint:sched:sched_process_exec
+/uid == 107/
+{
+    printf("[%llu] EXEC pid=%d comm=%s file=%s\n",
+           elapsed/1000000, pid, comm, str(args->filename));
+    delete(@children[pid]);
+}
+
+// ALL read() returns with small values (0 or 1) - these are handshake pipe reads
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->id == 0 && args->ret >= 0 && args->ret <= 2/
+{
+    printf("[%llu] READ(small) pid=%d comm=%s ret=%d\n",
+           elapsed/1000000, pid, comm, args->ret);
+}
+
+// ALL write() returns with small values (1-2) - handshake pipe writes
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->id == 1 && args->ret >= 1 && args->ret <= 2/
+{
+    printf("[%llu] WRITE(small) pid=%d comm=%s ret=%d\n",
+           elapsed/1000000, pid, comm, args->ret);
+}
+
+// ALL connect() calls (to see QMP socket connect attempts)
+tracepoint:syscalls:sys_enter_connect
+/uid == 107/
+{
+    printf("[%llu] CONNECT_ENTER pid=%d comm=%s fd=%d\n",
+           elapsed/1000000, pid, comm, args->fd);
+}
+
+tracepoint:syscalls:sys_exit_connect
+/uid == 107/
+{
+    printf("[%llu] CONNECT_EXIT pid=%d comm=%s ret=%d\n",
+           elapsed/1000000, pid, comm, args->ret);
+}
+
+// Track child exits
+tracepoint:syscalls:sys_enter_exit_group
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] CHILD_EXIT pid=%d comm=%s status=%d\n",
+           elapsed/1000000, pid, comm, args->error_code);
+    delete(@children[pid]);
+}
+
+// Track stderr writes from children (handshake errors)
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && args->fd == 2 && @children[pid]/
+{
+    printf("[%llu] CHILD_STDERR pid=%d: %s\n",
+           elapsed/1000000, pid,
+           str(args->buf, args->count < 200 ? args->count : 200));
+}
+
+// Track failed syscalls (excluding EAGAIN/EINTR)
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && args->ret < 0 && args->ret != -11 && args->ret != -4 &&
+ (comm == "rpc-virtqemud" || @children[pid])/
+{
+    printf("[%llu] FAIL pid=%d comm=%s syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, comm, args->id, args->ret);
+}

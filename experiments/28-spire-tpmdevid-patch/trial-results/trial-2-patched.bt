@@ -1,1 +1,114 @@
-ERROR: failed to open file '/home/cb/Projects/k3s-experiments/scripts/bpftrace-spire-tpm-stall.bt': No such file or directory
+/tmp/bpftrace-spire-tpm-stall.bt:44:36-38: WARNING: comparison of integers of different signs: 'uint64' and 'int64' can lead to undefined behavior
+/comm == "spire-agent" && args->fd == @tpmrm0_fd[tid]/
+                                   ~~
+/tmp/bpftrace-spire-tpm-stall.bt:62:36-38: WARNING: comparison of integers of different signs: 'uint64' and 'int64' can lead to undefined behavior
+/comm == "spire-agent" && args->fd == @tpmrm0_fd[tid]/
+                                   ~~
+/tmp/bpftrace-spire-tpm-stall.bt:44:36-38: WARNING: comparison of integers of different signs: 'uint64' and 'int64' can lead to undefined behavior
+/comm == "spire-agent" && args->fd == @tpmrm0_fd[tid]/
+                                   ~~
+/tmp/bpftrace-spire-tpm-stall.bt:62:36-38: WARNING: comparison of integers of different signs: 'uint64' and 'int64' can lead to undefined behavior
+/comm == "spire-agent" && args->fd == @tpmrm0_fd[tid]/
+                                   ~~
+/tmp/bpftrace-spire-tpm-stall.bt:39:5-26: WARNING: Return value discarded.
+    delete(@opening[tid]);
+    ~~~~~~~~~~~~~~~~~~~~~
+/tmp/bpftrace-spire-tpm-stall.bt:57:5-30: WARNING: Return value discarded.
+    delete(@write_start[tid]);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/bpftrace-spire-tpm-stall.bt:75:5-29: WARNING: Return value discarded.
+    delete(@read_start[tid]);
+    ~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/bpftrace-spire-tpm-stall.bt:93:5-30: WARNING: Return value discarded.
+    delete(@futex_start[tid]);
+    ~~~~~~~~~~~~~~~~~~~~~~~~~
+Attached 9 probes
+[130275708] openat /dev/tpmrm0 (tid=2352796)
+[130275708] openat -> fd=3
+[130275708] write(22 bytes) -> TPM command sent
+[130275708] write done in 0 ms
+[130275710] read() waiting for TPM response...
+[130275710] read() returned 27 bytes in 0 ms
+[130275710] write(99 bytes) -> TPM command sent
+[130283708] LONG futex wait: 7982 ms (tid=2352791) -- Go runtime park or mutex
+[130283715] LONG futex wait: 7999 ms (tid=2352793) -- Go runtime park or mutex
+[130283715] LONG futex wait: 8006 ms (tid=2352805) -- Go runtime park or mutex
+[130283715] LONG futex wait: 8006 ms (tid=2352797) -- Go runtime park or mutex
+[130283715] LONG futex wait: 8007 ms (tid=2352800) -- Go runtime park or mutex
+[130284717] LONG futex wait: 1001 ms (tid=2352800) -- Go runtime park or mutex
+[130284717] LONG futex wait: 1001 ms (tid=2352793) -- Go runtime park or mutex
+[130284717] LONG futex wait: 1001 ms (tid=2352799) -- Go runtime park or mutex
+[130286720] LONG futex wait: 1001 ms (tid=2352800) -- Go runtime park or mutex
+[130286720] LONG futex wait: 1001 ms (tid=2352805) -- Go runtime park or mutex
+[130286720] LONG futex wait: 1001 ms (tid=2352793) -- Go runtime park or mutex
+[130288722] LONG futex wait: 1001 ms (tid=2352799) -- Go runtime park or mutex
+[130289724] LONG futex wait: 1001 ms (tid=2352800) -- Go runtime park or mutex
+[130289724] LONG futex wait: 1001 ms (tid=2352799) -- Go runtime park or mutex
+[130289724] LONG futex wait: 1001 ms (tid=2352793) -- Go runtime park or mutex
+[130291727] LONG futex wait: 1001 ms (tid=2352799) -- Go runtime park or mutex
+[130292729] LONG futex wait: 1001 ms (tid=2352800) -- Go runtime park or mutex
+[130292729] LONG futex wait: 1001 ms (tid=2352793) -- Go runtime park or mutex
+[130292729] LONG futex wait: 1001 ms (tid=2352799) -- Go runtime park or mutex
+[130296734] LONG futex wait: 1001 ms (tid=2352799) -- Go runtime park or mutex
+[130296734] LONG futex wait: 1001 ms (tid=2352800) -- Go runtime park or mutex
+[130297736] LONG futex wait: 1001 ms (tid=2352805) -- Go runtime park or mutex
+[130300014] write done in 24304 ms
+[130300014] read() waiting for TPM response...
+[130300014] read() returned 490 bytes in 0 ms
+[130300015] write(565 bytes) -> TPM command sent
+[130300103] LONG futex wait: 16388 ms (tid=2352797) -- Go runtime park or mutex
+[130300145] write done in 129 ms
+[130300145] read() waiting for TPM response...
+[130300145] read() returned 59 bytes in 0 ms
+[130300145] write(129 bytes) -> TPM command sent
+[130300421] write done in 276 ms
+[130300421] read() waiting for TPM response...
+[130300421] read() returned 732 bytes in 0 ms
+[130300422] write(565 bytes) -> TPM command sent
+[130300616] write done in 194 ms
+[130300616] read() waiting for TPM response...
+[130300616] read() returned 59 bytes in 0 ms
+[130300616] write(14 bytes) -> TPM command sent
+[130300790] write done in 173 ms
+[130300790] read() waiting for TPM response...
+[130300790] read() returned 10 bytes in 0 ms
+[130300790] write(355 bytes) -> TPM command sent
+[130300984] write done in 193 ms
+[130300984] read() waiting for TPM response...
+[130300984] read() returned 522 bytes in 0 ms
+[130300985] write(22 bytes) -> TPM command sent
+[130301181] write done in 196 ms
+[130301181] read() waiting for TPM response...
+[130301181] read() returned 27 bytes in 0 ms
+[130301182] write(14 bytes) -> TPM command sent
+[130301382] write done in 200 ms
+[130301382] read() waiting for TPM response...
+[130301382] read() returned 62 bytes in 0 ms
+[130301383] write(35 bytes) -> TPM command sent
+[130301583] write done in 200 ms
+[130301583] read() waiting for TPM response...
+[130301583] read() returned 789 bytes in 0 ms
+[130301583] write(35 bytes) -> TPM command sent
+[130301788] write done in 204 ms
+[130301788] read() waiting for TPM response...
+[130301788] read() returned 682 bytes in 0 ms
+[130301788] write(14 bytes) -> TPM command sent
+[130301992] write done in 203 ms
+[130301992] read() waiting for TPM response...
+[130301992] read() returned 398 bytes in 0 ms
+[130301992] write(78 bytes) -> TPM command sent
+[130302282] write done in 289 ms
+[130302282] read() waiting for TPM response...
+[130302282] read() returned 429 bytes in 0 ms
+[130303563] LONG futex wait: 3459 ms (tid=2352799) -- Go runtime park or mutex
+[130303698] LONG futex wait: 27990 ms (tid=2352792) -- Go runtime park or mutex
+[130303698] LONG futex wait: 27990 ms (tid=2352798) -- Go runtime park or mutex
+[130303698] LONG futex wait: 27990 ms (tid=2352804) -- Go runtime park or mutex
+[130303698] LONG futex wait: 27991 ms (tid=2352803) -- Go runtime park or mutex
+[130303698] LONG futex wait: 27991 ms (tid=2352794) -- Go runtime park or mutex
+[130303698] LONG futex wait: 27991 ms (tid=2352801) -- Go runtime park or mutex
+[130303707] LONG futex wait: 28001 ms (tid=2352789) -- Go runtime park or mutex
+[130305173] LONG futex wait: 1327 ms (tid=2352794) -- Go runtime park or mutex
+[130305173] LONG futex wait: 1427 ms (tid=2353522) -- Go runtime park or mutex
+
+

@@ -1,0 +1,77 @@
+#!/usr/bin/bpftrace
+// Trace EVERY syscall of the virtqemud pre-exec child.
+// The pre-exec child forks from rpc-virtqemud (UID=107), does setup, and should
+// execve qemu-kvm but instead exits code=0. This script captures every syscall
+// in that child to find the last syscall before exit.
+// Run as root on ipc8 BEFORE applying the VMI.
+
+BEGIN { printf("Tracing virtqemud pre-exec child syscalls...\n"); }
+
+// Phase 1: capture all UID=107 children
+tracepoint:sched:sched_process_fork
+/uid == 107/
+{
+    @children[args->child_pid] = args->parent_pid;
+    printf("[%llu] FORK pid=%d comm=%s -> child=%d\n",
+           elapsed/1000000, pid, comm, args->child_pid);
+}
+
+// Phase 2: when a child exec's, mark it as done and stop tracking
+tracepoint:sched:sched_process_exec
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] EXEC pid=%d comm=%s file=%s PARENT=%d\n",
+           elapsed/1000000, pid, comm, str(args->filename), @children[pid]);
+    delete(@children[pid]);
+    delete(@last_syscall[pid]);
+}
+
+// Phase 3: track EVERY syscall entry for tracked children (last-N rolling)
+tracepoint:raw_syscalls:sys_enter
+/uid == 107 && @children[pid]/
+{
+    @last_syscall[pid] = args->id;
+    @last_5[pid, 0] = @last_5[pid, 1];
+    @last_5[pid, 1] = @last_5[pid, 2];
+    @last_5[pid, 2] = @last_5[pid, 3];
+    @last_5[pid, 3] = @last_5[pid, 4];
+    @last_5[pid, 4] = args->id;
+}
+
+// Phase 4: capture ALL syscall failures from tracked children
+tracepoint:raw_syscalls:sys_exit
+/uid == 107 && @children[pid] && args->ret < 0/
+{
+    printf("[%llu] CHILD_FAIL pid=%d comm=%s syscall=%d ret=%ld\n",
+           elapsed/1000000, pid, comm, args->id, args->ret);
+}
+
+// Phase 5: capture writes to stderr
+tracepoint:syscalls:sys_enter_write
+/uid == 107 && args->fd == 2 && @children[pid]/
+{
+    printf("[%llu] CHILD_STDERR pid=%d: %s\n",
+           elapsed/1000000, pid,
+           str(args->buf, args->count < 400 ? args->count : 400));
+}
+
+// Phase 6: on exit, dump the last syscalls seen and exit code
+tracepoint:syscalls:sys_enter_exit_group
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] EXIT_GROUP pid=%d comm=%s code=%d last_syscall=%d last5=[%d,%d,%d,%d,%d]\n",
+           elapsed/1000000, pid, comm, args->error_code, @last_syscall[pid],
+           @last_5[pid, 0], @last_5[pid, 1], @last_5[pid, 2], @last_5[pid, 3], @last_5[pid, 4]);
+    delete(@children[pid]);
+    delete(@last_syscall[pid]);
+}
+
+// Also catch signal-killed exits
+tracepoint:sched:sched_process_exit
+/uid == 107 && @children[pid]/
+{
+    printf("[%llu] SCHED_EXIT pid=%d comm=%s group_dead=%d last_syscall=%d\n",
+           elapsed/1000000, pid, comm, args->group_dead, @last_syscall[pid]);
+    delete(@children[pid]);
+    delete(@last_syscall[pid]);
+}

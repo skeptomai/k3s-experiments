@@ -2,14 +2,13 @@
 # Builds a patched spire-agent image on the cluster using pelagos build.
 #
 # What it does:
-#   1. init/clone-and-build: golang:1.26 container clones spire v1.9.6, overlays the
-#      patched session.go from a ConfigMap, builds spire-agent (CGO_ENABLED=0).
+#   1. init/clone-and-build: golang:1.26 container clones skeptomai/spire at
+#      tpmdevid-srk-reuse, builds spire-agent (CGO_ENABLED=0).
 #   2. init/stage-remfile: copies the Remfile into the workspace alongside the binary.
 #   3. build-and-push: alpine container with pelagos binary mounted from the host.
 #      Runs `pelagos build` then `pelagos image push` to 192.168.89.2:5004.
 #
 # Prerequisites:
-#   kubectl apply -f session-go-configmap.yaml   # patched session.go
 #   kubectl apply -f build-job.yaml
 #
 # After a successful run the image is available as:
@@ -38,10 +37,6 @@ spec:
         # Shared scratch space between init containers and main container
         - name: workspace
           emptyDir: {}
-        # Patched session.go — created from session-go-configmap.yaml
-        - name: patched-session
-          configMap:
-            name: spire-tpmdevid-patched-session
         # Remfile for pelagos build
         - name: remfile
           configMap:
@@ -65,10 +60,8 @@ spec:
           args:
             - |
               set -eux
-              git clone --depth 1 --branch v1.9.6 \
-                https://github.com/spiffe/spire /tmp/spire
-              cp /patched-session/session.go \
-                /tmp/spire/pkg/agent/plugin/nodeattestor/tpmdevid/tpmutil/session.go
+              git clone --depth 1 --branch tpmdevid-srk-reuse \
+                https://github.com/skeptomai/spire /tmp/spire
               cd /tmp/spire
               CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
                 go build -trimpath -o /workspace/spire-agent ./cmd/spire-agent
@@ -76,9 +69,6 @@ spec:
           volumeMounts:
             - name: workspace
               mountPath: /workspace
-            - name: patched-session
-              mountPath: /patched-session
-              readOnly: true
           resources:
             requests:
               cpu: "2"

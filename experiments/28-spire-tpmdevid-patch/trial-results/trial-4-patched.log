@@ -1,19 +1,31 @@
 === Trial 4 (patched) ===
-Start: 2026-07-19T22:53:15Z
+Start: 2026-07-20T01:40:45Z
 --- TPM state (pre) ---
 - 0x81000001
 - 0x81000009
-bpftrace PID on ipc9: 2078098
-DaemonSet applied at 22:53:18Z
-Pod running: spire-agent-trial-patched-7fvzk
-time="2026-07-19T22:53:20Z" level=info msg="SVID is not found. Starting node attestation" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
-time="2026-07-19T22:53:48Z" level=info msg="Node attestation was successful" rettestable=true spiffe_id="spiffe://ipc.local/spire/agent/tpm_devid/dd04bfbf9dbfb604b0fdc1bf1d42d03e73788417" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
-bpftrace output: experiments/28-spire-tpmdevid-patch/trial-results/trial-4-patched.bt (1 lines)
+bpftrace PID on ipc9: 2360729
+DaemonSet applied at 01:41:05Z
+Pod running: spire-agent-trial-patched-gwzzq
+time="2026-07-20T01:41:06Z" level=info msg="SVID is not found. Starting node attestation" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
+time="2026-07-20T01:41:34Z" level=info msg="Node attestation was successful" reattestable=true spiffe_id="spiffe://ipc.local/spire/agent/tpm_devid/dd04bfbf9dbfb604b0fdc1bf1d42d03e73788417" subsystem_name=attestor trust_domain_id="spiffe://ipc.local"
+bpftrace output: /home/cb/Projects/k3s-experiments/experiments/28-spire-tpmdevid-patch/trial-results/trial-4-patched.bt (117 lines)
 --- CreatePrimary calls (read() duration > 5s) ---
-(none captured)
+[130540329] read() returned 27 bytes in 0 ms
+[130564652] read() returned 490 bytes in 0 ms
+[130564785] read() returned 59 bytes in 0 ms
+[130565061] read() returned 732 bytes in 0 ms
+[130565251] read() returned 59 bytes in 0 ms
+[130565422] read() returned 10 bytes in 0 ms
+[130565614] read() returned 522 bytes in 0 ms
+[130565813] read() returned 27 bytes in 0 ms
+[130566014] read() returned 62 bytes in 0 ms
+[130566218] read() returned 789 bytes in 0 ms
+[130566425] read() returned 682 bytes in 0 ms
+[130566628] read() returned 398 bytes in 0 ms
+[130566911] read() returned 429 bytes in 0 ms
 Pod terminated
 --- TPM state (post) ---
 - 0x81000001
 - 0x81000009
-End: 2026-07-19T22:54:41Z
+End: 2026-07-20T01:42:27Z
 === Trial 4 done ===
