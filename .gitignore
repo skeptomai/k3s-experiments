@@ -1,6 +1,8 @@
 
 backups/
 .claude/
+!.claude/skills/
+!.claude/skills/**
 # Local secret env for tailscale-cleanup (never commit)
 scripts/op-env.sh
 config/tpm/devid-ca.key.pem
