@@ -1,0 +1,86 @@
+#!/usr/bin/env bpftrace
+// MetalLB speaker container lifecycle tracer
+// Goal: determine whether Pelagos sends signals to speaker processes on container
+// deletion/crash, to debug the orphaned-process / port-7946-busy bug.
+//
+// Run on the affected node. Captures:
+//   EXEC           - new speaker process started (note PID for tracking)
+//   FORK           - speaker forked a child (unusual but worth knowing)
+//   EXIT           - speaker process exited (or notably: absence = orphan)
+//   SIGNAL_GEN     - a signal was generated targeting the speaker PID
+//   SIGNAL_DELIVER - a signal was actually delivered to the speaker process
+//   KILL_SYSCALL   - kill(2) from any caller targeting the speaker PID
+//   TGKILL_SYSCALL - tgkill(2) targeting the speaker thread group
+//
+// After triggering a pod deletion, look for:
+//   - SIGNAL_GEN / KILL_SYSCALL from pelagos-cri, containerd, or runc → Pelagos sent it
+//   - EXIT absent after SIGNAL_GEN → process ignored/blocked the signal
+//   - No SIGNAL_GEN at all → Pelagos never tried to kill the process
+
+BEGIN {
+    printf("%-10s %-6s %-6s %-20s %s\n", "ms", "PID", "PPID", "EVENT", "DETAIL");
+    printf("Watching for speaker process exec/exit/signals...\n\n");
+}
+
+
+tracepoint:sched:sched_process_exec
+/comm == "speaker"/
+{
+    @speakers[pid] = nsecs;
+    printf("%-10lu %-6d %-6d %-20s file=%s\n",
+        elapsed / 1000000, pid, ppid, "EXEC", str(args->filename));
+}
+
+tracepoint:sched:sched_process_fork
+/comm == "speaker"/
+{
+    @speakers[args->child_pid] = nsecs;
+    printf("%-10lu %-6d %-6d %-20s child_pid=%d\n",
+        elapsed / 1000000, pid, ppid, "FORK", args->child_pid);
+}
+
+tracepoint:sched:sched_process_exit
+/comm == "speaker" || @speakers[pid]/
+{
+    printf("%-10lu %-6d %-6d %-20s lived=%lums\n",
+        elapsed / 1000000, pid, ppid, "EXIT",
+        @speakers[pid] ? (nsecs - @speakers[pid]) / 1000000 : 0);
+    delete(@speakers[pid]);
+}
+
+// Signal generated targeting a speaker process — match by target comm OR map
+// (comm match catches processes that started before bpftrace did)
+tracepoint:signal:signal_generate
+/str(args->comm) == "speaker" || @speakers[(int32)args->pid]/
+{
+    printf("%-10lu %-6d %-6d %-20s sig=%d -> target_pid=%d target_comm=%s result=%d sender=%s\n",
+        elapsed / 1000000, pid, ppid, "SIGNAL_GEN",
+        args->sig, args->pid, str(args->comm), args->result, comm);
+}
+
+// Signal delivered — runs in context of speaker process
+tracepoint:signal:signal_deliver
+/comm == "speaker" || @speakers[pid]/
+{
+    printf("%-10lu %-6d %-6d %-20s sig=%d handler=0x%lx\n",
+        elapsed / 1000000, pid, ppid, "SIGNAL_DELIVER",
+        args->sig, args->sa_handler);
+}
+
+// kill(2) syscall — reveals WHO is trying to kill the speaker
+tracepoint:syscalls:sys_enter_kill
+/@speakers[(int32)args->pid]/
+{
+    printf("%-10lu %-6d %-6d %-20s caller=%s -> target_pid=%d sig=%d\n",
+        elapsed / 1000000, pid, ppid, "KILL_SYSCALL",
+        comm, args->pid, args->sig);
+}
+
+// tgkill(2) — more precise thread-targeted kill (field is 'pid' in kernel ABI, not 'tid')
+tracepoint:syscalls:sys_enter_tgkill
+/@speakers[(int32)args->tgid]/
+{
+    printf("%-10lu %-6d %-6d %-20s caller=%s -> tgid=%d tid=%d sig=%d\n",
+        elapsed / 1000000, pid, ppid, "TGKILL_SYSCALL",
+        comm, args->tgid, args->pid, args->sig);
+}
