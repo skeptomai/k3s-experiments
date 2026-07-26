@@ -54,7 +54,33 @@ DEADTIME 60
 POWERDOWNFLAG /etc/killpower
 NOCOMMWARNTIME 300
 FINALDELAY 5
+
+NOTIFYCMD /usr/sbin/upssched
+NOTIFYFLAG ONBATT SYSLOG+WALL+EXEC
+NOTIFYFLAG ONLINE SYSLOG+WALL+EXEC
 EOF
+
+# upssched: 5-minute on-battery timer → FSD to all nodes
+cat > /etc/nut/upssched.conf << 'EOF'
+CMDSCRIPT /etc/nut/upssched-cmd
+PIPEFN /run/nut/upssched.pipe
+LOCKFN /run/nut/upssched.lock
+
+AT ONBATT * START-TIMER onbatt 300
+AT ONLINE * CANCEL-TIMER onbatt
+EOF
+
+cat > /etc/nut/upssched-cmd << 'EOF'
+#!/bin/sh
+case "$1" in
+    onbatt)
+        logger -t upssched "UPS on battery for 5 minutes — initiating cluster shutdown via FSD"
+        /usr/sbin/upsmon -c fsd
+        ;;
+esac
+EOF
+chmod 755 /etc/nut/upssched-cmd
+chown root:nut /etc/nut/upssched-cmd
 
 # udev: grant nut group access to the UPS via both libusb and hidraw paths
 cat > /etc/udev/rules.d/62-nut-cyberpower.rules << 'EOF'
