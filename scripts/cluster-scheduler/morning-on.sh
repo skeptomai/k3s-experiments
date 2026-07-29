@@ -9,7 +9,7 @@ ALL_NODES="ipc4 ipc5 ipc6 ipc7 ipc8 ipc9"
 
 echo "==> [$(date)] cluster morning-on starting"
 echo "==> Powering on all cluster nodes..."
-python3 /scripts/cluster-kasa-outlet.py on all
+python3 /scripts/cluster-kasa-outlet.py on all || echo "WARN: Kasa outlet unreachable — nodes may already be up, continuing"
 
 echo "==> [$(date)] Waiting for API server to become reachable..."
 until kubectl get nodes --request-timeout=5s >/dev/null 2>&1; do
