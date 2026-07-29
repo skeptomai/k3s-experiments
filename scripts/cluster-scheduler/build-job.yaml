@@ -61,6 +61,7 @@ spec:
           args:
             - |
               set -eux
+              apt-get update -qq && apt-get install -y -qq ca-certificates
               /pelagos build \
                 --tag 192.168.89.2:5004/cluster-scheduler:latest \
                 --network host \
