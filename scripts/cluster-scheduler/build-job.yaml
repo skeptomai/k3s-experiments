@@ -56,7 +56,7 @@ spec:
 
       containers:
         - name: build-and-push
-          image: alpine:3.20
+          image: ubuntu:24.04
           command: ["/bin/sh", "-c"]
           args:
             - |
