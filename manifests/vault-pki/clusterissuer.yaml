@@ -1,0 +1,25 @@
+# cert-manager ClusterIssuer backed by Vault PKI intermediate CA.
+#
+# Trust chain:
+#   internal-ca (self-signed, cert-manager) → Vault pki_int (intermediate) → leaf certs
+#
+# caBundle is the internal-ca cert (tls.crt from the cert-manager/internal-ca-tls Secret),
+# used to verify Vault's TLS certificate (which is also signed by internal-ca-issuer).
+# It is a public cert — safe to commit.
+#
+# Prerequisite: run scripts/setup-vault-pki.sh to configure Vault.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: vault-pki-issuer
+spec:
+  vault:
+    server: https://vault.vault.svc:8200
+    path: pki_int/sign/home-lab
+    caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJkRENDQVJxZ0F3SUJBZ0lRUzJ4aGI3TGFQUC82QUxJbUJZSmEwREFLQmdncWhrak9QUVFEQWpBYU1SZ3cKRmdZRFZRUURFdzlyTTNNdGFXNTBaWEp1WVd3dFkyRXdIaGNOTWpZd05qRTBNREV4T0RNM1doY05Nell3TmpFeApNREV4T0RNM1dqQWFNUmd3RmdZRFZRUURFdzlyTTNNdGFXNTBaWEp1WVd3dFkyRXdXVEFUQmdjcWhrak9QUUlCCkJnZ3Foa2pPUFFNQkJ3TkNBQVRaUWxyU2syK2tyaVVQQWdNR0pHWTV2RGJMTU5IdkVtY2xUeDRwdXhFRVJyN3EKaFVpbGo0VHMzK2VtZ25EZllUVXliUEZzRTlXMlo4WWpuV0JzVDlNbW8wSXdRREFPQmdOVkhROEJBZjhFQkFNQwpBcVF3RHdZRFZSMFRBUUgvQkFVd0F3RUIvekFkQmdOVkhRNEVGZ1FVR2F1cWN1Njh0c1JrajJPSnZ3MDZ2QW9NCklmMHdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWdlWDlwamNoNWU4VW9EN3hhTnNTQTZLa2YrMWNKdi9HRzA3QWgKTW9kRFpFUUNJUURyeEI5U2NvSFpNdDdic2lmTmkwMExUL3UyQVpaaUxIc2M1Tm5KNVBtTVNRPT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    auth:
+      kubernetes:
+        mountPath: /v1/auth/kubernetes
+        role: cert-manager
+        serviceAccountRef:
+          name: cert-manager
