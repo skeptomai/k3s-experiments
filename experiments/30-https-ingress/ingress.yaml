@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello
+  namespace: https-demo
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - hello.home.skeptomai.com
+      secretName: hello-tls
+  rules:
+    - host: hello.home.skeptomai.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello
+                port:
+                  number: 80

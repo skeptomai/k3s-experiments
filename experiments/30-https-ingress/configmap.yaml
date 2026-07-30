@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-nginx
+  namespace: https-demo
+data:
+  default.conf: |
+    server {
+      listen 80;
+      add_header X-Pod-Name $hostname always;
+      location / {
+        root /usr/share/nginx/html;
+        index index.html;
+      }
+    }
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Experiment 30: HTTPS Ingress</title>
+      <style>
+        body { font-family: monospace; max-width: 640px; margin: 4em auto; padding: 0 1em; }
+        h1 { font-size: 1.2em; }
+        .check { color: green; }
+        code { background: #eee; padding: 0.1em 0.3em; border-radius: 3px; }
+      </style>
+    </head>
+    <body>
+      <h1>Experiment 30: HTTPS Ingress</h1>
+      <p><span class="check">✓</span> TLS — cert issued by Vault PKI intermediate CA,
+         rooted at <code>internal-ca</code></p>
+      <p><span class="check">✓</span> Load balanced — 3 replicas behind Traefik</p>
+      <p><span class="check">✓</span> MetalLB L2 VIP at <code>192.168.88.240</code></p>
+      <p>Check the <code>X-Pod-Name</code> response header to see which pod served
+         this request — reload to watch it rotate across replicas.</p>
+    </body>
+    </html>
