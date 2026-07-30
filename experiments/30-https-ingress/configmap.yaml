@@ -17,6 +17,7 @@ data:
     <!DOCTYPE html>
     <html>
     <head>
+      <meta charset="UTF-8">
       <title>Experiment 30: HTTPS Ingress</title>
       <style>
         body { font-family: monospace; max-width: 640px; margin: 4em auto; padding: 0 1em; }
