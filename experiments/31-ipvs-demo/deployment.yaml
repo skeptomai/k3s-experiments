@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ipvs-demo
+  namespace: ipvs-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ipvs-demo
+  template:
+    metadata:
+      labels:
+        app: ipvs-demo
+    spec:
+      containers:
+        - name: server
+          image: 192.168.89.2:5004/ipvs-demo:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi

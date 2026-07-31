@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ipvs-demo
+  namespace: ipvs-demo
+spec:
+  selector:
+    app: ipvs-demo
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# LoadBalancer service for the IPVS demo — gets its own MetalLB IP so traffic
+# goes Client → IPVS → demo pods directly (no Traefik in the path).
+# This makes the IPVS least-connection distribution directly observable in
+# /proc/net/ip_vs: the real servers are the demo pod IPs, not Traefik pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ipvs-demo-lb
+  namespace: ipvs-demo
+spec:
+  type: LoadBalancer
+  selector:
+    app: ipvs-demo
+  ports:
+    - port: 80
+      targetPort: 8080

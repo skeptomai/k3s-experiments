@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ipvs-demo
+  namespace: ipvs-demo
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [ipvs-demo.home.skeptomai.com]
+      secretName: ipvs-demo-tls
+  rules:
+    - host: ipvs-demo.home.skeptomai.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ipvs-demo
+                port:
+                  number: 80

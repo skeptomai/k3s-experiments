@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ipvs-demo-tls
+  namespace: ipvs-demo
+spec:
+  secretName: ipvs-demo-tls
+  duration: 8760h
+  issuerRef:
+    name: vault-pki-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - ipvs-demo.home.skeptomai.com
