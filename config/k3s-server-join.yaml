@@ -11,6 +11,9 @@
 # after placing this file (with token filled in) at /etc/rancher/k3s/config.yaml.
 container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
 flannel-backend: wireguard-native
+kube-proxy-arg:
+  - "proxy-mode=ipvs"
+  - "ipvs-scheduler=lc"
 disable:
   - local-storage
   - servicelb   # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md

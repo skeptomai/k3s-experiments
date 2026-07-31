@@ -1,4 +1,7 @@
 container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
+kube-proxy-arg:
+  - "proxy-mode=ipvs"
+  - "ipvs-scheduler=lc"
 # node-label persists node-class through a reinstall (applied at registration).
 # Agents = the i5-12500 non-T "fastest" tier (ipc7-9). Workloads select node-class;
 # vault etc. accept [performance, fastest] so they can land on either i5 tier.
