@@ -206,34 +206,50 @@ graph LR
     client -->|"GET /\nHost: grafana.home.skeptomai.com\nHTTPS :443"| vip
 
     subgraph "MetalLB"
-        vip["192.168.88.240\n(MetalLB VIP)"]
+        vip["192.168.88.240\n(speaker node receives via ARP)"]
     end
 
-    vip --> traefik["Traefik pod\n(reads Host header)"]
+    vip -->|"arrives at speaker node"| kp["kube-proxy\n(iptables DNAT on speaker node)"]
+    kp -->|"→ any Traefik pod\n(possibly different node)"| traefik["Traefik pod\n(terminates TLS,\nreads Host header)"]
 
     subgraph "Routing table (from Ingress / IngressRoute)"
-        r1["grafana.home.skeptomai.com → grafana-svc:3000"]
-        r2["prometheus.home.skeptomai.com → prometheus-svc:9090"]
-        r3["vault.home.skeptomai.com → vault-svc:8200"]
+        r1["grafana.home.skeptomai.com"]
+        r2["prometheus.home.skeptomai.com"]
+        r3["vault.home.skeptomai.com"]
     end
 
     traefik --> r1 & r2 & r3
 
-    r1 --> gs["grafana ClusterIP\n→ grafana pods"]
-    r2 --> ps["prometheus ClusterIP\n→ prometheus pods"]
-    r3 --> vs["vault ClusterIP\n→ vault pods"]
+    r1 -->|"direct to pod IP\n(from EndpointSlice)"| gp["grafana pod\n10.x.x.x"]
+    r2 -->|"direct to pod IP\n(from EndpointSlice)"| pp["prometheus pod\n10.x.x.x"]
+    r3 -->|"direct to pod IP\n(from EndpointSlice)"| vp["vault pod\n10.x.x.x"]
 ```
 
 The flow for a single request:
 1. Client resolves `grafana.home.skeptomai.com` → `192.168.88.240` (DNS)
-2. TCP connection arrives at `.240:443`; MetalLB delivers it to the node whose speaker
-   holds `.240` (currently ipc4)
-3. Traefik terminates TLS, reads the decrypted `Host:` header
-4. Matches against routing table → `grafana-svc:3000`
-5. Proxies to the Grafana ClusterIP Service, which load-balances across Grafana pods
+2. TCP connection arrives at `.240:443`; the MetalLB speaker node receives it via L2/ARP
+3. kube-proxy iptables DNAT on the speaker node redirects to a Traefik pod — which may
+   be on a different node entirely
+4. Traefik terminates TLS, reads the decrypted `Host:` header
+5. Matches routing table → `grafana-svc`
+6. Traefik watches EndpointSlices for `grafana-svc`, picks a healthy pod IP directly,
+   and proxies to it — **kube-proxy is not involved in this hop**
 
-Traefik knows nothing about which node the pods are on — that's the ClusterIP Service's
-job (backed by kube-proxy iptables rules on every node).
+The critical distinction: kube-proxy handles getting traffic *to* Traefik. Traefik
+handles everything after that — both the L7 routing decision and the backend pod
+selection. Traefik reads EndpointSlices from the Kubernetes API and maintains its own
+list of live pod IPs; it never routes via a ClusterIP. This is why Traefik supports its
+own load balancing algorithms (weighted round-robin etc.) for backend services.
+
+### Who does what
+
+Three layers, each stabilizing one hop:
+
+| Layer | Stabilizes | Mechanism |
+|---|---|---|
+| MetalLB | External IP → a node | ARP/GARP from elected speaker |
+| kube-proxy | Node → a Traefik pod | iptables DNAT (on speaker node) |
+| Traefik | Host header → a backend pod | EndpointSlice watch + direct pod IP |
 
 ---
 
