@@ -10,13 +10,14 @@
 #     INSTALL_K3S_EXEC=server sh -
 # after placing this file (with token filled in) at /etc/rancher/k3s/config.yaml.
 container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
-flannel-backend: wireguard-native
+flannel-backend: none   # Cilium manages CNI; k3s must not run Flannel
 kube-proxy-arg:
   - "proxy-mode=ipvs"
   - "ipvs-scheduler=lc"
 disable:
   - local-storage
-  - servicelb   # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
+  - servicelb         # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
+  - network-policy    # Cilium enforces NetworkPolicy; disable k3s built-in controller
 server: "https://192.168.88.58:6443"   # kube-vip VIP (HA endpoint — NOT a single node)
 token: "<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>"
 # Include the kube-vip control-plane VIP in the apiserver serving cert SAN.

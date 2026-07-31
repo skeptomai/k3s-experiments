@@ -1,11 +1,12 @@
 container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
-flannel-backend: wireguard-native
+flannel-backend: none   # Cilium manages CNI; k3s must not run Flannel
 kube-proxy-arg:
   - "proxy-mode=ipvs"
   - "ipvs-scheduler=lc"
 disable:
   - local-storage
-  - servicelb   # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
+  - servicelb         # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
+  - network-policy    # Cilium enforces NetworkPolicy; disable k3s built-in controller
 # Initialize the embedded-etcd datastore (HA control plane with ipc5/ipc6).
 # This member is the cluster-init seed (ipc4); ipc5/ipc6 join as additional servers.
 cluster-init: true
