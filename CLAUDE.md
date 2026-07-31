@@ -48,6 +48,54 @@ previously workers.
 
 Run `kubectl apply` from omen against the local repo (always current). Do NOT use a clone on ipc4 — it goes stale. Flux manages `manifests/` from GitHub directly; experiments are applied manually from omen via SSH.
 
+## Agent Coordination
+
+The Pelagos agent (`~/Projects/pelagos/`) builds and releases the container runtime this
+cluster runs. A shared blackboard at `~/Projects/agent-coordinator/state/` keeps both
+agents synchronized.
+
+### On startup — read the blackboard
+
+```bash
+cat ~/Projects/agent-coordinator/state/pelagos.json
+```
+
+Check `signals_out.to_k3s`:
+- `"upgrade-and-test"` → a new Pelagos release is ready. Upgrade the cluster to
+  `target_version`, run cluster validation, then write results back (see below).
+  Clear the signal first (set `to_k3s = null`, commit) before starting the upgrade.
+- `"test-only"` → run cluster validation against the current installed version without
+  upgrading (e.g., after a config or manifest change).
+
+Also check `pelagos.json.latest_release` vs `cluster.json.pelagos_installed` — if they
+differ and there's no explicit signal, flag it to the user.
+
+### After experiments or cluster validation — write the blackboard
+
+```bash
+# Read current state first, then write merged update to cluster.json:
+#   pelagos_installed = "<version now running>"
+#   last_test_run = "<ISO 8601>"
+#   last_test_result.version_tested = "<version>"
+#   last_test_result.pass = true | false
+#   last_test_result.issues_found = [<issue numbers opened>]
+#   last_test_result.notes = "<brief summary>"
+#   signals_out.to_pelagos = "new-cluster-bugs" (if issues found) | null
+#   signals_out.new_issue_numbers = [<issue numbers>]
+#   updated_by = "k3s-agent"
+#   updated_at = "<ISO 8601>"
+cd ~/Projects/agent-coordinator && git add state/ && git commit -m "chore: k3s-agent post-test state update"
+```
+
+### When filing a GitHub issue against Pelagos
+
+Always add the label `cluster-origin` and include in the issue body:
+- Pelagos version at time of failure (`pelagos_installed` from cluster.json)
+- Which node(s) exhibited the failure
+- Reproduction steps (kubectl/k3s commands that trigger it)
+
+---
+
 ## What Claude Can Do Directly
 
 Unlike a typical remote-deploy workflow, Claude can SSH directly to the nodes and run kubectl/k3s commands. Scripts in `scripts/` are the preferred way to do repeatable operations.
