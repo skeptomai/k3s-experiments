@@ -1,107 +1,73 @@
 # Experiment 27 — Ubuntu cloud VM with virtctl SSH jump
 
-Demonstrates a full-stack KubeVirt SSH workflow using a real Ubuntu 24.04 cloud image
-where cloud-init correctly handles `ssh_authorized_keys` — no manual key injection
-needed. Reuses the RBAC and virtctl jump container from experiment 26.
-
-## How it works
-
-- Ubuntu 24.04 minimal cloud image packed as a KubeVirt `containerDisk`
-- `cloudInitNoCloud` userData passes the RSA public key via `ssh_authorized_keys`
-- cloud-init runs on first boot, installs the key into `/home/ubuntu/.ssh/authorized_keys`
-- A jump pod (same ServiceAccount + image from exp 26) SSHes in via `virtctl ssh`,
-  which tunnels through the Kubernetes API portforward subresource
-
-No direct network path from omen to the VM is needed — the SSH connection travels:
-`jump pod → kubelet API → virt-handler → virtqemud → QEMU serial/virtio → sshd`
+This experiment demonstrates KubeVirt's cloud-init integration using a real Ubuntu 24.04 cloud image, where `ssh_authorized_keys` in the userData payload causes cloud-init to install the public key before sshd accepts connections. It extends experiment 26's virtctl jump pattern to a production-grade OS, showing that the same RBAC and jump container work unchanged — only the guest image and cloud-init config differ.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `vmi-ubuntu.yaml` | Ubuntu 24.04 VMI (2 cores, 1Gi RAM) with cloud-init SSH key injection |
-| `jump-job.yaml` | Job that SSHes into the VM and runs a command |
+| `vmi-ubuntu.yaml` | Ubuntu 24.04 VMI (2 cores, 1Gi RAM) with cloudInitNoCloud SSH key injection |
+| `jump-job.yaml` | Job that SSHes into the VM via virtctl and runs a command to verify cloud-init completed |
 
 ## Prerequisites
 
-This experiment reuses resources from experiment 26:
+This experiment reuses resources from experiment 26. Apply the RBAC and create the SSH key secret if not already present:
 
-- `vm-jump` ServiceAccount + RBAC (`experiments/26-virtctl-ssh-jump/rbac.yaml`)
-- `vm-ssh-key` Secret (RSA 2048 private key)
-- `192.168.89.2:5004/kubevirt/virtctl-jump:v1.8.4-ssh` container image
-
-Apply exp 26 RBAC if not already present:
-```bash
+```
 kubectl apply -f experiments/26-virtctl-ssh-jump/rbac.yaml
 ```
 
-## Container disk image
+The `vm-ssh-key` Secret and `192.168.89.2:5004/kubevirt/virtctl-jump:v1.8.4-ssh` image must also exist from experiment 26.
 
-The Ubuntu disk image is packed as a KubeVirt `containerDisk` — a container with the
-disk image at `/disk/disk.img`. Build and push it once:
+## Container disk
 
-```bash
-wget https://cloud-images.ubuntu.com/minimal/releases/24.04/release/ubuntu-24.04-minimal-cloudimg-amd64.img
+The Ubuntu disk image is packaged as a KubeVirt `containerDisk` and pushed to the local registry. Build and push it once (skip if already present):
+
+```
+wget https://cloud-images.ubuntu.com/minimal/releases/24.04/release/ubuntu-24.04-minimal-cloudimg-amd64.img && printf 'FROM scratch\nADD ubuntu-24.04-minimal-cloudimg-amd64.img /disk/disk.img\n' > ubuntu-disk.dockerfile && sudo pelagos build -f ubuntu-disk.dockerfile -t 192.168.89.2:5004/ubuntu/ubuntu-cloud-disk:24.04 . && sudo pelagos image push --insecure 192.168.89.2:5004/ubuntu/ubuntu-cloud-disk:24.04
 ```
 
-Create `ubuntu-disk.dockerfile`:
-```dockerfile
-FROM scratch
-ADD ubuntu-24.04-minimal-cloudimg-amd64.img /disk/disk.img
+## Apply
+
+Start the VM:
+
+```
+kubectl apply -f experiments/27-ubuntu-cloud-vm/vmi-ubuntu.yaml
 ```
 
-```bash
-sudo pelagos build -f ubuntu-disk.dockerfile -t 192.168.89.2:5004/ubuntu/ubuntu-cloud-disk:24.04 .
-sudo pelagos image push --insecure 192.168.89.2:5004/ubuntu/ubuntu-cloud-disk:24.04
+Wait for it to reach Running state:
+
 ```
-
-The image is already in the local registry — rebuild only if the base image changes.
-
-## Running
-
-### 1. Start the VM
-
-```bash
-kubectl create -f experiments/27-ubuntu-cloud-vm/vmi-ubuntu.yaml
 kubectl get vmi ubuntu-cloud -w
 ```
 
-Wait for `Running`. The VM takes ~30–60 seconds for cloud-init to complete after entering
-Running state.
+Then run the SSH jump job:
 
-### 2. Run the jump job
-
-```bash
-kubectl create -f experiments/27-ubuntu-cloud-vm/jump-job.yaml
-kubectl logs -l job-name=ubuntu-ssh-jump --follow
+```
+kubectl apply -f experiments/27-ubuntu-cloud-vm/jump-job.yaml
 ```
 
-Expected output:
+## Observe
+
+1. Watch the VMI reach Running — cloud-init runs inside the guest during first boot, which takes 30–60 seconds after the VMI is Running.
+
+2. Tail the jump job logs:
+
+   ```
+   kubectl logs -l job-name=ubuntu-ssh-jump --follow
+   ```
+
+   Expected output:
+   ```
+   Linux ubuntu-cloud 6.8.0-134-generic ...
+   status: done
+   SSH-jump-success
+   ```
+
+   `cloud-init status: done` confirms key injection completed before the SSH session landed. The virtctl tunnel path is: jump pod → kubelet portforward → virt-handler → virtqemud → QEMU → sshd. No direct network path from the jump pod to the VM is required.
+
+## Teardown
+
 ```
-Linux ubuntu-cloud 6.8.0-134-generic #134-Ubuntu SMP PREEMPT_DYNAMIC Fri Jun 26 18:43:11 UTC 2026 x86_64
-status: done
-SSH-jump-success
+kubectl delete -f experiments/27-ubuntu-cloud-vm/jump-job.yaml -f experiments/27-ubuntu-cloud-vm/vmi-ubuntu.yaml
 ```
-
-`cloud-init status: done` confirms key injection completed before the SSH landed.
-
-### 3. Cleanup
-
-```bash
-kubectl delete job ubuntu-ssh-jump
-kubectl delete vmi ubuntu-cloud
-```
-
-## Why Ubuntu instead of CirrOS
-
-CirrOS (experiment 25/26) uses a stripped-down cloud-init reimplementation that silently
-ignores `ssh_authorized_keys`. It also ships Dropbear v2018.76, which only speaks legacy
-`ssh-rsa` (SHA1) — requiring explicit `PubkeyAcceptedAlgorithms=+ssh-rsa` on the
-client.
-
-Ubuntu cloud images include:
-- Full cloud-init: `ssh_authorized_keys` works out of the box
-- Current OpenSSH server: ed25519 and `rsa-sha2-256` work; no legacy flags needed
-- `ubuntu` user pre-created by cloud-init with `sudo` access
-
-The jump job connects as `ubuntu` with no password, no manual setup.

@@ -1,100 +1,56 @@
-# Experiment 20: cert-manager
+# Experiment 20 — cert-manager
 
-## What you'll observe
-
-- cert-manager running as cluster infrastructure (installed via Flux from `manifests/cert-manager/`)
-- A `ClusterIssuer` with the `selfSigned` backend — no ACME, no external CA required
-- A `Certificate` resource that cert-manager resolves into a Kubernetes TLS `Secret`
-- Automatic certificate renewal (cert-manager watches `renewBefore` and rotates before expiry)
-
-## Concepts
-
-### What cert-manager does
-
-cert-manager is a Kubernetes controller that manages the full lifecycle of X.509 certificates:
-
-1. You declare a `Certificate` resource (desired state)
-2. cert-manager talks to an `Issuer` or `ClusterIssuer` to obtain the cert
-3. cert-manager stores the result in a `Secret` of type `kubernetes.io/tls`
-4. cert-manager watches expiry and renews automatically before `renewBefore`
-
-### Issuers vs ClusterIssuers
-
-| Resource | Scope | Use case |
-|----------|-------|----------|
-| `Issuer` | Namespace | Per-team CA; certificates only in that namespace |
-| `ClusterIssuer` | Cluster-wide | Shared CA; any namespace can reference it |
-
-This experiment uses a `ClusterIssuer` so any namespace can request certs from it.
-
-### Issuer backends
-
-| Backend | How it works | When to use |
-|---------|-------------|-------------|
-| `selfSigned` | Signs with its own private key | Internal cluster services, experiments |
-| `ca` | Signs with a provided CA cert/key | Internal PKI; share the CA cert with clients |
-| `acme` | ACME protocol (Let's Encrypt, etc.) | Public-facing services with a real domain |
-| `vault` | HashiCorp Vault PKI | Enterprise PKI |
-
-This experiment uses `selfSigned` — no external dependencies, works entirely in-cluster.
-
-### The Certificate lifecycle
-
-```
-Certificate (desired) → cert-manager controller → CertificateRequest → Issuer → Secret (actual)
-```
-
-The `Secret` contains three keys:
-- `tls.crt` — the certificate (PEM)
-- `tls.key` — the private key (PEM)
-- `ca.crt` — the issuer CA cert (for selfSigned, same as `tls.crt`)
-
-Pods and Ingress resources reference this Secret directly.
-
-### Relationship to SPIRE (experiment 11)
-
-They are independent — cert-manager has no knowledge of SPIRE and vice versa in this cluster.
-
-SPIRE runs its own internal PKI and delivers SVIDs in-memory via a Unix socket (the SPIFFE Workload API). Its attestation process uses the Kubernetes API to verify pod identity, not certificates. cert-manager never touches SPIRE's trust chain, and SPIRE never reads cert-manager Secrets.
-
-The practical split: use cert-manager for Ingress TLS and workloads that need a mountable TLS Secret; use SPIRE when you want attestation-based identity without distributing secrets at all.
-
-They *can* be integrated: SPIRE's `UpstreamAuthority` plugin can delegate its root CA to cert-manager, making cert-manager the root of trust for SPIRE-issued SVIDs. This gives a single CA chain across both systems, but adds complexity. This cluster does not use that integration.
+cert-manager is a Kubernetes controller that manages the full lifecycle of X.509 certificates as native cluster resources. Rather than generating and distributing certificates manually, you declare a `Certificate` resource and cert-manager handles issuance, Secret population, and automatic renewal before expiry. This experiment demonstrates the core workflow using a self-signed `ClusterIssuer` — no external CA or ACME account required — so the entire PKI lives inside the cluster.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `namespace.yaml` | `cert-demo` namespace |
-| `clusterissuer.yaml` | `selfsigned` ClusterIssuer — cluster-wide self-signed CA |
-| `certificate.yaml` | `demo-tls` Certificate → `demo-tls-secret` Secret |
+| `namespace.yaml` | Creates the `cert-demo` namespace |
+| `clusterissuer.yaml` | `ClusterIssuer` named `selfsigned` using the `selfSigned` backend |
+| `certificate.yaml` | `Certificate` for `demo.cert-demo.svc.cluster.local`; 90-day duration, 15-day renewal window, stored in Secret `demo-tls-secret` |
 
-## Infrastructure
-
-cert-manager itself is installed via Flux from `manifests/cert-manager/`, which pulls the upstream `cert-manager.yaml` release manifest. The Flux Kustomization is at `clusters/ipc/cert-manager.yaml`.
-
-## Running manually
+## Apply
 
 ```
 kubectl apply -f experiments/20-cert-manager/namespace.yaml
-kubectl apply -f experiments/20-cert-manager/clusterissuer.yaml
-kubectl apply -f experiments/20-cert-manager/certificate.yaml
+kubectl apply -f experiments/20-cert-manager/
+```
 
-# Watch cert-manager issue the certificate (~5s)
-kubectl get certificate demo-tls -n cert-demo --watch
+## Observe
 
-# Inspect the resulting TLS secret
+Watch cert-manager issue the certificate and populate the Secret:
+
+```
+kubectl get certificate -n cert-demo -w
+```
+
+The `READY` column transitions to `True` once the Secret is populated. Inspect the resulting TLS Secret:
+
+```
 kubectl get secret demo-tls-secret -n cert-demo -o yaml
+```
 
-# Decode the certificate
+The Secret contains `tls.crt`, `tls.key`, and `ca.crt`. Decode the certificate to confirm the SANs and validity window:
+
+```
 kubectl get secret demo-tls-secret -n cert-demo -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -text
 ```
 
-## Expected output
+Check the `CertificateRequest` cert-manager created internally:
 
 ```
-NAME       READY   SECRET            AGE
-demo-tls   True    demo-tls-secret   5s
+kubectl get certificaterequest -n cert-demo
 ```
 
-The Secret will contain a self-signed certificate valid for 90 days, with SANs matching the `dnsNames` in the Certificate spec.
+## Teardown
+
+```
+kubectl delete namespace cert-demo
+```
+
+The `ClusterIssuer` is cluster-scoped — delete it separately if no longer needed:
+
+```
+kubectl delete clusterissuer selfsigned
+```

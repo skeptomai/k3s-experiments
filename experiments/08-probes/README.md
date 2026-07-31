@@ -1,45 +1,22 @@
-# Experiment 08: Liveness and Readiness Probes
+# Experiment 08 — Liveness and Readiness Probes
 
-## What you'll observe
+Kubernetes probes let the control plane distinguish between a container that is alive
+and one that is ready to serve traffic — two different things with different consequences
+when they fail. This experiment makes both behaviors tangible: a liveness probe failure
+triggers a container restart (the RESTARTS counter climbs), while a readiness probe
+failure removes the pod from Service endpoints without killing it. Understanding this
+distinction is essential for writing production workloads that degrade gracefully instead
+of dropping traffic or looping in crash restarts.
 
-- A liveness probe failing → container killed and restarted (RESTARTS counter climbs)
-- A readiness probe failing → pod stays Running but receives no traffic (0/1 Ready)
-- A Service that only routes to pods whose readiness probe is passing
-- The critical difference: liveness kills, readiness just cuts traffic
+## Files
 
-## Concepts
-
-### Probe types
-
-| Type | How it checks | Success condition |
-|------|--------------|------------------|
-| `exec` | Runs a command inside the container | Exit code 0 |
-| `httpGet` | HTTP GET to a path and port | Status code 2xx or 3xx |
-| `tcpSocket` | Opens a TCP connection to a port | Connection accepted |
-
-### Probe parameters
-
-| Parameter | Meaning | Default |
-|-----------|---------|---------|
-| `initialDelaySeconds` | Wait this long after container starts before first probe | 0 |
-| `periodSeconds` | How often to probe | 10 |
-| `failureThreshold` | Consecutive failures before action is taken | 3 |
-| `successThreshold` | Consecutive successes to flip back to healthy | 1 |
-| `timeoutSeconds` | How long to wait for a probe response | 1 |
-
-### Liveness vs Readiness vs Startup
-
-| Probe | On failure | Use case |
-|-------|-----------|---------|
-| **Liveness** | Container is killed and restarted | Detect deadlocks, infinite loops — cases where the process is running but stuck |
-| **Readiness** | Pod removed from Service endpoints, not restarted | App is up but not ready yet — warming caches, waiting for a dependency |
-| **Startup** | Container is killed and restarted | Slow-starting containers — disables liveness until the app has had time to start |
-
-A startup probe is used to give a slow application extra time to initialise without
-triggering the liveness probe prematurely. Once the startup probe succeeds once,
-it hands off to the liveness probe.
-
----
+| File | Purpose |
+|------|---------|
+| `namespace.yaml` | Creates the `probes-demo` namespace |
+| `deployment-liveness.yaml` | Busybox pod that deletes `/tmp/healthy` after 30s, triggering exec liveness probe failures and restarts |
+| `deployment-readiness-ok.yaml` | Nginx pod with a readiness probe on `/` — succeeds, pod receives traffic |
+| `deployment-readiness-fail.yaml` | Nginx pod with a readiness probe on `/healthz` — 404, pod is excluded from endpoints |
+| `service.yaml` | Service selecting both readiness pods; only the passing one appears in endpoints |
 
 ## Apply
 
@@ -47,93 +24,45 @@ it hands off to the liveness probe.
 kubectl apply -f experiments/08-probes/namespace.yaml && kubectl apply -f experiments/08-probes/
 ```
 
-## Observe the liveness probe failing
+## Observe
 
-Watch the liveness-demo pod:
+### Liveness: container killed and restarted
+
+Watch the liveness-demo pod cycle through restarts:
 
 ```
-kubectl get pods -n probes-demo --watch
+kubectl get pods -n probes-demo -w
 ```
 
-The busybox container creates `/tmp/healthy` on start, sleeps 30 seconds, then
-deletes it. The liveness probe runs `cat /tmp/healthy` every 5 seconds. After the
-file is deleted, 3 consecutive failures (15 seconds) trigger a restart.
+The busybox container creates `/tmp/healthy` on start, sleeps 30 seconds, then deletes
+it. The liveness probe runs `cat /tmp/healthy` every 5 seconds with a failure threshold
+of 3 — so about 15 seconds after the file disappears, the container is killed and
+restarted. The RESTARTS counter increments roughly every 45 seconds.
 
-You'll see `RESTARTS` increment roughly every 45 seconds. Let it cycle a few times,
-then describe the pod to see the restart history:
+Describe the pod to see the probe failure events:
 
 ```
 kubectl describe pod -n probes-demo -l app=liveness-demo
 ```
 
-Look for the `Events` section:
+The Events section will show `Liveness probe failed` followed by `Container busybox failed liveness probe, will be restarted`.
 
-```
-Warning  Unhealthy  Liveness probe failed: cat: can't open '/tmp/healthy': No such file or directory
-Normal   Killing    Container busybox failed liveness probe, will be restarted
-```
-
-## Observe the readiness probe difference
+### Readiness: pod alive but cut from traffic
 
 ```
 kubectl get pods -n probes-demo -l app=readiness-demo
 ```
 
-You'll see:
+You'll see one pod `1/1 Ready` (probing `/`, which nginx serves) and one `0/1 Ready`
+(probing `/healthz`, which returns 404). Both are Running — neither is restarted.
+
+Check the Service endpoints to confirm only the healthy pod receives traffic:
 
 ```
-NAME                             READY   STATUS    RESTARTS
-readiness-ok-xxx                 1/1     Running   0
-readiness-fail-xxx               0/1     Running   0
+kubectl get endpoints -n probes-demo readiness-demo
 ```
 
-Both are `Running` — neither is being killed. But `readiness-fail` shows `0/1`: the
-container is alive but the pod is not ready. Its readiness probe is hitting `/healthz`,
-which nginx doesn't serve (404). The `readiness-ok` pod probes `/` which returns 200.
-
-## Observe the Service endpoints
-
-```
-kubectl get endpoints readiness-demo -n probes-demo
-```
-
-The Service selects both pods (both have `app: readiness-demo`) but only the ready
-pod appears in the endpoints list. Traffic sent to the Service will only reach
-`readiness-ok`.
-
-Describe the failing pod to see the probe events:
-
-```
-kubectl describe pod -n probes-demo -l variant=fail
-```
-
-In Events:
-
-```
-Warning  Unhealthy  Readiness probe failed: HTTP probe failed with statuscode: 404
-```
-
-Note: no `Killing` event. The pod is never restarted — it just stays out of the
-endpoints until its readiness probe passes.
-
-## Startup probe (concept)
-
-For a slow-starting application, a startup probe prevents liveness from restarting
-the container before it has had a chance to initialise:
-
-```yaml
-startupProbe:
-  httpGet:
-    path: /healthz
-    port: 8080
-  failureThreshold: 30
-  periodSeconds: 10
-```
-
-This gives the app up to 300 seconds (30 × 10) to pass its first health check.
-Once it does, the startup probe disables itself and the liveness probe takes over.
-Without a startup probe, a slow app would be killed and restarted repeatedly before
-it ever finished starting.
+Only the IP of the `readiness-ok` pod appears in the endpoint list.
 
 ## Teardown
 

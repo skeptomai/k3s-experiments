@@ -1,83 +1,76 @@
-# Experiment 01: Namespaces and Deployments
+# Experiment 01 — Namespaces and Deployments
 
-## What you'll observe
+The foundational Kubernetes primitives. A Namespace isolates resources; a Deployment
+declares desired state (3 replicas of nginx); Kubernetes maintains that state
+continuously — rescheduling pods that die, spreading them across nodes. This experiment
+makes that ownership chain and self-healing behavior tangible.
 
-- How namespaces isolate resources from the default namespace
-- How a Deployment manages a ReplicaSet, which manages Pods
-- How Kubernetes reschedules pods when one is killed (self-healing)
-- How load is spread across multiple replicas
+## Files
+
+| File | Purpose |
+|------|---------|
+| `namespace.yaml` | Creates the `demo` namespace that scopes all other resources |
+| `deployment.yaml` | 3-replica nginx Deployment; Kubernetes creates a ReplicaSet which creates the Pods |
+| `service.yaml` | NodePort Service on port 30080 — exposes the pods on every node's IP |
 
 ## Apply
 
+The namespace must exist before the other resources. Apply it first, then the rest:
+
 ```
-kubectl apply -f experiments/01-namespaces-and-deployments/namespace.yaml && kubectl apply -f experiments/01-namespaces-and-deployments/
+kubectl apply -f experiments/01-namespaces-and-deployments/namespace.yaml
+kubectl apply -f experiments/01-namespaces-and-deployments/
 ```
 
-The namespace must exist before the deployment. `kubectl apply -f <dir>` applies alphabetically, so `deployment.yaml` would run before `namespace.yaml` — apply the namespace explicitly first.
+## Observe
 
-## Watch it come up
+Watch pods come up — you'll see them move through `Pending → ContainerCreating → Running`:
 
 ```
 kubectl get pods -n demo -w
 ```
 
-You'll see three pods transition through `Pending → ContainerCreating → Running`. Each pod lands on whichever node has capacity — check which node each is on:
+Check which node each pod landed on:
 
 ```
 kubectl get pods -n demo -o wide
 ```
 
-## Hit the service
-
-The service is exposed as a NodePort on 30080. Any node IP works:
+Hit the service — any node IP works. Get one with:
 
 ```
-curl http://192.168.88.53:30080
-curl http://192.168.88.52:30080
-curl http://192.168.88.54:30080
+kubectl get nodes -o wide
 ```
 
-Each response shows the hostname of the pod that handled the request. Hit it several times — you'll see the hostname rotate across your three pods.
+Then:
 
-## Self-healing demo
+```
+curl http://<node-ip>:30080
+```
 
-Kill a pod by name (use a real pod name from `kubectl get pods -n demo`):
+Each response includes the hostname of the pod that handled it. Hit it several times and
+you'll see the hostname rotate across all three pods.
+
+## Self-healing
+
+Delete a pod by name (use a real name from `kubectl get pods -n demo`):
 
 ```
 kubectl delete pod -n demo <pod-name>
 ```
 
-Then immediately watch:
+Watch immediately — a replacement appears within seconds. The ReplicaSet controller sees
+`actual=2, desired=3` and creates a new pod.
 
-```
-kubectl get pods -n demo -w
-```
-
-The deleted pod disappears and a new one appears within seconds. The Deployment maintains `replicas: 3` — this is the ReplicaSet controller doing its job.
-
-## Scale up/down
-
-```
-kubectl scale deployment hello -n demo --replicas=5
-kubectl get pods -n demo -o wide
-```
-
-Five pods, spread across your three nodes. Scale back down:
-
-```
-kubectl scale deployment hello -n demo --replicas=1
-```
-
-Kubernetes picks which pods to terminate.
-
-## Inspect the ownership chain
+## Ownership chain
 
 ```
 kubectl get replicasets -n demo
 kubectl describe replicaset -n demo <rs-name>
 ```
 
-The ReplicaSet is owned by the Deployment. The Pods are owned by the ReplicaSet. This ownership chain is how rollouts and rollbacks work — the Deployment creates a new ReplicaSet and scales the old one down.
+Deployment → ReplicaSet → Pods. This chain is how rolling updates work: a new Deployment
+revision creates a new ReplicaSet, scales it up, and scales the old one down.
 
 ## Teardown
 
@@ -85,4 +78,4 @@ The ReplicaSet is owned by the Deployment. The Pods are owned by the ReplicaSet.
 kubectl delete namespace demo
 ```
 
-Deleting the namespace cascades — it removes the deployment, replicaset, pods, and service in one shot.
+Deleting the namespace cascades — Deployment, ReplicaSet, Pods, and Service all go with it.

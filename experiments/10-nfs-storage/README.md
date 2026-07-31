@@ -1,60 +1,62 @@
-# Experiment 10: NFS Persistent Storage
+# Experiment 10 — NFS Persistent Storage
 
-## What you'll observe
+NFS-backed dynamic provisioning lets pods claim durable storage without knowing anything
+about the underlying NFS server. This experiment uses `nfs-subdir-external-provisioner`
+to create a `nfs` StorageClass backed by TrueNAS on nazgul — pods request a PVC and the
+provisioner fulfills it by carving out a subdirectory automatically. The key payoff is
+`ReadWriteMany`: multiple pods on different nodes can mount the same volume simultaneously,
+which StatefulSets and other distributed workloads require.
 
-- PersistentVolumeClaims are fulfilled automatically by the NFS provisioner
-- Each PVC gets its own subdirectory on the NFS server under `/mnt/primary_storage/k8s-nfs`
-- Storage survives pod restarts and rescheduling across nodes
-- `ReadWriteMany` access mode allows multiple pods on different nodes to share a volume simultaneously
+## Files
 
-## Infrastructure
+| File | Purpose |
+|------|---------|
+| `helm-values.yaml` | Helm values for the NFS provisioner — points at nazgul, sets `nfs` as the default StorageClass with `Retain` reclaim policy |
+| `test-pvc.yaml` | PVC + Pod that verifies end-to-end: claims 1Gi via the `nfs` StorageClass and writes a file to it |
 
-NFS server: `nazgul.home.skeptomai.com` (192.168.89.2), TrueNAS SCALE  
-Export: `/mnt/primary_storage/k8s-nfs`  
-StorageClass: `nfs` (default)
+## Apply
 
-## Setup
-
-### Install the NFS provisioner via Helm
-
-```
-helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
-helm repo update
-helm install nfs-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner --namespace kube-system -f helm-values.yaml
-```
-
-### Verify
+Install the provisioner via Helm (one-time setup):
 
 ```
-sudo kubectl get storageclass
-sudo kubectl get pods -n kube-system | grep nfs
+helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner && helm repo update
+helm install nfs-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner --namespace kube-system -f experiments/10-nfs-storage/helm-values.yaml
 ```
 
-### Run the test
+Then run the test workload:
 
 ```
-sudo kubectl apply -f test-pvc.yaml
-sudo kubectl get pvc nfs-test
-sudo kubectl logs nfs-test
+kubectl apply -f experiments/10-nfs-storage/test-pvc.yaml
 ```
 
-The PVC should bind within a few seconds. On nazgul you'll see a new subdirectory
-appear under `/mnt/primary_storage/k8s-nfs`.
+## Observe
 
-### Clean up
+Watch the PVC bind — it should go `Pending → Bound` within a few seconds:
 
 ```
-sudo kubectl delete -f test-pvc.yaml
-sudo kubectl delete pvc nfs-test
+kubectl get pvc nfs-test -w
 ```
 
-## Concepts
+Check the pod completed successfully:
 
-`nfs-subdir-external-provisioner` is a dynamic provisioner — it watches for PVC
-creation events and fulfills them by creating a subdirectory on the NFS server. The
-subdirectory is named `${namespace}-${pvcname}-${pvname}` for easy identification.
+```
+kubectl logs nfs-test
+```
 
-`reclaimPolicy: Retain` means that when a PVC is deleted, the underlying directory
-on the NFS server is kept (renamed with an `archived-` prefix). This prevents
-accidental data loss. Delete the directories on nazgul manually when you're sure
-you no longer need the data.
+On nazgul, a new subdirectory appears under `/mnt/primary_storage/k8s-nfs` named
+`default-nfs-test-<pvname>`. That directory persists independently of the pod.
+
+Verify the StorageClass was installed as default:
+
+```
+kubectl get storageclass
+```
+
+## Teardown
+
+```
+kubectl delete -f experiments/10-nfs-storage/test-pvc.yaml
+```
+
+The subdirectory on nazgul is **not** deleted automatically — the `Retain` reclaim policy
+renames it with an `archived-` prefix. Remove it manually on nazgul when no longer needed.

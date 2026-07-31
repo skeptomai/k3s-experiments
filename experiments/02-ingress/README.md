@@ -1,20 +1,17 @@
-# Experiment 02: Ingress
+# Experiment 02 — Ingress
 
-Exposes the hello deployment from experiment 01 through Traefik (the k3s
-default ingress controller) using a hostname-based routing rule, instead of
-a raw NodePort.
+Kubernetes Services expose pods at the cluster level, but getting traffic in from outside still requires either a NodePort (which leaks implementation detail — node IPs and high ports) or a proper ingress controller. This experiment wires the `hello` deployment from experiment 01 through Traefik, the ingress controller already running in k3s, using hostname-based routing. The goal is to see how a single L7 proxy on a stable address can front multiple services on port 80 using only the HTTP Host header to decide where traffic goes.
 
-## What you'll observe
+## Files
 
-- How an Ingress routes HTTP requests by hostname to a backend service
-- How Traefik picks up Ingress resources automatically via the ingressClassName
-- The difference between hitting a NodePort directly vs going through the ingress controller
-- How path-based routing would work (extension of this experiment)
+| File | Purpose |
+|------|---------|
+| `ingress.yaml` | Ingress resource routing `hello.ipc` → the `hello` Service in the `demo` namespace via Traefik |
+| `load-balancing-techniques.md` | Reference doc comparing eBPF, IPVS, iptables, and userspace proxies — explains why Traefik is slower than kube-proxy but more capable |
 
 ## Prerequisites
 
-Experiment 01 must be applied — the `demo` namespace, `hello` deployment, and
-`hello` service must exist.
+Experiment 01 must be applied first. The `demo` namespace, `hello` Deployment, and `hello` Service must exist.
 
 ## Apply
 
@@ -22,55 +19,35 @@ Experiment 01 must be applied — the `demo` namespace, `hello` deployment, and
 kubectl apply -f experiments/02-ingress/ingress.yaml
 ```
 
-## Configure local DNS
+## Observe
 
-Traefik is listening on all three node IPs on port 80. The Ingress rule routes
-requests with `Host: hello.ipc` to the hello service. You need that hostname
-to resolve to one of the node IPs on your client machine.
+1. Confirm Traefik picked up the Ingress rule:
 
-Add to `/etc/hosts` on omen:
+   ```
+   kubectl get ingress -n demo
+   ```
 
-```
-192.168.88.55  hello.ipc
-```
+2. Get the Traefik LoadBalancer IP (should be `192.168.88.240`):
 
-## Test it
+   ```
+   kubectl get svc -n kube-system traefik
+   ```
 
-```
-curl http://hello.ipc
-```
+3. Add a DNS entry so `hello.ipc` resolves to Traefik. Add this line to `/etc/hosts` on omen:
 
-You should get the nginx hello page. Hit it several times — the pod hostname
-in the response will rotate across your three pods, same as with NodePort.
+   ```
+   192.168.88.240  hello.ipc
+   ```
 
-## What changed from NodePort
+4. Send a request through the ingress controller:
 
-With NodePort you were bypassing the ingress controller entirely — the iptables
-rules handled balancing directly. With Ingress, the request flow is:
+   ```
+   curl http://hello.ipc
+   ```
 
-```
-curl → Traefik (port 80 on ipc4) → hello Service → pod
-```
+   Hit it several times — the pod hostname in the response will rotate across the three pods, now load-balanced by Traefik rather than kube-proxy. The request flow is: `curl → Traefik (:80) → hello Service → pod`.
 
-Traefik is a real proxy process doing the load balancing, not kernel iptables
-rules. It also reads the Host header, which is how you can route multiple
-services through the same port 80 using different hostnames.
-
-## Add a second route (extension)
-
-To see path-based routing, add a second path to the ingress rules:
-
-```yaml
-- path: /api
-  pathType: Prefix
-  backend:
-    service:
-      name: some-other-service
-      port:
-        number: 80
-```
-
-Traefik will route `/api/*` to one service and everything else to hello.
+5. Compare with the NodePort from experiment 01 — both reach the same pods, but through fundamentally different paths. See `load-balancing-techniques.md` for the tradeoff analysis.
 
 ## Teardown
 
@@ -78,5 +55,4 @@ Traefik will route `/api/*` to one service and everything else to hello.
 kubectl delete -f experiments/02-ingress/ingress.yaml
 ```
 
-The hello deployment and service from experiment 01 remain — only the Ingress
-rule is removed.
+The `demo` namespace and `hello` Deployment/Service from experiment 01 remain intact.

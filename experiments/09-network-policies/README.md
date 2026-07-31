@@ -1,150 +1,69 @@
-# Experiment 09: Network Policies
+# Experiment 09 — Network Policies
 
-## What you'll observe
+Kubernetes NetworkPolicy lets you control which pods can talk to which other pods, on which ports. Without any policy, all pods in a namespace can reach each other freely — NetworkPolicy changes the default from "allow all" to a whitelist model where you enumerate permitted traffic and everything else is denied. This matters in multi-tenant clusters or anywhere you want to enforce service boundaries at the network layer.
 
-- Without any NetworkPolicy, all pods in a namespace can reach each other freely
-- A default-deny policy blocks all ingress to selected pods — including previously open traffic
-- An allow rule opens a specific path: one pod label to another, on one port
-- That NetworkPolicy is a whitelist, not a blacklist — you enumerate what's allowed, everything else is denied
+> **CNI note:** NetworkPolicy enforcement requires a CNI plugin that implements it. This cluster runs Flannel with `wireguard-native` backend, which does not enforce NetworkPolicy — policies are accepted by the API server but have no effect on traffic. The manifests here are correct and will enforce as-is on Cilium or Calico. This experiment documents the correct patterns for when the cluster gains an enforcing CNI.
 
-## CNI note — enforcement not active on this cluster
+## Files
 
-NetworkPolicy requires a CNI plugin that enforces it. k3s ships with Flannel, which
-does not enforce NetworkPolicy natively. Despite documentation suggesting k3s includes
-a kube-router-based policy controller, enforcement is **not functional** on this cluster
-with the `flannel-backend: wireguard-native` configuration — policies are accepted by
-the API server but have no effect on traffic.
+| File | Purpose |
+|------|---------|
+| `namespace.yaml` | Creates the `netpol-demo` namespace |
+| `deployment-backend.yaml` | nginx Deployment + Service (`app: backend`) acting as the protected service |
+| `deployment-frontend.yaml` | busybox Deployment (`app: frontend`) representing an authorized client |
+| `deployment-client.yaml` | busybox Deployment (`app: client`) representing an unauthorized client |
+| `netpol-default-deny.yaml` | Default-deny policy: selects `app: backend` pods and blocks all ingress |
+| `netpol-allow-frontend.yaml` | Allow policy: permits ingress to `app: backend` on port 80 from `app: frontend` only |
 
-**The manifests in this experiment are correct.** They will enforce as-is when the
-cluster runs an enforcing CNI (Cilium, Calico). This experiment is a placeholder for
-that future state, and documents the correct NetworkPolicy patterns in the meantime.
+## Apply
 
-To get enforcement on this cluster: replace Flannel with Cilium or Calico (backlog item).
-
-## Concepts
-
-A NetworkPolicy selects a set of pods via `podSelector` and defines ingress and/or
-egress rules for them. If a pod is selected by at least one NetworkPolicy, only
-traffic explicitly permitted by a matching rule is allowed. If a pod is not selected
-by any NetworkPolicy, all traffic is allowed (open by default).
-
-**Default-deny pattern:** A NetworkPolicy with an empty `ingress: []` (or just
-`policyTypes: [Ingress]` with no ingress rules) selects pods and denies all inbound
-traffic. This is the foundation — apply it first, then layer in allow rules.
+Apply the namespace and workloads first:
 
 ```
-No NetworkPolicy → pod is open (allow all)
-NetworkPolicy with no ingress rules → pod is closed (deny all ingress)
-NetworkPolicy with ingress rules → only matching traffic is allowed
+kubectl apply -f experiments/09-network-policies/namespace.yaml -f experiments/09-network-policies/deployment-backend.yaml -f experiments/09-network-policies/deployment-frontend.yaml -f experiments/09-network-policies/deployment-client.yaml
 ```
 
-Multiple NetworkPolicies targeting the same pod are **unioned** — if any policy
-permits the traffic, it is allowed.
-
-## Apply (initial state — no policies)
-
-```
-kubectl apply -f experiments/09-network-policies/namespace.yaml && kubectl apply -f experiments/09-network-policies/deployment-backend.yaml && kubectl apply -f experiments/09-network-policies/deployment-frontend.yaml && kubectl apply -f experiments/09-network-policies/deployment-client.yaml
-```
-
-Wait for all pods to be Running:
+Wait for pods to be Running:
 
 ```
 kubectl get pods -n netpol-demo
 ```
 
-## Step 1: verify open traffic (no policy)
+## Observe
 
-Get pod names:
+**Step 1 — Baseline (no policy): all pods reach the backend.**
 
-```
-kubectl get pods -n netpol-demo
-```
-
-From the **frontend** pod, reach the backend Service:
+From the frontend pod:
 
 ```
-kubectl exec -n netpol-demo <frontend-pod> -- wget -qO- --timeout=3 http://backend
+kubectl exec -n netpol-demo deploy/frontend -- wget -qO- --timeout=3 http://backend
 ```
 
-From the **client** pod, do the same:
+From the client pod:
 
 ```
-kubectl exec -n netpol-demo <client-pod> -- wget -qO- --timeout=3 http://backend
+kubectl exec -n netpol-demo deploy/client -- wget -qO- --timeout=3 http://backend
 ```
 
-Both return nginx's welcome page. No policies, no restrictions.
+Both return nginx's welcome page. No restrictions.
 
-## Step 2: apply default-deny to backend
+**Step 2 — Apply default-deny to backend.**
 
 ```
 kubectl apply -f experiments/09-network-policies/netpol-default-deny.yaml
 ```
 
-This policy selects `app: backend` and declares `policyTypes: [Ingress]` with no
-ingress rules — meaning deny all inbound traffic to the backend pod.
+Repeat both `wget` commands above. On an enforcing CNI, both time out — the NetworkPolicy selects `app: backend` pods and specifies `policyTypes: [Ingress]` with no ingress rules, which means deny all inbound.
 
-Retry from both pods:
-
-```
-kubectl exec -n netpol-demo <frontend-pod> -- wget -qO- --timeout=3 http://backend
-kubectl exec -n netpol-demo <client-pod> -- wget -qO- --timeout=3 http://backend
-```
-
-Both time out. The backend is now unreachable from anywhere.
-
-## Step 3: allow frontend only
+**Step 3 — Allow only frontend.**
 
 ```
 kubectl apply -f experiments/09-network-policies/netpol-allow-frontend.yaml
 ```
 
-This policy also selects `app: backend` and adds an ingress rule: allow TCP port 80
-from pods with label `app: frontend`.
+The frontend pod can now reach the backend; the client pod is still blocked. Multiple NetworkPolicies targeting the same pod are unioned — any policy that permits the traffic wins, so the allow rule opens exactly one path while the default-deny covers everything else.
 
-Test again:
-
-```
-kubectl exec -n netpol-demo <frontend-pod> -- wget -qO- --timeout=3 http://backend
-```
-
-Returns nginx welcome page — allowed.
-
-```
-kubectl exec -n netpol-demo <client-pod> -- wget -qO- --timeout=3 http://backend
-```
-
-Times out — still blocked. `client` has `app: client`, which matches no allow rule.
-
-## Inspect the policies
-
-```
-kubectl get networkpolicy -n netpol-demo
-kubectl describe networkpolicy backend-allow-frontend -n netpol-demo
-```
-
-## Egress policies
-
-This experiment only covers ingress (inbound traffic to a pod). Egress policies
-control outbound traffic from a pod and work the same way — `policyTypes: [Egress]`
-with `egress` rules. A common pattern is to allow egress only to DNS (port 53) and
-specific services, blocking all other outbound traffic.
-
-## Namespace selectors
-
-Rules can also select by namespace rather than pod label:
-
-```yaml
-ingress:
-  - from:
-      - namespaceSelector:
-          matchLabels:
-            kubernetes.io/metadata.name: production
-```
-
-This allows traffic from any pod in the `production` namespace. You can combine
-`namespaceSelector` and `podSelector` in the same rule to allow a specific pod
-in a specific namespace.
+**Key concept:** A pod with no NetworkPolicy is fully open. Once any NetworkPolicy selects a pod, that pod is closed except for what the policies explicitly permit. The policies are a whitelist, not a blacklist.
 
 ## Teardown
 
