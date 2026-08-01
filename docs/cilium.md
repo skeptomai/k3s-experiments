@@ -288,6 +288,69 @@ reconciles automatically on rebuild.
 corresponding `CiliumNetworkPolicy allow-kubelet-probes` entry in
 `manifests/cilium-netpols/` before the pods will pass health checks.
 
+## k8s NetworkPolicy vs CiliumNetworkPolicy
+
+Understanding the choice between these two APIs is key to understanding both the probe
+quirk and how to avoid it.
+
+### How each API triggers enforcement
+
+**k8s `NetworkPolicy`** — the standard Kubernetes API. Cilium honours it, but the
+semantics are blunt: the moment any NetworkPolicy selects a pod, Cilium switches that
+pod to **default-deny** for all ingress (or egress) not explicitly permitted. There is
+no way in the standard API to express "allow from the host entity" — you can only use
+pod selectors, namespace selectors, and IP CIDRs. You cannot name Cilium's `host`
+entity in a k8s NetworkPolicy. So when you write a k8s NetworkPolicy, you
+**unavoidably need a CNP alongside it** to allow kubelet probes, because the standard
+API has no vocabulary for it.
+
+**`CiliumNetworkPolicy` (CNP)** — Cilium's own CRD. Same default-deny trigger, but
+it exposes Cilium's full policy model, including `fromEntities: host/world/cluster`.
+If you write all your policies as CNPs from the start, you can fold the probe
+allowance directly into your primary policy and never need a separate
+`allow-kubelet-probes` object.
+
+### Could you avoid all this by only using CiliumNetworkPolicy?
+
+Largely yes — but **the underlying BPF bug does not go away**. The
+`cilium_host → world` misclassification exists regardless of which API you use; you
+still need `fromEntities: world` on probe ports somewhere. The difference is
+*when* you discover that:
+
+| Approach | Discovery point | Extra object needed |
+|----------|----------------|---------------------|
+| k8s NetworkPolicy | Probes break after you add the policy | Yes — separate CNP `allow-kubelet-probes` |
+| CiliumNetworkPolicy only | At policy-writing time (you include probe ports in your primary policy) | No — fold it into the main CNP |
+
+So with CNP-only you never get a surprise breakage — you just write the host/world
+allowance once in your main policy and it's done. With k8s NetworkPolicy you always
+end up needing a CNP on the side anyway, so you are always using both APIs.
+
+### Why we use k8s NetworkPolicy for experiments
+
+Experiment 09 (`experiments/09-network-policies/`) deliberately uses standard k8s
+`NetworkPolicy` objects to verify that Cilium correctly enforces the portable,
+CNI-agnostic API. If that API didn't work, swapping Cilium for another CNI would break
+things silently. Portability and standards compliance are the goal, so the extra
+`allow-kubelet-probes` CNP is an accepted cost.
+
+For namespaces we control long-term that will never change CNI (flux-system,
+monitoring, etc.), writing CNPs exclusively would be a reasonable alternative — and
+would let you inline the probe allowance rather than maintaining a separate file in
+`manifests/cilium-netpols/`. We haven't done this because it would make those
+namespaces Cilium-specific at the policy layer, which complicates any future CNI
+migration.
+
+### Summary
+
+| | k8s NetworkPolicy | CiliumNetworkPolicy only |
+|---|---|---|
+| Portability | Any CNI | Cilium only |
+| Probe allowance | Requires separate CNP | Inline in main policy |
+| Bug still present | Yes | Yes |
+| Surprise breakage | Yes (probes fail silently) | No (you write allowance upfront) |
+| Our use | Experiments, portability testing | Not used for existing namespaces |
+
 ## Diagnosing probe failures
 
 ```bash
