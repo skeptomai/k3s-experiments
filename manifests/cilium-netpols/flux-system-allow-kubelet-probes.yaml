@@ -1,0 +1,20 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-kubelet-probes
+  namespace: flux-system
+spec:
+  endpointSelector: {}
+  ingress:
+  - fromEntities:
+    - host
+  - fromEntities:
+    - world
+    toPorts:
+    - ports:
+      - port: "9440"
+        protocol: TCP
+      - port: "9090"
+        protocol: TCP
+      - port: "9443"
+        protocol: TCP
