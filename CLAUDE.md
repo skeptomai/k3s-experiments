@@ -28,6 +28,11 @@ previously workers.
   (`k8s-api.home.skeptomai.com`) across ipc4-6. omen kubeconfig has two contexts —
   `default` (tailnet `ipc4:6443`, reachable anywhere, not HA) and `ipc-vip` (the VIP,
   HA, LAN-only). See `docs/kube-vip.md`.
+- **CNI:** Cilium 1.19.6 (`kubeProxyReplacement=false`, vxlan, enforces NetworkPolicies
+  via BPF). k3s configs have `flannel-backend: none`. See `docs/cilium.md` — notably the
+  **kubelet probe quirk**: any namespace with a k8s NetworkPolicy needs a
+  `CiliumNetworkPolicy allow-kubelet-probes` in `manifests/cilium-netpols/` or health
+  probes will be blocked. Flux-managed; rebuilds automatically once Flux bootstraps.
 - **LoadBalancer:** MetalLB (L2/ARP), pool **`192.168.88.240-.250`**; k3s ServiceLB is
   disabled (`disable: servicelb` in the server configs). Traefik runs on `.240`. See
   `docs/metallb.md`. Both kube-vip and MetalLB are **Flux-managed** (`clusters/ipc/`), so
