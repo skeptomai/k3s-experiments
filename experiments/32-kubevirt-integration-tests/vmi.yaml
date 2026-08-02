@@ -1,0 +1,85 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+metadata:
+  name: pelagos-integration-tests
+  namespace: default
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ipc7
+  domain:
+    cpu:
+      cores: 4
+    memory:
+      guest: 4Gi
+    devices:
+      disks:
+        - name: rootdisk
+          disk:
+            bus: virtio
+        - name: cloudinitdisk
+          disk:
+            bus: virtio
+      interfaces:
+        - name: default
+          masquerade: {}
+  networks:
+    - name: default
+      pod: {}
+  volumes:
+    - name: rootdisk
+      containerDisk:
+        image: 192.168.89.2:5004/ubuntu/ubuntu-cloud-disk:24.04
+    - name: cloudinitdisk
+      cloudInitNoCloud:
+        userData: |
+          #cloud-config
+          packages:
+            - passt
+            - gcc
+            - wget
+            - nftables
+            - rsync
+          write_files:
+            - path: /etc/pelagos/registries.toml
+              permissions: '0644'
+              content: |
+                [mirrors]
+                "docker.io" = ["http://192.168.89.2:5000"]
+                "registry.k8s.io" = ["http://192.168.89.2:5001"]
+                "ghcr.io" = ["http://192.168.89.2:5002"]
+                "public.ecr.aws" = ["http://192.168.89.2:5003"]
+                "quay.io" = ["http://192.168.89.2:5005"]
+            - path: /usr/local/bin/run-pelagos-tests.sh
+              permissions: '0755'
+              content: |
+                #!/bin/bash
+                trap poweroff EXIT
+                set -uo pipefail
+                SERVER=http://192.168.88.63:9080
+                echo "==> $(date -Iseconds) downloading test artifacts"
+                mkdir -p /cache/target/release/deps /cache/repo /etc/pelagos
+                for BIN in pelagos pelagos-cri pelagos-dockerd pelagos-dns; do
+                  wget -q -O /cache/target/release/$BIN "$SERVER/target/release/$BIN"
+                  chmod +x /cache/target/release/$BIN
+                done
+                wget -q -O /cache/target/release/deps/integration_tests "$SERVER/target/release/deps/integration_tests"
+                chmod +x /cache/target/release/deps/integration_tests
+                wget -q -O /tmp/repo-src.tar.gz "$SERVER/repo-src.tar.gz"
+                tar -xzf /tmp/repo-src.tar.gz -C /cache/repo/
+                wget -q -O /tmp/alpine-rootfs.tar.gz "$SERVER/alpine-rootfs.tar.gz"
+                tar -xzf /tmp/alpine-rootfs.tar.gz -C /cache/repo/
+                mkdir -p /cache/repo/target/debug
+                for BIN in pelagos pelagos-cri pelagos-dockerd pelagos-dns; do
+                  ln -sfn /cache/target/release/$BIN /cache/repo/target/debug/$BIN
+                done
+                bash /cache/repo/scripts/setup.sh --no-user
+                mkdir -p /run/pelagos /run/pelagos/pasta-ns
+                modprobe overlay || true
+                modprobe br_netfilter || true
+                sysctl -w net.bridge.bridge-nf-call-iptables=1
+                echo "==> $(date -Iseconds) running tests"
+                cd /cache/repo
+                /cache/target/release/deps/integration_tests --test-threads=1 || true
+                echo "==> done at $(date -Iseconds)"
+          runcmd:
+            - /usr/local/bin/run-pelagos-tests.sh

@@ -56,7 +56,8 @@ spec:
               set -euo pipefail
               CACHE=/srv/pelagos-build/cache
               ln -sfn "$CACHE" /cache
-              ln -sfn /srv/pelagos-build/alpine-rootfs "$CACHE/repo/alpine-rootfs"
+              rm -rf "$CACHE/repo/alpine-rootfs"
+              cp -a /srv/pelagos-build/alpine-rootfs "$CACHE/repo/alpine-rootfs"
               TESTBIN=$(ls "$CACHE/target/release/deps/integration_tests-"* 2>/dev/null | grep -v '\.d$' | tail -1)
               [ -n "$TESTBIN" ] || { echo "ERROR: no integration_tests binary in $CACHE/target/release/deps/" >&2; exit 1; }
               echo "==> $(basename "$TESTBIN") on $(hostname) (direct, no pod wrapper)"
