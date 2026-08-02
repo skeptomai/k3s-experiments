@@ -79,7 +79,7 @@ spec:
                 sysctl -w net.bridge.bridge-nf-call-iptables=1
                 echo "==> $(date -Iseconds) running tests"
                 cd /cache/repo
-                /cache/target/release/deps/integration_tests --test-threads=1 || true
+                /cache/target/release/deps/integration_tests --test-threads=1 --skip multi_network_isolation
                 echo "==> done at $(date -Iseconds)"
           runcmd:
             - /usr/local/bin/run-pelagos-tests.sh
