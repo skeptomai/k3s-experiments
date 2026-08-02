@@ -16,8 +16,6 @@ spec:
       containers:
         - name: build
           image: 192.168.89.2:5004/pelagos-builder:rust-protoc-34.1
-          securityContext:
-            privileged: true   # integration tests create netns, cgroups, nft rules
           env:
             - name: GIT_REF
               value: "v0.65.73"
@@ -49,14 +47,22 @@ spec:
                              "$CARGO_TARGET_DIR/release/pelagos-cri" /out/
               echo "==> done: /out/pelagos /out/pelagos-cri"
               ls -lh /out/
-              echo "==> setting up pelagos dirs for integration tests"
-              bash scripts/setup.sh --no-user
-              ln -sfn /alpine-rootfs "$REPO/alpine-rootfs"
-              # Put the freshly built pelagos binary in PATH — integration tests
-              # call Command::new("pelagos") as a subprocess.
-              export PATH=/out:$PATH
-              echo "==> integration tests (cargo test --test integration_tests -- --test-threads=1)"
-              cargo test --release --test integration_tests -- --test-threads=1
+              echo "==> compiling integration test binary (--no-run, SSH execution on ipc7)"
+              cargo test --release --test integration_tests --no-run
+              echo "==> running integration tests on ipc7 via SSH"
+              ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i /root/.ssh/id_rsa \
+                cb@192.168.88.63 "sudo bash -s" << 'REMOTE_SCRIPT'
+              set -euo pipefail
+              CACHE=/srv/pelagos-build/cache
+              ln -sfn "$CACHE" /cache
+              ln -sfn /srv/pelagos-build/alpine-rootfs "$CACHE/repo/alpine-rootfs"
+              TESTBIN=$(ls "$CACHE/target/release/deps/integration_tests-"* 2>/dev/null | grep -v '\.d$' | tail -1)
+              [ -n "$TESTBIN" ] || { echo "ERROR: no integration_tests binary in $CACHE/target/release/deps/" >&2; exit 1; }
+              echo "==> $(basename "$TESTBIN") on $(hostname) (direct, no pod wrapper)"
+              export PATH=/srv/pelagos-build/out:$PATH
+              cd "$CACHE/repo"
+              exec "$TESTBIN" --test-threads=1
+              REMOTE_SCRIPT
           resources:
             requests:
               cpu: "8"
@@ -65,23 +71,18 @@ spec:
               cpu: "12"
               memory: "16Gi"
           volumeMounts:
-            - { name: cache,           mountPath: /cache }
-            - { name: output,          mountPath: /out }
-            - { name: alpine-rootfs,   mountPath: /alpine-rootfs, readOnly: true }
-            - { name: var-lib-pelagos, mountPath: /var/lib/pelagos }
-            - { name: run-pelagos,     mountPath: /run/pelagos }
+            - { name: cache,   mountPath: /cache }
+            - { name: output,  mountPath: /out }
+            - name: ssh-key
+              mountPath: /root/.ssh/id_rsa
+              subPath: id_rsa
+              readOnly: true
       volumes:
         - name: cache
           hostPath: { path: /srv/pelagos-build/cache, type: DirectoryOrCreate }
         - name: output
           hostPath: { path: /srv/pelagos-build/out, type: DirectoryOrCreate }
-        - name: alpine-rootfs
-          hostPath: { path: /srv/pelagos-build/alpine-rootfs, type: Directory }
-        - name: var-lib-pelagos
-          # ext4 hostPath so lowerdir is not on container overlay (kernel blocks overlay-on-overlay)
-          hostPath: { path: /srv/pelagos-build/var-lib-pelagos, type: DirectoryOrCreate }
-        - name: run-pelagos
-          # emptyDir breaks overlay-on-overlay: Pelagos puts upperdir/workdir in
-          # /run/pelagos/ which inside the container is on overlayfs; node-backed
-          # emptyDir puts it on ext4 instead, which the kernel allows as overlay upper.
-          emptyDir: {}
+        - name: ssh-key
+          secret:
+            secretName: pelagos-build-ssh-key
+            defaultMode: 0600

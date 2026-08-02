@@ -17,11 +17,16 @@ incremental builds fast (~40s on a warm cache).
 
 ## Prerequisites on ipc7
 
-Before running the build job for the first time, create the alpine rootfs on ipc7 (used
-by integration tests). SSH to ipc7 and run once:
+**Once only — create the alpine rootfs** (used by integration tests):
 
 ```
-sudo mkdir -p /srv/pelagos-build/alpine-rootfs && curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.0-x86_64.tar.gz | sudo tar xz -C /srv/pelagos-build/alpine-rootfs
+ssh -J cb@ipc4.taildd208.ts.net cb@ipc7 "sudo mkdir -p /srv/pelagos-build/alpine-rootfs && curl -fsSL https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.0-x86_64.tar.gz | sudo tar xz -C /srv/pelagos-build/alpine-rootfs"
+```
+
+**Once only — create the SSH key Secret** (build pod SSHes back to ipc7 to run tests):
+
+```
+kubectl create secret generic pelagos-build-ssh-key --from-file=id_rsa=$HOME/.ssh/id_rsa
 ```
 
 ## Apply
@@ -45,28 +50,23 @@ The job:
 2. Builds in release mode (`cargo build --release`)
 3. Runs `cargo test --lib` (unit tests, 393/395 in v0.65.73)
 4. Installs binaries to `/srv/pelagos-build/out/` on the node
-5. Runs `cargo test --test integration_tests` (full integration suite, requires root + privileged pod)
+5. Compiles the integration test binary in-pod (`--no-run`)
+6. SSHes back to ipc7 and runs `scripts/run-integration-tests.sh` as root
 
-Integration tests create real containers, cgroups, and loopback network namespaces
-inside the pod. The job runs privileged on ipc7 with:
-- `/srv/pelagos-build/var-lib-pelagos` as hostPath for `/var/lib/pelagos` (image layers,
-  overlay scratch — must be ext4, not container overlay, for kernel overlayfs to work)
-- `/run/pelagos` as emptyDir (containers state — same ext4 device, for overlay upper/work)
-- `/srv/pelagos-build/alpine-rootfs` as read-only hostPath for `/alpine-rootfs`
+Integration tests run **directly on ipc7** (not inside a container) so that bridge
+networking and network namespace operations work without the nested-container restriction.
+`scripts/run-integration-tests.sh` creates a `/cache` symlink so that compile-time-baked
+paths in the test binary resolve correctly, then runs the pre-compiled binary from
+`/srv/pelagos-build/cache/target/release/deps/`.
 
-**Bridge networking tests (`pasta`) are skipped/failing.** Installing `passt` in-pod
-causes a net regression: Debian 12's pasta detects the netns bind-mount differently
-than Pelagos expects. Tests that handled `pasta not found` gracefully instead fail with
-`pasta found but crashed`. Leave `passt` uninstalled — ~205 of 478 integration tests pass
-(all non-bridge-networking functionality).
+Note: tests use `/var/lib/pelagos` and `/run/pelagos` from ipc7's production Pelagos
+installation. Avoid running the build job while heavy workloads are on ipc7.
 
 A successful run ends with:
 
 ```
-test result: FAILED. NNN passed; MMM failed; ...
+test result: ok. 478 passed; 0 failed; ...
 ```
-
-(The job exits 101 because bridge networking tests fail — expected in-pod.)
 
 Check the output binaries on ipc7:
 
