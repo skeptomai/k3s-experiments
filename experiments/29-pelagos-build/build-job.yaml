@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pelagos-build-v0-65-63
+  name: pelagos-build-v0-65-73
   namespace: default
 spec:
   backoffLimit: 0
@@ -18,7 +18,7 @@ spec:
           image: 192.168.89.2:5004/pelagos-builder:rust-protoc-34.1
           env:
             - name: GIT_REF
-              value: "v0.65.63"
+              value: "v0.65.73"
             - name: CARGO_HOME
               value: /cache/cargo
             - name: CARGO_TARGET_DIR
