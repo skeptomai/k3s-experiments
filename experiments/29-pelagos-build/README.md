@@ -62,11 +62,18 @@ paths in the test binary resolve correctly, then runs the pre-compiled binary fr
 Note: tests use `/var/lib/pelagos` and `/run/pelagos` from ipc7's production Pelagos
 installation. Avoid running the build job while heavy workloads are on ipc7.
 
-A successful run ends with:
+A successful run ends with something like:
 
 ```
-test result: ok. 478 passed; 0 failed; ...
+test result: FAILED. 463 passed; 4 failed; 11 ignored; ...
 ```
+
+The 4 remaining failures are port-forward/localhost-proxy tests
+(`networking::test_port_forward_end_to_end`, `port_proxy::test_port_proxy_localhost_connectivity`,
+`port_proxy::test_port_proxy_multiple_connections`, `ipv6::test_ipv6_port_forward_localhost`).
+They establish connections (pasta works) but get empty responses — a host-networking
+difference when running directly on ipc7 vs in an isolated network namespace. These are
+not regressions; they have never passed in this environment.
 
 Check the output binaries on ipc7:
 

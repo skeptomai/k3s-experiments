@@ -40,11 +40,12 @@ spec:
                 git reset --hard -q "origin/$GIT_REF"
               fi
               echo "==> building $(git rev-parse --short HEAD) ($GIT_REF)"
-              cargo build --release -p pelagos -p pelagos-cri
+              cargo build --release -p pelagos -p pelagos-cri -p pelagos-dockerd
               echo "==> unit tests (cargo test --lib)"
               cargo test --release --lib -p pelagos -p pelagos-cri
               install -m0755 "$CARGO_TARGET_DIR/release/pelagos" \
-                             "$CARGO_TARGET_DIR/release/pelagos-cri" /out/
+                             "$CARGO_TARGET_DIR/release/pelagos-cri" \
+                             "$CARGO_TARGET_DIR/release/pelagos-dockerd" /out/
               echo "==> done: /out/pelagos /out/pelagos-cri"
               ls -lh /out/
               echo "==> compiling integration test binary (--no-run, SSH execution on ipc7)"
@@ -61,6 +62,12 @@ spec:
               echo "==> $(basename "$TESTBIN") on $(hostname) (direct, no pod wrapper)"
               export PATH=/srv/pelagos-build/out:$PATH
               cd "$CACHE/repo"
+              # Some test modules use env!("CARGO_MANIFEST_DIR") + "/target/debug/<bin>"
+              # (hardcoded debug path even when built --release). Symlink to satisfy them.
+              mkdir -p "$CACHE/repo/target/debug"
+              ln -sfn "$CACHE/target/release/pelagos"         "$CACHE/repo/target/debug/pelagos"
+              ln -sfn "$CACHE/target/release/pelagos-cri"     "$CACHE/repo/target/debug/pelagos-cri"
+              ln -sfn "$CACHE/target/release/pelagos-dockerd" "$CACHE/repo/target/debug/pelagos-dockerd"
               exec "$TESTBIN" --test-threads=1
               REMOTE_SCRIPT
           resources:
