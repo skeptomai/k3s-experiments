@@ -29,7 +29,13 @@ operator.replicas    = 2
 ```
 
 `kubeProxyReplacement=false` means Cilium handles **NetworkPolicy enforcement** via
-BPF but leaves ClusterIP/NodePort DNAT to k3s's embedded kube-proxy (iptables).
+BPF but leaves ClusterIP/NodePort DNAT to k3s's embedded kube-proxy.
+
+**kube-proxy must use nftables mode** (`proxy-mode=nftables` in `kube-proxy-arg`).
+IPVS mode conflicts with Cilium's BPF service hooks: IPVS virtual servers are shadowed
+by Cilium's BPF TC programs, making NodePorts unreachable from outside the cluster even
+though the IPVS rules exist and `ipvsadm -Ln` looks correct. IPVS was also deprecated
+in Kubernetes 1.35 in favour of nftables. See `config/k3s-server.yaml`.
 
 ## Pelagos workarounds required
 

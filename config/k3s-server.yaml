@@ -1,8 +1,7 @@
 container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
 flannel-backend: none   # Cilium manages CNI; k3s must not run Flannel
 kube-proxy-arg:
-  - "proxy-mode=ipvs"
-  - "ipvs-scheduler=lc"
+  - "proxy-mode=nftables"  # IPVS conflicts with Cilium BPF service hooks; nftables does not
 disable:
   - local-storage
   - servicelb         # MetalLB owns LoadBalancer services (L2/ARP); see docs/metallb.md
