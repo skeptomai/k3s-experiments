@@ -16,6 +16,8 @@ spec:
       containers:
         - name: build
           image: 192.168.89.2:5004/pelagos-builder:rust-protoc-34.1
+          securityContext:
+            privileged: true   # integration tests create netns, cgroups, nft rules
           env:
             - name: GIT_REF
               value: "v0.65.73"
@@ -41,12 +43,20 @@ spec:
               fi
               echo "==> building $(git rev-parse --short HEAD) ($GIT_REF)"
               cargo build --release -p pelagos -p pelagos-cri
-              echo "==> unit tests"
+              echo "==> unit tests (cargo test --lib)"
               cargo test --release --lib -p pelagos -p pelagos-cri
               install -m0755 "$CARGO_TARGET_DIR/release/pelagos" \
                              "$CARGO_TARGET_DIR/release/pelagos-cri" /out/
               echo "==> done: /out/pelagos /out/pelagos-cri"
               ls -lh /out/
+              echo "==> setting up pelagos dirs for integration tests"
+              bash scripts/setup.sh --no-user
+              ln -sfn /alpine-rootfs "$REPO/alpine-rootfs"
+              # Put the freshly built pelagos binary in PATH — integration tests
+              # call Command::new("pelagos") as a subprocess.
+              export PATH=/out:$PATH
+              echo "==> integration tests (cargo test --test integration_tests -- --test-threads=1)"
+              cargo test --release --test integration_tests -- --test-threads=1
           resources:
             requests:
               cpu: "8"
@@ -55,10 +65,23 @@ spec:
               cpu: "12"
               memory: "16Gi"
           volumeMounts:
-            - { name: cache,  mountPath: /cache }
-            - { name: output, mountPath: /out }
+            - { name: cache,           mountPath: /cache }
+            - { name: output,          mountPath: /out }
+            - { name: alpine-rootfs,   mountPath: /alpine-rootfs, readOnly: true }
+            - { name: var-lib-pelagos, mountPath: /var/lib/pelagos }
+            - { name: run-pelagos,     mountPath: /run/pelagos }
       volumes:
         - name: cache
           hostPath: { path: /srv/pelagos-build/cache, type: DirectoryOrCreate }
         - name: output
           hostPath: { path: /srv/pelagos-build/out, type: DirectoryOrCreate }
+        - name: alpine-rootfs
+          hostPath: { path: /srv/pelagos-build/alpine-rootfs, type: Directory }
+        - name: var-lib-pelagos
+          # ext4 hostPath so lowerdir is not on container overlay (kernel blocks overlay-on-overlay)
+          hostPath: { path: /srv/pelagos-build/var-lib-pelagos, type: DirectoryOrCreate }
+        - name: run-pelagos
+          # emptyDir breaks overlay-on-overlay: Pelagos puts upperdir/workdir in
+          # /run/pelagos/ which inside the container is on overlayfs; node-backed
+          # emptyDir puts it on ext4 instead, which the kernel allows as overlay upper.
+          emptyDir: {}
