@@ -1,0 +1,20 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: flux-system
+spec:
+  endpointSelector: {}
+  ingress:
+  # Prometheus on nazgul scrapes kustomize-controller metrics on :8080 via NodePort
+  # 30880. kube-proxy NATTs and MASQs the source to the forwarding node's IP, which
+  # Cilium classifies as remote-node when the pod is on a different node, or world
+  # when the pod is on the same node as the NodePort entry point.
+  - fromEntities:
+    - remote-node
+  - fromEntities:
+    - world
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP

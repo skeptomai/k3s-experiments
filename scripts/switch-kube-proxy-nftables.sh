@@ -3,8 +3,9 @@
 # IPVS conflicts with Cilium's BPF service hooks — NodePorts are unreachable from
 # outside the cluster when both are active. nftables mode does not have this conflict.
 #
-# Rolling restart: ipc5 → ipc6 → ipc4 (preserves etcd quorum), then ipc7-9 in parallel.
-# Safe to run on a live cluster.
+# Patches kube-proxy-arg IN PLACE in each node's live config, preserving all other
+# fields (including the cluster token on join nodes). Rolling restart: ipc5 → ipc6 →
+# ipc4 (preserves etcd quorum), then ipc7-9 in parallel.
 
 set -euo pipefail
 
@@ -13,15 +14,26 @@ AGENTS=(ipc7 ipc8 ipc9)
 JUMP="cb@ipc4.taildd208.ts.net"
 SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no"
 
-deploy_and_restart() {
+# Replace the kube-proxy-arg block in /etc/rancher/k3s/config.yaml in place.
+# Removes any existing kube-proxy-arg entries, appends the nftables one.
+PATCH='import sys, re
+cfg = open("/etc/rancher/k3s/config.yaml").read()
+# Remove existing kube-proxy-arg block (key + indented list items)
+cfg = re.sub(r"kube-proxy-arg:\n(?:  - [^\n]+\n)*", "", cfg)
+# Append new block
+cfg = cfg.rstrip("\n") + "\nkube-proxy-arg:\n  - \"proxy-mode=nftables\"\n"
+open("/etc/rancher/k3s/config.yaml", "w").write(cfg)
+print("patched")
+'
+
+patch_node() {
     local node="$1"
-    local config_src="$2"
-    echo "==> $node: deploying config and restarting k3s"
+    echo "==> $node: patching kube-proxy-arg"
     if [ "$node" = "ipc4" ]; then
-        ssh $SSH_OPTS "$JUMP" "sudo cp /dev/stdin /etc/rancher/k3s/config.yaml" < "$config_src"
+        ssh $SSH_OPTS "$JUMP" "sudo python3 -c '$PATCH'"
         ssh $SSH_OPTS "$JUMP" "sudo systemctl restart k3s"
     else
-        ssh $SSH_OPTS -J "$JUMP" "cb@$node" "sudo cp /dev/stdin /etc/rancher/k3s/config.yaml" < "$config_src"
+        ssh $SSH_OPTS -J "$JUMP" "cb@$node" "sudo python3 -c '$PATCH'"
         ssh $SSH_OPTS -J "$JUMP" "cb@$node" "sudo systemctl restart k3s"
     fi
 }
@@ -42,11 +54,6 @@ wait_node_ready() {
     return 1
 }
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SERVER_CONFIG="$REPO/config/k3s-server.yaml"
-SERVER_JOIN_CONFIG="$REPO/config/k3s-server-join.yaml"
-AGENT_CONFIG="$REPO/config/k3s-agent.yaml"
-
 echo "Rolling kube-proxy to nftables mode"
 echo "  servers (rolling): ${SERVERS[*]}"
 echo "  agents  (parallel): ${AGENTS[*]}"
@@ -54,16 +61,14 @@ echo
 
 # --- Control plane: rolling ---
 for node in "${SERVERS[@]}"; do
-    cfg="$SERVER_JOIN_CONFIG"
-    [ "$node" = "ipc4" ] && cfg="$SERVER_CONFIG"
-    deploy_and_restart "$node" "$cfg"
+    patch_node "$node"
     wait_node_ready "$node"
 done
 
-# --- Agents: push configs in parallel, restart, wait ---
-echo "==> agents: deploying configs"
+# --- Agents: patch and restart in parallel ---
+echo "==> agents: patching configs"
 for node in "${AGENTS[@]}"; do
-    ssh $SSH_OPTS -J "$JUMP" "cb@$node" "sudo cp /dev/stdin /etc/rancher/k3s/config.yaml" < "$AGENT_CONFIG" &
+    ssh $SSH_OPTS -J "$JUMP" "cb@$node" "sudo python3 -c '$PATCH'" &
 done
 wait
 

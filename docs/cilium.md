@@ -283,9 +283,10 @@ packet as `world`.
 
 ### Currently patched namespaces
 
-| Namespace | Probe ports | Policy file |
-|-----------|-------------|-------------|
-| flux-system | 9440 (health), 9090 (source-controller storage), 9443 (notification webhook) | `manifests/cilium-netpols/flux-system-allow-kubelet-probes.yaml` |
+| Namespace | Ports | Purpose | Policy file |
+|-----------|-------|---------|-------------|
+| flux-system | 9440, 9090, 9443 | kubelet health probes | `manifests/cilium-netpols/flux-system-allow-kubelet-probes.yaml` |
+| flux-system | 8080 | Prometheus metrics scrape (kustomize-controller) | `manifests/cilium-netpols/flux-system-allow-prometheus-scrape.yaml` |
 
 `manifests/cilium-netpols/` is Flux-managed (`clusters/ipc/cilium-netpols.yaml`) and
 reconciles automatically on rebuild.
