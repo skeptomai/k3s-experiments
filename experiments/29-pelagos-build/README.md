@@ -87,9 +87,12 @@ The short version:
 - A KubeVirt VMI boots on ipc7 with Ubuntu 24.04.
 - `setup.sh` in exp 32 tarballs the source tree and alpine rootfs from the build cache
   and starts a temporary HTTP server (`python3 -m http.server 9080`) on ipc7.
-- The VM downloads binaries and tarballs from `http://192.168.88.63:9080` via
-  KubeVirt's masquerade NAT, sets up the Pelagos install layout, and runs the test
-  binary. The VM powers off when the run completes.
+- The VM downloads ~55 MB of pre-built binaries and tarballs from
+  `http://192.168.88.63:9080` via KubeVirt's masquerade NAT (`pelagos` 19 MB,
+  `integration_tests` 14 MB, `pelagos-cri` 10 MB, `pelagos-dockerd` 6 MB,
+  `pelagos-dns` 0.5 MB, source tree + alpine rootfs tarballs ~5 MB), sets up the
+  Pelagos install layout, and runs the test binary. The VM powers off when the run
+  completes.
 - Two kernel modules must be loaded in the VM: `overlay` (not built-in in the Ubuntu
   cloud image) and `br_netfilter` (needed for the bridge isolation test). After loading
   `br_netfilter`, `net.bridge.bridge-nf-call-iptables=1` must be set via sysctl — k3s

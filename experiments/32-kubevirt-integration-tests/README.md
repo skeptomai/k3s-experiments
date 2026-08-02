@@ -73,7 +73,7 @@ kubectl apply -f experiments/32-kubevirt-integration-tests/vmi.yaml
 virtctl console pelagos-integration-tests
 ```
 
-The VM boots, installs packages, downloads ~420 MB of test artifacts, then runs the
+The VM boots, installs packages, downloads ~55 MB of test artifacts, then runs the
 tests. Expect 15–25 minutes total. Tests run sequentially (--test-threads=1).
 
 To run only a specific test (e.g. while debugging), pass it as a filter in `vmi.yaml`:
