@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["python-kasa", "tzdata"]
 # ///
-"""Control ipc cluster power outlets on the Kasa HS300 at 192.168.88.16.
+"""Control ipc cluster power outlets on the Kasa HS300 at 192.168.88.31.
 
 Usage:
   kasa-outlet.py status
@@ -20,7 +20,7 @@ import asyncio
 import sys
 from kasa.iot import IotStrip
 
-STRIP_HOST = "192.168.88.16"
+STRIP_HOST = "192.168.88.31"
 
 NODE_ALIAS = {
     "ipc4": "Node 4",

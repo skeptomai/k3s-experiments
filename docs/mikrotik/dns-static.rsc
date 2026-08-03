@@ -1,4 +1,4 @@
-# 2026-07-29 19:51:02 by RouterOS 7.22.3
+# 2026-08-03 09:55:51 by RouterOS 7.22.3
 # software id = EXWY-84S5
 #
 # model = RB5009UG+S+

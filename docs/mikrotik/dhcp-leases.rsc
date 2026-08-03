@@ -1,4 +1,4 @@
-# 2026-07-29 19:51:03 by RouterOS 7.22.3
+# 2026-08-03 09:55:51 by RouterOS 7.22.3
 # software id = EXWY-84S5
 #
 # model = RB5009UG+S+
@@ -49,3 +49,5 @@ add address=192.168.88.74 client-id=1:30:52:53:c:4f:d5 comment=\
 add address=192.168.88.160 client-id=1:dc:a6:32:ca:2d:32 comment=\
     "prusa-mk4-camera (Pi 4B, camera streamer)" mac-address=DC:A6:32:CA:2D:32 \
     server=defconf
+add address=192.168.88.31 comment="cluster-power-strip (Kasa HS300, ipc4-9)" \
+    mac-address=6C:5A:B0:15:ED:72 server=defconf
