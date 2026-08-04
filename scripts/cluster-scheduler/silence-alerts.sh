@@ -14,6 +14,13 @@
 
 set -euo pipefail
 
+# The cluster-scheduler container runs with system TZ=UTC. "night"/"wake_time"
+# are meant in local (Pacific) time, so all date arithmetic here must pin TZ
+# explicitly — otherwise "05:30 today" resolves against the UTC calendar day,
+# which can be only ~90 minutes away at 21:00 PDT instead of the intended
+# ~8.5 hours, collapsing the night silence almost immediately.
+export TZ="America/Los_Angeles"
+
 ALERTMANAGER="http://192.168.89.2:9093"
 CREATED_BY="silence-alerts.sh"
 DEFAULT_DURATION="12h"
