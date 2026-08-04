@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-config
+  namespace: openbao
+data:
+  openbao.hcl: |
+    ui = true
+
+    listener "tcp" {
+      address         = "[::]:8200"
+      cluster_address = "[::]:8201"
+      tls_cert_file   = "/openbao/tls/tls.crt"
+      tls_key_file    = "/openbao/tls/tls.key"
+    }
+
+    storage "raft" {
+      path = "/openbao/data"
+      retry_join {
+        leader_api_addr     = "https://openbao-0.openbao-internal:8200"
+        leader_ca_cert_file = "/openbao/tls/ca.crt"
+      }
+      retry_join {
+        leader_api_addr     = "https://openbao-1.openbao-internal:8200"
+        leader_ca_cert_file = "/openbao/tls/ca.crt"
+      }
+      retry_join {
+        leader_api_addr     = "https://openbao-2.openbao-internal:8200"
+        leader_ca_cert_file = "/openbao/tls/ca.crt"
+      }
+    }
+
+    # Transit auto-unseal via the nazgul satellite (k3s-experiments#13). Token
+    # is intentionally NOT set here -- provided via the BAO_TOKEN env var on the
+    # container, sourced from a Secret created out-of-band (not committed to git).
+    seal "transit" {
+      address         = "https://192.168.89.2:8200"
+      key_name        = "k3s-cluster-unseal"
+      mount_path      = "transit/"
+      tls_skip_verify = "true"
+    }

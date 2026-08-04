@@ -1,0 +1,27 @@
+# Headless service for Raft peer DNS (openbao-0.openbao-internal, ...).
+# publishNotReadyAddresses so peers can find each other before they're unsealed.
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao-internal
+  namespace: openbao
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: openbao
+  ports:
+    - { name: https, port: 8200, targetPort: 8200 }
+    - { name: cluster, port: 8201, targetPort: 8201 }
+---
+# Client service for the OpenBao API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao
+  namespace: openbao
+spec:
+  selector:
+    app: openbao
+  ports:
+    - { name: https, port: 8200, targetPort: 8200 }

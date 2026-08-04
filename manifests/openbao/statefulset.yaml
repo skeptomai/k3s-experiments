@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao
+  namespace: openbao
+spec:
+  serviceName: openbao-internal
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: openbao
+  template:
+    metadata:
+      labels:
+        app: openbao
+    spec:
+      serviceAccountName: openbao
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000          # chowns the local PV + tls secret so the openbao user can read/write
+      # One Raft member per i5 worker: a single node loss costs only one member.
+      # Accept BOTH i5 tiers — "performance" (i5-12500T, ipc4-6) and "fastest"
+      # (i5-12500 non-T, ipc7-9, which is strictly better). node-class is a single
+      # label value per node, so we widen the selector rather than double-label nodes.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: node-class, operator: In, values: [performance, fastest] }
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: { app: openbao }
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: openbao
+          image: quay.io/openbao/openbao:2.6.1
+          # command + explicit args, bypassing the image's docker-entrypoint.sh
+          # (which auto-injects -dev-root-token-id / -dev-listen-address flags
+          # whenever it sees "server" as the first arg) — same pattern as this
+          # repo's Vault StatefulSet (manifests/vault/statefulset.yaml) and the
+          # nazgul satellite (k3s-experiments#13).
+          command: ["bao"]
+          args: ["server", "-config=/openbao/config/openbao.hcl"]
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: BAO_RAFT_NODE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: BAO_API_ADDR
+              value: "https://$(POD_NAME).openbao-internal:8200"
+            - name: BAO_CLUSTER_ADDR
+              value: "https://$(POD_NAME).openbao-internal:8201"
+            - name: BAO_ADDR
+              value: "https://127.0.0.1:8200"
+            - name: BAO_CACERT
+              value: "/openbao/tls/ca.crt"
+            # Transit auto-unseal token for the nazgul satellite — from a Secret
+            # created out-of-band (not committed to git). See k3s-experiments#13.
+            - name: BAO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: openbao-autounseal-token
+                  key: token
+          ports:
+            - { name: https, containerPort: 8200 }
+            - { name: cluster, containerPort: 8201 }
+          volumeMounts:
+            - { name: config, mountPath: /openbao/config }
+            - { name: tls, mountPath: /openbao/tls, readOnly: true }
+            - { name: data, mountPath: /openbao/data }
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              port: 8200
+              path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              port: 8200
+              path: "/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200&perfstandbyok=true"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap: { name: openbao-config }
+        - name: tls
+          secret: { secretName: openbao-tls }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: openbao-local
+        resources:
+          requests:
+            storage: 10Gi

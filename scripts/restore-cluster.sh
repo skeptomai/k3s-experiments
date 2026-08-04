@@ -55,7 +55,7 @@ cat "$SNAP_LOCAL"  | SSH 'sudo tee /root/restore/snapshot >/dev/null'
 cat "$TOKEN_LOCAL" | SSH 'sudo tee /root/restore/token >/dev/null && sudo chmod 600 /root/restore/token /root/restore/snapshot'
 SSH 'echo "  snapshot bytes: $(sudo stat -c %s /root/restore/snapshot); token bytes: $(sudo cat /root/restore/token | wc -c)"'
 
-echo "--- [3/6] uninstall any existing k3s/k3s-agent on $SEED (keeps /var/lib/vault-data, /opt/local-path) ---"
+echo "--- [3/6] uninstall any existing k3s/k3s-agent on $SEED (keeps /var/lib/vault-data, /var/lib/openbao-data, /opt/local-path) ---"
 SSH 'if [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh; \
      elif [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh; \
      else echo "  (no prior k3s install)"; fi'
