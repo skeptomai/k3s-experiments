@@ -25,3 +25,20 @@ spec:
     app: openbao
   ports:
     - { name: https, port: 8200, targetPort: 8200 }
+---
+# NodePort so nazgul's blackbox-exporter (outside the cluster) can probe
+# /v1/sys/health for real seal-state alerting — that endpoint is unauthenticated
+# by design (no secrets exposed) and is the standard way to externally health-check
+# Vault/OpenBao. Matches the existing NodePort convention for kube-state-metrics /
+# spire-metrics (pinned to ipc4 by convention, reachable via any node in practice).
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao-nodeport
+  namespace: openbao
+spec:
+  type: NodePort
+  selector:
+    app: openbao
+  ports:
+    - { name: https, port: 8200, targetPort: 8200, nodePort: 30930 }
