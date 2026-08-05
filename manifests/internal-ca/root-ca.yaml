@@ -1,0 +1,42 @@
+# Cluster-wide self-signed root CA (cert-manager) — shared trust root for
+# everything in the cluster (Vault/OpenBao's own TLS listener, the PKI
+# intermediate CA chain, and any other internal service certs).
+#
+# Extracted from manifests/vault/tls.yaml (k3s-experiments#13, task #8) — these
+# 3 resources used to live alongside Vault's own leaf cert, which meant
+# decommissioning the vault Kustomization would have deleted the shared root
+# CA along with it, breaking TLS cluster-wide (not just Vault/OpenBao). Same
+# object names/specs as before, just moved to their own Kustomization so they
+# have an independent lifecycle from any one backend.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# CA cert lives in cert-manager ns (the ClusterIssuer cluster-resource-namespace).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: internal-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: k3s-internal-ca
+  secretName: internal-ca-tls
+  duration: 87600h   # 10y
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: internal-ca-issuer
+spec:
+  ca:
+    secretName: internal-ca-tls

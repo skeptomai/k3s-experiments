@@ -1,38 +1,7 @@
-# Reusable self-signed CA (cert-manager) + the Vault server cert.
-# selfsigned ClusterIssuer -> a CA cert -> a CA ClusterIssuer -> the Vault leaf.
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: selfsigned-issuer
-spec:
-  selfSigned: {}
----
-# CA cert lives in cert-manager ns (the ClusterIssuer cluster-resource-namespace).
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: internal-ca
-  namespace: cert-manager
-spec:
-  isCA: true
-  commonName: k3s-internal-ca
-  secretName: internal-ca-tls
-  duration: 87600h   # 10y
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: selfsigned-issuer
-    kind: ClusterIssuer
----
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: internal-ca-issuer
-spec:
-  ca:
-    secretName: internal-ca-tls
----
+# Vault's own TLS listener cert. The shared root CA (selfsigned-issuer,
+# internal-ca, internal-ca-issuer) used to live here too, but moved to
+# manifests/internal-ca/ (k3s-experiments#13, task #8) — decommissioning
+# Vault must not take the cluster-wide trust root down with it.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
