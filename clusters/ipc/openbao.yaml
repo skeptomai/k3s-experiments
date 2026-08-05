@@ -12,3 +12,4 @@ spec:
     name: flux-system
   dependsOn:
     - name: cert-manager
+    - name: internal-ca
