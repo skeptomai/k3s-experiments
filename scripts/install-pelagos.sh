@@ -119,7 +119,7 @@ Before=${K3S_SERVICE}.service
 [Service]
 Type=simple
 ExecStartPre=/usr/bin/mkdir -p /run/pelagos
-ExecStart=/usr/local/bin/pelagos-cri --pelagos-bin /usr/local/bin/pelagos --socket /run/pelagos/cri.sock
+ExecStart=/usr/local/bin/pelagos-cri --pelagos-bin /usr/local/bin/pelagos --socket /run/pelagos/cri.sock --metrics-addr 0.0.0.0:9091
 Restart=always
 RestartSec=5s
 Environment=RUST_LOG=info
