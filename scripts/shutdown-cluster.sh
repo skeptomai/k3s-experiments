@@ -21,6 +21,21 @@ for node in $ALL_NODES; do
   kubectl cordon "$node"
 done
 
+# virt-operator recreates virt-api-pdb / virt-controller-pdb on its own
+# reconcile loop, so a single delete before the first drain isn't enough --
+# it's back within the couple minutes it takes to reach later drain phases.
+# With every node cordoned, a 2-replica component's "other" pod also has
+# nowhere to reschedule to, so it sits Pending while the recreated PDB
+# blocks the last replica's eviction indefinitely. Delete immediately
+# before EVERY drain phase, not just once at the start.
+drop_kubevirt_pdbs() {
+  kubectl delete pdb -n kubevirt --all --ignore-not-found 2>/dev/null || true
+}
+
+echo ""
+echo "==> Removing KubeVirt PodDisruptionBudgets before drain (recreated by virt-operator on restart)..."
+drop_kubevirt_pdbs
+
 echo ""
 echo "==> Draining worker nodes (ignore daemonsets, delete emptydir)..."
 for node in $WORKERS; do
@@ -28,6 +43,7 @@ for node in $WORKERS; do
   kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=120s
 done
 
+drop_kubevirt_pdbs
 echo ""
 echo "==> Draining secondary control-plane nodes..."
 for node in $CONTROL_PLANE_SECONDARY; do
@@ -35,6 +51,7 @@ for node in $CONTROL_PLANE_SECONDARY; do
   kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
 done
 
+drop_kubevirt_pdbs
 echo ""
 echo "==> Draining seed control-plane (ipc4)..."
 kubectl drain "$CONTROL_PLANE_SEED" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
