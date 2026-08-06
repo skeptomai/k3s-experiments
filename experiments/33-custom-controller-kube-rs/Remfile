@@ -14,5 +14,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/echo-controller /usr/local/bin/echo-controller
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/echo-controller"]
-CMD []
+CMD ["/usr/local/bin/echo-controller"]
