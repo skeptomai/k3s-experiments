@@ -41,6 +41,10 @@ const FINALIZER: &str = "edu.k3s-experiments.dev/cleanup";
 /// "the ConfigMaps that currently belong to this Echo" without trusting
 /// any in-memory bookkeeping.
 const OWNER_LABEL: &str = "edu.k3s-experiments.dev/echo";
+/// Namespace this controller watches. Matches manifests/rbac.yaml's Role,
+/// which is namespace-scoped rather than cluster-wide (see the RBAC design
+/// note in README.md).
+const WATCH_NAMESPACE: &str = "custom-controller-demo";
 
 /// `Echo` — the primary custom resource this controller reconciles.
 ///
@@ -311,10 +315,16 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let client = Client::try_default().await?;
-    let echoes = Api::<Echo>::all(client.clone());
-    let configmaps = Api::<ConfigMap>::all(client.clone());
+    // RBAC for this controller is deliberately namespace-scoped (see
+    // manifests/rbac.yaml) rather than a ClusterRole, so watches must be
+    // namespaced too, not Api::all() (cluster-scoped list/watch).
+    let echoes = Api::<Echo>::namespaced(client.clone(), WATCH_NAMESPACE);
+    let configmaps = Api::<ConfigMap>::namespaced(client.clone(), WATCH_NAMESPACE);
 
-    info!("echo-controller starting, watching Echo (edu.k3s-experiments.dev/v1alpha1)");
+    info!(
+        namespace = WATCH_NAMESPACE,
+        "echo-controller starting, watching Echo (edu.k3s-experiments.dev/v1alpha1)"
+    );
 
     Controller::new(echoes, watcher::Config::default())
         .owns(configmaps, watcher::Config::default())
