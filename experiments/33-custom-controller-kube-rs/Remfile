@@ -6,8 +6,7 @@
 
 FROM 192.168.89.2:5000/library/rust:1-bookworm AS builder
 WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
+COPY . .
 RUN cargo build --release
 
 FROM 192.168.89.2:5000/library/debian:bookworm-slim
