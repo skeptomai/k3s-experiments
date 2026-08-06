@@ -1,0 +1,86 @@
+# Builds the echo-controller image on the cluster using pelagos build,
+# following the pattern in scripts/cluster-scheduler/build-job.yaml.
+#
+# What it does:
+#   1. init/clone: git clones the experiment-33-custom-controller branch of
+#      k3s-experiments (depth 1) into workspace. NOTE: the Rust source lives
+#      on a feature branch, not master — this Job intentionally points at it.
+#   2. build-and-push: pelagos binary + store mounted from ipc4. Runs
+#      `pelagos build` on experiments/33-custom-controller-kube-rs/ (the
+#      Remfile there), then `pelagos image push`.
+#
+# Usage:
+#   kubectl apply -f experiments/33-custom-controller-kube-rs/build-job.yaml
+#
+# Pinned to ipc4 so the pelagos hostPath mount is consistent.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: echo-controller-build
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: ipc4
+
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: pelagos-bin
+          hostPath:
+            path: /usr/local/bin/pelagos
+            type: File
+        - name: pelagos-store
+          hostPath:
+            path: /var/lib/pelagos
+            type: Directory
+
+      initContainers:
+        - name: clone
+          image: alpine/git:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              git clone --depth 1 --branch experiment-33-custom-controller \
+                https://github.com/skeptomai/k3s-experiments /workspace/repo
+              echo "cloned, context at /workspace/repo/experiments/33-custom-controller-kube-rs/"
+              ls /workspace/repo/experiments/33-custom-controller-kube-rs/
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+
+      containers:
+        - name: build-and-push
+          image: ubuntu:24.04
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eux
+              apt-get update -qq && apt-get install -y -qq ca-certificates
+              /pelagos build \
+                --tag 192.168.89.2:5004/echo-controller:latest \
+                --network host \
+                /workspace/repo/experiments/33-custom-controller-kube-rs
+              /pelagos image push --insecure 192.168.89.2:5004/echo-controller:latest
+              echo "pushed: 192.168.89.2:5004/echo-controller:latest"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: pelagos-bin
+              mountPath: /pelagos
+            - name: pelagos-store
+              mountPath: /var/lib/pelagos
+          resources:
+            requests:
+              cpu: "2"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"

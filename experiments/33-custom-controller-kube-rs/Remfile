@@ -1,0 +1,18 @@
+# Multi-stage build for echo-controller. Built in-cluster via `pelagos build`
+# (Dockerfile-syntax compatible) — see build-job.yaml in this directory, which
+# follows the pattern in scripts/cluster-scheduler/build-job.yaml.
+#
+# Base images pulled through the local Zot mirror (192.168.89.2:5000 = docker.io).
+
+FROM 192.168.89.2:5000/library/rust:1-bookworm AS builder
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --release
+
+FROM 192.168.89.2:5000/library/debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/echo-controller /usr/local/bin/echo-controller
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/echo-controller"]

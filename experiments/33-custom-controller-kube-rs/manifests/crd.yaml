@@ -1,0 +1,70 @@
+# Generated from the Rust type via: cargo run --release -- --print-crd
+# (the running controller image also supports this flag). Do not hand-edit
+# the schema — regenerate after changing EchoSpec/EchoStatus in src/main.rs.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: echos.edu.k3s-experiments.dev
+spec:
+  group: edu.k3s-experiments.dev
+  names:
+    kind: Echo
+    plural: echos
+    shortNames:
+    - echo
+    singular: echo
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.message
+      name: Message
+      type: string
+    - jsonPath: .spec.replicas
+      name: Replicas
+      type: integer
+    - jsonPath: .status.readyReplicas
+      name: Ready
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for EchoSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              `Echo` — the primary custom resource this controller reconciles.
+
+              group=edu.k3s-experiments.dev, version=v1alpha1, kind=Echo, scope=Namespaced.
+            properties:
+              message:
+                description: Message written into each owned ConfigMap's data.
+                type: string
+              replicas:
+                description: Desired number of owned ConfigMaps.
+                format: int32
+                type: integer
+            required:
+            - message
+            - replicas
+            type: object
+          status:
+            description: '`Echo.status` — always recomputed from a live count of owned ConfigMaps.'
+            nullable: true
+            properties:
+              readyReplicas:
+                description: |-
+                  Number of matching ConfigMaps observed in the cluster as of the last
+                  reconcile. Never derived from a diff — always a fresh list+count.
+                format: int32
+                type: integer
+            required:
+            - readyReplicas
+            type: object
+        required:
+        - spec
+        title: Echo
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

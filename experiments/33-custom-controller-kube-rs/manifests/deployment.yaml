@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-controller
+  namespace: custom-controller-demo
+  labels:
+    app: echo-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-controller
+  template:
+    metadata:
+      labels:
+        app: echo-controller
+    spec:
+      serviceAccountName: echo-controller
+      containers:
+        - name: echo-controller
+          image: 192.168.89.2:5004/echo-controller:latest
+          imagePullPolicy: Always
+          env:
+            - name: RUST_LOG
+              value: info
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]

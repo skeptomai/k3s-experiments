@@ -1,0 +1,8 @@
+apiVersion: edu.k3s-experiments.dev/v1alpha1
+kind: Echo
+metadata:
+  name: hello
+  namespace: custom-controller-demo
+spec:
+  message: "hello from kube-rs"
+  replicas: 3
