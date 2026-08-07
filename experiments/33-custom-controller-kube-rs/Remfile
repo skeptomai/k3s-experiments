@@ -1,4 +1,4 @@
-# Multi-stage build for echo-controller. Built in-cluster via `pelagos build`
+# Multi-stage build for stamp-controller. Built in-cluster via `pelagos build`
 # (Dockerfile-syntax compatible) — see build-job.yaml in this directory, which
 # follows the pattern in scripts/cluster-scheduler/build-job.yaml.
 #
@@ -12,6 +12,6 @@ RUN cargo build --release
 FROM 192.168.89.2:5000/library/debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/echo-controller /usr/local/bin/echo-controller
+COPY --from=builder /app/target/release/stamp-controller /usr/local/bin/stamp-controller
 USER 65532:65532
-CMD ["/usr/local/bin/echo-controller"]
+CMD ["/usr/local/bin/stamp-controller"]

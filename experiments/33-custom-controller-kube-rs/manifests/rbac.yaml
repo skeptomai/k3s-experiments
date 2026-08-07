@@ -1,4 +1,4 @@
-# RBAC for the echo-controller. Everything here is namespace-scoped to
+# RBAC for the stamp-controller. Everything here is namespace-scoped to
 # custom-controller-demo — the only cluster-scoped object in this experiment
 # is the CustomResourceDefinition itself (crd.yaml), which is inherently
 # cluster-scoped and applied separately by a human/admin, not by the
@@ -6,23 +6,23 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: echo-controller
+  name: stamp-controller
   namespace: custom-controller-demo
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: echo-controller
+  name: stamp-controller
   namespace: custom-controller-demo
 rules:
   - apiGroups: ["edu.k3s-experiments.dev"]
-    resources: ["echos"]
+    resources: ["stamps"]
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["edu.k3s-experiments.dev"]
-    resources: ["echos/status"]
+    resources: ["stamps/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["edu.k3s-experiments.dev"]
-    resources: ["echos/finalizers"]
+    resources: ["stamps/finalizers"]
     verbs: ["update"]
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -31,13 +31,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: echo-controller
+  name: stamp-controller
   namespace: custom-controller-demo
 subjects:
   - kind: ServiceAccount
-    name: echo-controller
+    name: stamp-controller
     namespace: custom-controller-demo
 roleRef:
   kind: Role
-  name: echo-controller
+  name: stamp-controller
   apiGroup: rbac.authorization.k8s.io

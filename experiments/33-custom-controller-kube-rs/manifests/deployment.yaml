@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: echo-controller
+  name: stamp-controller
   namespace: custom-controller-demo
   labels:
-    app: echo-controller
+    app: stamp-controller
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: echo-controller
+      app: stamp-controller
   template:
     metadata:
       labels:
-        app: echo-controller
+        app: stamp-controller
     spec:
-      serviceAccountName: echo-controller
+      serviceAccountName: stamp-controller
       containers:
-        - name: echo-controller
-          image: 192.168.89.2:5004/echo-controller:latest
+        - name: stamp-controller
+          image: 192.168.89.2:5004/stamp-controller:latest
           imagePullPolicy: Always
           env:
             - name: RUST_LOG

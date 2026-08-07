@@ -12,25 +12,45 @@ Full design rationale and the discussion that shaped every choice below is in
 [**issue #15**](https://github.com/skeptomai/k3s-experiments/issues/15) — read
 it first.
 
+## A note on naming
+
+The CRD is called `Stamp`, not something more "evocative." An earlier draft
+called it `Echo` — that name is actively misleading, not just imprecise:
+"echo" implies a request/response round-trip (the TCP/UDP Echo Protocol,
+`ping`), where a caller sends data and gets that same data back. Nothing here
+does that. `Stamp` writes `spec.replicas` copies of a value into storage and
+reports how many it observes — closer to "stamping out N copies" than to any
+round-trip. In a teaching artifact, a name that imports the *wrong* mental
+model is worse than a neutral one: the reader has to un-learn it before the
+real lesson (owner references, level-triggering, finalizers) can land.
+
+Likewise, `spec.replicas` doesn't mean what it means on a Deployment. A
+Deployment's replicas are running Pods doing work. A `Stamp`'s replicas are
+static, inert `ConfigMap` objects — nothing executes, nothing is scheduled,
+nothing is load-balanced. The word was borrowed because it gives the
+controller something countable to reconcile toward, not because ConfigMaps
+resemble workload replicas in any real sense. Worth keeping in mind while
+reading the rest of this doc.
+
 ## What it demonstrates
 
-- **`Echo` CRD** (`edu.k3s-experiments.dev/v1alpha1`, namespaced) with
+- **`Stamp` CRD** (`edu.k3s-experiments.dev/v1alpha1`, namespaced) with
   `spec.message: string` and `spec.replicas: int`. The CRD's OpenAPI schema
   is **generated from the Rust type**, not hand-written — `#[derive(CustomResource)]`
   (from `kube`) + `schemars` build it at compile time, and the binary can
-  print it: `echo-controller --print-crd`. `manifests/crd.yaml` is that
+  print it: `stamp-controller --print-crd`. `manifests/crd.yaml` is that
   generated output, checked in for convenience; regenerate it after changing
-  `EchoSpec`/`EchoStatus` in `src/main.rs` rather than hand-editing it.
-- **Owned resources.** For each `Echo`, the controller creates
+  `StampSpec`/`StampStatus` in `src/main.rs` rather than hand-editing it.
+- **Owned resources.** For each `Stamp`, the controller creates
   `spec.replicas` ConfigMaps (each holding `spec.message` under key
-  `message`), each with an `ownerReference` back to the `Echo`. The
+  `message`), each with an `ownerReference` back to the `Stamp`. The
   `Controller` is built with `.owns(configmaps, ...)`, so ConfigMap events
-  also trigger the owning `Echo`'s reconcile — not just events on the `Echo`
+  also trigger the owning `Stamp`'s reconcile — not just events on the `Stamp`
   itself.
 - **Level-triggered, idempotent reconciliation.** The reconcile function
   never trusts an in-memory diff or "what changed" from the triggering
   event. Every pass lists the ConfigMaps actually present (by label
-  selector `edu.k3s-experiments.dev/echo=<name>`), reconciles that against
+  selector `edu.k3s-experiments.dev/stamp=<name>`), reconciles that against
   `spec.replicas` (creating/deleting as needed), then **recounts** what's
   actually there afterward and writes that fresh count to
   `status.readyReplicas` — never the originally-desired number. This makes
@@ -52,21 +72,20 @@ it first.
 |------|---------|
 | `Cargo.toml`, `src/main.rs` | The controller — CRD type, reconcile/cleanup logic, `--print-crd` |
 | `Remfile` | Multi-stage build (rust:1-bookworm → debian:bookworm-slim) for `pelagos build` |
-| `build-job.yaml` | In-cluster build Job (git-clones this branch, `pelagos build` + `pelagos image push`) |
+| `build-job.yaml` | In-cluster build Job (git-clones master, `pelagos build` + `pelagos image push`) |
 | `manifests/namespace.yaml` | `custom-controller-demo` namespace |
-| `manifests/crd.yaml` | Generated `Echo` CustomResourceDefinition (cluster-scoped — the one unavoidable cluster-wide object here) |
-| `manifests/rbac.yaml` | ServiceAccount + namespaced Role + RoleBinding (scoped to `echos`/`echos/status`/`echos/finalizers` and `configmaps`, nothing cluster-wide) |
+| `manifests/crd.yaml` | Generated `Stamp` CustomResourceDefinition (cluster-scoped — the one unavoidable cluster-wide object here) |
+| `manifests/rbac.yaml` | ServiceAccount + namespaced Role + RoleBinding (scoped to `stamps`/`stamps/status`/`stamps/finalizers` and `configmaps`, nothing cluster-wide) |
 | `manifests/deployment.yaml` | Controller Deployment (1 replica) |
-| `manifests/sample-echo.yaml` | Sample `Echo` (`message: "hello from kube-rs"`, `replicas: 3`) |
+| `manifests/sample-stamp.yaml` | Sample `Stamp` (`message: "hello from kube-rs"`, `replicas: 3`) |
 | `setup.sh` | Applies namespace/CRD/RBAC/Deployment, waits for rollout (idempotent) |
-| `teardown.sh` | Deletes any `Echo` objects first (so finalizer cleanup runs), then everything else (idempotent) |
+| `teardown.sh` | Deletes any `Stamp` objects first (so finalizer cleanup runs), then everything else (idempotent) |
 
 ## Build
 
 This cluster builds images in-cluster via `pelagos build` (Remfile,
-Dockerfile-syntax compatible) — no Docker involved. Because the build Job
-clones from GitHub over HTTPS, the source has to be on a **pushed branch**,
-not just local: this experiment's code lives on `experiment-33-custom-controller`.
+Dockerfile-syntax compatible) — no Docker involved. The build Job clones
+this repo's `master` branch over HTTPS.
 
 Build (single command, run from omen):
 
@@ -77,10 +96,10 @@ kubectl apply -f experiments/33-custom-controller-kube-rs/build-job.yaml
 Watch it:
 
 ```
-kubectl logs -f job/echo-controller-build
+kubectl logs -f job/stamp-controller-build
 ```
 
-On success this pushes `192.168.89.2:5004/echo-controller:latest` to the
+On success this pushes `192.168.89.2:5004/stamp-controller:latest` to the
 local Zot registry on nazgul, which `manifests/deployment.yaml` pulls from.
 
 ## Deploy
@@ -94,28 +113,28 @@ controller pod to become Ready.
 
 ## Test
 
-Apply the sample `Echo`:
+Apply the sample `Stamp`:
 
 ```
-kubectl apply -f experiments/33-custom-controller-kube-rs/manifests/sample-echo.yaml
+kubectl apply -f experiments/33-custom-controller-kube-rs/manifests/sample-stamp.yaml
 ```
 
 Observe:
 
 ```
-kubectl -n custom-controller-demo get echo hello -o wide
-kubectl -n custom-controller-demo get configmap -l edu.k3s-experiments.dev/echo=hello
-kubectl -n custom-controller-demo get echo hello -o jsonpath='{.status.readyReplicas}'
+kubectl -n custom-controller-demo get stamp hello -o wide
+kubectl -n custom-controller-demo get configmap -l edu.k3s-experiments.dev/stamp=hello
+kubectl -n custom-controller-demo get stamp hello -o jsonpath='{.status.readyReplicas}'
 ```
 
 You should see 3 ConfigMaps (`hello-0`, `hello-1`, `hello-2`), each
 containing `message: hello from kube-rs` and an `ownerReference` pointing
-back to the `hello` Echo, and `status.readyReplicas` reading `3`.
+back to the `hello` Stamp, and `status.readyReplicas` reading `3`.
 
 **Scale it** — change `spec.replicas` and confirm convergence:
 
 ```
-kubectl -n custom-controller-demo patch echo hello --type=merge -p '{"spec":{"replicas":5}}'
+kubectl -n custom-controller-demo patch stamp hello --type=merge -p '{"spec":{"replicas":5}}'
 ```
 
 Two more ConfigMaps appear and `status.readyReplicas` becomes `5` — this is
@@ -125,13 +144,13 @@ more" special case.
 **Delete it** — watch the finalizer lifecycle:
 
 ```
-kubectl -n custom-controller-demo delete echo hello
+kubectl -n custom-controller-demo delete stamp hello
 ```
 
 Follow the controller logs during the delete (`kubectl -n
-custom-controller-demo logs -f deploy/echo-controller`) to see the "deleting
+custom-controller-demo logs -f deploy/stamp-controller`) to see the "deleting
 owned ConfigMap" / "cleanup confirmed" messages, then confirm the
-ConfigMaps and the `Echo` itself are both gone and the delete didn't hang on
+ConfigMaps and the `Stamp` itself are both gone and the delete didn't hang on
 the finalizer.
 
 ## Teardown
@@ -140,7 +159,7 @@ the finalizer.
 bash experiments/33-custom-controller-kube-rs/teardown.sh
 ```
 
-Deletes any remaining `Echo` objects first (triggering finalizer cleanup),
+Deletes any remaining `Stamp` objects first (triggering finalizer cleanup),
 then the Deployment, RBAC, CRD, and namespace. Safe to re-run.
 
 ## Safety

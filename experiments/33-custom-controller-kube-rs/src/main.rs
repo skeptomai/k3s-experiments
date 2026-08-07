@@ -1,12 +1,19 @@
-//! echo-controller — a minimal, concept-complete kube-rs custom controller.
+//! stamp-controller — a minimal, concept-complete kube-rs custom controller.
 //!
-//! Watches `Echo` custom resources (group `edu.k3s-experiments.dev`, version
-//! `v1alpha1`). For each `Echo`, reconciles the cluster so that exactly
+//! Watches `Stamp` custom resources (group `edu.k3s-experiments.dev`, version
+//! `v1alpha1`). For each `Stamp`, reconciles the cluster so that exactly
 //! `spec.replicas` ConfigMaps exist, each holding `spec.message` and owned
-//! (via `ownerReferences`) by the `Echo`. `status.readyReplicas` is always
+//! (via `ownerReferences`) by the `Stamp`. `status.readyReplicas` is always
 //! recomputed from a live list of matching ConfigMaps — never from an
 //! in-memory diff — so reconcile is safe to call redundantly, out of order,
 //! or after missed events (level-triggered, not edge-triggered).
+//!
+//! Named `Stamp` rather than something evocative of an existing protocol —
+//! this deliberately "stamps out" N copies of a value into storage. An
+//! earlier draft called this `Echo`, which is actively misleading: "echo"
+//! implies a request/response round-trip (RFC 862, ping), and nothing here
+//! sends anything back to a caller — it just writes N ConfigMaps and reports
+//! how many it observes. See issue #15 for the full naming discussion.
 //!
 //! A finalizer (`edu.k3s-experiments.dev/cleanup`) is added on creation and
 //! removed only after explicit cleanup logic confirms the owned ConfigMaps
@@ -35,44 +42,44 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-/// Finalizer name added to every `Echo` on creation.
+/// Finalizer name added to every `Stamp` on creation.
 const FINALIZER: &str = "edu.k3s-experiments.dev/cleanup";
 /// Label placed on every ConfigMap this controller creates, used to find
-/// "the ConfigMaps that currently belong to this Echo" without trusting
+/// "the ConfigMaps that currently belong to this Stamp" without trusting
 /// any in-memory bookkeeping.
-const OWNER_LABEL: &str = "edu.k3s-experiments.dev/echo";
+const OWNER_LABEL: &str = "edu.k3s-experiments.dev/stamp";
 /// Namespace this controller watches. Matches manifests/rbac.yaml's Role,
 /// which is namespace-scoped rather than cluster-wide (see the RBAC design
 /// note in README.md).
 const WATCH_NAMESPACE: &str = "custom-controller-demo";
 
-/// `Echo` — the primary custom resource this controller reconciles.
+/// `Stamp` — the primary custom resource this controller reconciles.
 ///
-/// group=edu.k3s-experiments.dev, version=v1alpha1, kind=Echo, scope=Namespaced.
+/// group=edu.k3s-experiments.dev, version=v1alpha1, kind=Stamp, scope=Namespaced.
 #[derive(CustomResource, Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "edu.k3s-experiments.dev",
     version = "v1alpha1",
-    kind = "Echo",
+    kind = "Stamp",
     namespaced,
-    status = "EchoStatus",
-    shortname = "echo",
+    status = "StampStatus",
+    shortname = "stamp",
     printcolumn = r#"{"name":"Message","type":"string","jsonPath":".spec.message"}"#,
     printcolumn = r#"{"name":"Replicas","type":"integer","jsonPath":".spec.replicas"}"#,
     printcolumn = r#"{"name":"Ready","type":"integer","jsonPath":".status.readyReplicas"}"#
 )]
 #[serde(rename_all = "camelCase")]
-pub struct EchoSpec {
+pub struct StampSpec {
     /// Message written into each owned ConfigMap's data.
     pub message: String,
     /// Desired number of owned ConfigMaps.
     pub replicas: i32,
 }
 
-/// `Echo.status` — always recomputed from a live count of owned ConfigMaps.
+/// `Stamp.status` — always recomputed from a live count of owned ConfigMaps.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct EchoStatus {
+pub struct StampStatus {
     /// Number of matching ConfigMaps observed in the cluster as of the last
     /// reconcile. Never derived from a diff — always a fresh list+count.
     pub ready_replicas: i32,
@@ -91,26 +98,26 @@ enum ReconcileError {
     Finalizer(#[from] Box<kube::runtime::finalizer::Error<ReconcileError>>),
 }
 
-/// Returns the ConfigMaps currently owned by `echo`, found by label selector
+/// Returns the ConfigMaps currently owned by `stamp`, found by label selector
 /// (not by trusting any in-memory record of what was previously created).
 async fn owned_configmaps(
     client: &Client,
     namespace: &str,
-    echo_name: &str,
+    stamp_name: &str,
 ) -> Result<Vec<ConfigMap>, kube::Error> {
     let cms: Api<ConfigMap> = Api::namespaced(client.clone(), namespace);
-    let lp = ListParams::default().labels(&format!("{OWNER_LABEL}={echo_name}"));
+    let lp = ListParams::default().labels(&format!("{OWNER_LABEL}={stamp_name}"));
     Ok(cms.list(&lp).await?.items)
 }
 
-/// Builds the ConfigMap manifest for replica index `i` of `echo`, with an
+/// Builds the ConfigMap manifest for replica index `i` of `stamp`, with an
 /// ownerReference back to it so Kubernetes GC (and `.owns()` watches) apply.
-fn build_configmap(echo: &Echo, i: i32) -> ConfigMap {
-    let name = echo.name_any();
-    let uid = echo.uid().expect("Echo must have a uid to build owner refs");
+fn build_configmap(stamp: &Stamp, i: i32) -> ConfigMap {
+    let name = stamp.name_any();
+    let uid = stamp.uid().expect("Stamp must have a uid to build owner refs");
     let owner_ref = OwnerReference {
         api_version: "edu.k3s-experiments.dev/v1alpha1".to_string(),
-        kind: "Echo".to_string(),
+        kind: "Stamp".to_string(),
         name: name.clone(),
         uid,
         controller: Some(true),
@@ -121,12 +128,12 @@ fn build_configmap(echo: &Echo, i: i32) -> ConfigMap {
     labels.insert(OWNER_LABEL.to_string(), name.clone());
 
     let mut data = std::collections::BTreeMap::new();
-    data.insert("message".to_string(), echo.spec.message.clone());
+    data.insert("message".to_string(), stamp.spec.message.clone());
 
     ConfigMap {
         metadata: kube::api::ObjectMeta {
             name: Some(format!("{name}-{i}")),
-            namespace: echo.namespace(),
+            namespace: stamp.namespace(),
             labels: Some(labels),
             owner_references: Some(vec![owner_ref]),
             ..Default::default()
@@ -137,20 +144,20 @@ fn build_configmap(echo: &Echo, i: i32) -> ConfigMap {
 }
 
 /// Explicit finalizer cleanup: delete every ConfigMap still labeled as
-/// belonging to this Echo, then confirm none remain. Owner-reference GC
+/// belonging to this Stamp, then confirm none remain. Owner-reference GC
 /// would eventually remove these anyway; this exists to demonstrate the
 /// finalizer's own cleanup-then-confirm lifecycle, not because it is
 /// strictly necessary here.
-async fn cleanup(client: &Client, echo: &Echo) -> Result<Action, ReconcileError> {
-    let ns = echo.namespace().unwrap_or_else(|| "default".to_string());
-    let name = echo.name_any();
-    info!(echo = %name, namespace = %ns, "finalizer cleanup: deleting owned ConfigMaps");
+async fn cleanup(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError> {
+    let ns = stamp.namespace().unwrap_or_else(|| "default".to_string());
+    let name = stamp.name_any();
+    info!(stamp = %name, namespace = %ns, "finalizer cleanup: deleting owned ConfigMaps");
 
     let cms: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
     let existing = owned_configmaps(client, &ns, &name).await?;
     for cm in &existing {
         let cm_name = cm.name_any();
-        info!(echo = %name, configmap = %cm_name, "deleting owned ConfigMap");
+        info!(stamp = %name, configmap = %cm_name, "deleting owned ConfigMap");
         match cms.delete(&cm_name, &DeleteParams::default()).await {
             Ok(_) => {}
             Err(kube::Error::Api(e)) if e.code == 404 => {}
@@ -162,10 +169,10 @@ async fn cleanup(client: &Client, echo: &Echo) -> Result<Action, ReconcileError>
     // removed — this confirm-then-remove step is the point of the exercise.
     let remaining = owned_configmaps(client, &ns, &name).await?;
     if remaining.is_empty() {
-        info!(echo = %name, "cleanup confirmed: no owned ConfigMaps remain, finalizer will be removed");
+        info!(stamp = %name, "cleanup confirmed: no owned ConfigMaps remain, finalizer will be removed");
     } else {
         warn!(
-            echo = %name,
+            stamp = %name,
             remaining = remaining.len(),
             "cleanup issued deletes but ConfigMaps still visible; will retry"
         );
@@ -181,10 +188,10 @@ async fn cleanup(client: &Client, echo: &Echo) -> Result<Action, ReconcileError>
 /// the right content, by listing what's actually present rather than
 /// trusting any diff; (2) recount actual owned ConfigMaps and write that
 /// (not the desired count) to `status.readyReplicas`.
-async fn apply(client: &Client, echo: &Echo) -> Result<Action, ReconcileError> {
-    let ns = echo.namespace().unwrap_or_else(|| "default".to_string());
-    let name = echo.name_any();
-    let desired = echo.spec.replicas.max(0);
+async fn apply(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError> {
+    let ns = stamp.namespace().unwrap_or_else(|| "default".to_string());
+    let name = stamp.name_any();
+    let desired = stamp.spec.replicas.max(0);
 
     let cms: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
     let existing = owned_configmaps(client, &ns, &name).await?;
@@ -200,7 +207,7 @@ async fn apply(client: &Client, echo: &Echo) -> Result<Action, ReconcileError> {
 
     for i in 0..desired {
         let cm_name = format!("{name}-{i}");
-        let desired_cm = build_configmap(echo, i);
+        let desired_cm = build_configmap(stamp, i);
 
         match existing_by_name.remove(&cm_name) {
             Some(current) => {
@@ -210,18 +217,18 @@ async fn apply(client: &Client, echo: &Echo) -> Result<Action, ReconcileError> {
                     .and_then(|d| d.get("message"))
                     .cloned()
                     .unwrap_or_default();
-                if current_message != echo.spec.message {
-                    info!(echo = %name, configmap = %cm_name, "message drifted, re-applying");
+                if current_message != stamp.spec.message {
+                    info!(stamp = %name, configmap = %cm_name, "message drifted, re-applying");
                     cms.patch(
                         &cm_name,
-                        &PatchParams::apply("echo-controller"),
+                        &PatchParams::apply("stamp-controller"),
                         &Patch::Apply(&desired_cm),
                     )
                     .await?;
                 }
             }
             None => {
-                info!(echo = %name, configmap = %cm_name, "creating owned ConfigMap");
+                info!(stamp = %name, configmap = %cm_name, "creating owned ConfigMap");
                 match cms.create(&PostParams::default(), &desired_cm).await {
                     Ok(_) => {}
                     Err(kube::Error::Api(e)) if e.code == 409 => {
@@ -237,7 +244,7 @@ async fn apply(client: &Client, echo: &Echo) -> Result<Action, ReconcileError> {
     // Anything left in existing_by_name is beyond the desired count
     // (e.g. spec.replicas was scaled down) — delete it.
     for (cm_name, _) in existing_by_name {
-        info!(echo = %name, configmap = %cm_name, "deleting excess ConfigMap");
+        info!(stamp = %name, configmap = %cm_name, "deleting excess ConfigMap");
         match cms.delete(&cm_name, &DeleteParams::default()).await {
             Ok(_) => {}
             Err(kube::Error::Api(e)) if e.code == 404 => {}
@@ -249,18 +256,18 @@ async fn apply(client: &Client, echo: &Echo) -> Result<Action, ReconcileError> {
     // count derived from the create/delete calls just made above.
     let actual = owned_configmaps(client, &ns, &name).await?.len() as i32;
 
-    let echoes: Api<Echo> = Api::namespaced(client.clone(), &ns);
+    let stamps: Api<Stamp> = Api::namespaced(client.clone(), &ns);
     let status_patch = serde_json::json!({
         "status": { "readyReplicas": actual }
     });
-    echoes
+    stamps
         .patch_status(
             &name,
-            &PatchParams::apply("echo-controller"),
+            &PatchParams::apply("stamp-controller"),
             &Patch::Merge(&status_patch),
         )
         .await?;
-    info!(echo = %name, desired, actual, "reconciled");
+    info!(stamp = %name, desired, actual, "reconciled");
 
     Ok(Action::requeue(Duration::from_secs(300)))
 }
@@ -268,29 +275,29 @@ async fn apply(client: &Client, echo: &Echo) -> Result<Action, ReconcileError> {
 /// Top-level reconcile function handed to `Controller::run`. Delegates to
 /// `kube::runtime::finalizer` to drive the add/cleanup/remove lifecycle
 /// around the actual `apply`/`cleanup` logic above.
-async fn reconcile(echo: Arc<Echo>, ctx: Arc<Context>) -> Result<Action, ReconcileError> {
-    let ns = echo.namespace().unwrap_or_else(|| "default".to_string());
-    let echoes: Api<Echo> = Api::namespaced(ctx.client.clone(), &ns);
+async fn reconcile(stamp: Arc<Stamp>, ctx: Arc<Context>) -> Result<Action, ReconcileError> {
+    let ns = stamp.namespace().unwrap_or_else(|| "default".to_string());
+    let stamps: Api<Stamp> = Api::namespaced(ctx.client.clone(), &ns);
 
-    finalizer(&echoes, FINALIZER, echo, |event| async {
+    finalizer(&stamps, FINALIZER, stamp, |event| async {
         match event {
-            FinalizerEvent::Apply(echo) => apply(&ctx.client, &echo).await,
-            FinalizerEvent::Cleanup(echo) => cleanup(&ctx.client, &echo).await,
+            FinalizerEvent::Apply(stamp) => apply(&ctx.client, &stamp).await,
+            FinalizerEvent::Cleanup(stamp) => cleanup(&ctx.client, &stamp).await,
         }
     })
     .await
     .map_err(|e| ReconcileError::Finalizer(Box::new(e)))
 }
 
-fn error_policy(echo: Arc<Echo>, err: &ReconcileError, _ctx: Arc<Context>) -> Action {
-    error!(echo = %echo.name_any(), error = %err, "reconcile failed, requeueing");
+fn error_policy(stamp: Arc<Stamp>, err: &ReconcileError, _ctx: Arc<Context>) -> Action {
+    error!(stamp = %stamp.name_any(), error = %err, "reconcile failed, requeueing");
     Action::requeue(Duration::from_secs(10))
 }
 
 #[derive(Parser, Debug)]
-#[command(about = "echo-controller: kube-rs teaching controller for the Echo CRD")]
+#[command(about = "stamp-controller: kube-rs teaching controller for the Stamp CRD")]
 struct Cli {
-    /// Print the Echo CustomResourceDefinition as YAML and exit, instead of
+    /// Print the Stamp CustomResourceDefinition as YAML and exit, instead of
     /// running the controller. Lets the CRD manifest be generated from the
     /// Rust type (source of truth) rather than hand-written.
     #[arg(long)]
@@ -302,7 +309,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     if cli.print_crd {
-        let crd = Echo::crd();
+        let crd = Stamp::crd();
         println!("{}", serde_yaml::to_string(&crd)?);
         return Ok(());
     }
@@ -318,15 +325,15 @@ async fn main() -> anyhow::Result<()> {
     // RBAC for this controller is deliberately namespace-scoped (see
     // manifests/rbac.yaml) rather than a ClusterRole, so watches must be
     // namespaced too, not Api::all() (cluster-scoped list/watch).
-    let echoes = Api::<Echo>::namespaced(client.clone(), WATCH_NAMESPACE);
+    let stamps = Api::<Stamp>::namespaced(client.clone(), WATCH_NAMESPACE);
     let configmaps = Api::<ConfigMap>::namespaced(client.clone(), WATCH_NAMESPACE);
 
     info!(
         namespace = WATCH_NAMESPACE,
-        "echo-controller starting, watching Echo (edu.k3s-experiments.dev/v1alpha1)"
+        "stamp-controller starting, watching Stamp (edu.k3s-experiments.dev/v1alpha1)"
     );
 
-    Controller::new(echoes, watcher::Config::default())
+    Controller::new(stamps, watcher::Config::default())
         .owns(configmaps, watcher::Config::default())
         .shutdown_on_signal()
         .run(reconcile, error_policy, Arc::new(Context { client }))

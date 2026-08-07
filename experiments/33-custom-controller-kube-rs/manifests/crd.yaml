@@ -1,18 +1,18 @@
 # Generated from the Rust type via: cargo run --release -- --print-crd
 # (the running controller image also supports this flag). Do not hand-edit
-# the schema — regenerate after changing EchoSpec/EchoStatus in src/main.rs.
+# the schema — regenerate after changing StampSpec/StampStatus in src/main.rs.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: echos.edu.k3s-experiments.dev
+  name: stamps.edu.k3s-experiments.dev
 spec:
   group: edu.k3s-experiments.dev
   names:
-    kind: Echo
-    plural: echos
+    kind: Stamp
+    plural: stamps
     shortNames:
-    - echo
-    singular: echo
+    - stamp
+    singular: stamp
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -28,13 +28,13 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Auto-generated derived type for EchoSpec via `CustomResource`
+        description: Auto-generated derived type for StampSpec via `CustomResource`
         properties:
           spec:
             description: |-
-              `Echo` — the primary custom resource this controller reconciles.
+              `Stamp` — the primary custom resource this controller reconciles.
 
-              group=edu.k3s-experiments.dev, version=v1alpha1, kind=Echo, scope=Namespaced.
+              group=edu.k3s-experiments.dev, version=v1alpha1, kind=Stamp, scope=Namespaced.
             properties:
               message:
                 description: Message written into each owned ConfigMap's data.
@@ -48,7 +48,7 @@ spec:
             - replicas
             type: object
           status:
-            description: '`Echo.status` — always recomputed from a live count of owned ConfigMaps.'
+            description: '`Stamp.status` — always recomputed from a live count of owned ConfigMaps.'
             nullable: true
             properties:
               readyReplicas:
@@ -62,9 +62,10 @@ spec:
             type: object
         required:
         - spec
-        title: Echo
+        title: Stamp
         type: object
     served: true
     storage: true
     subresources:
       status: {}
+

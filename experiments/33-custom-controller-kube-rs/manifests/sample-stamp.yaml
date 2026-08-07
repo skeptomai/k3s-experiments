@@ -1,5 +1,5 @@
 apiVersion: edu.k3s-experiments.dev/v1alpha1
-kind: Echo
+kind: Stamp
 metadata:
   name: hello
   namespace: custom-controller-demo
