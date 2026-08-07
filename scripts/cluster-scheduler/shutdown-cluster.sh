@@ -33,31 +33,36 @@ for node in $ALL_NODES; do
 done
 
 # virt-operator recreates virt-api-pdb / virt-controller-pdb on its own
-# reconcile loop -- a single delete before the first drain isn't enough, it's
-# back within the ~2-3 minutes it takes to reach later drain phases. With
-# every node cordoned, a 2-replica component's "other" pod also has nowhere
-# to reschedule to, so it sits Pending while the recreated PDB blocks the
-# last replica's eviction indefinitely. Delete immediately before EVERY
-# drain phase, not just once at the start.
+# reconcile loop -- deleting once per BATCH isn't enough: a prior node's own
+# drain in the same batch can take up to its own --timeout (120s), which is
+# plenty of time for virt-operator to recreate the PDB before the *next*
+# node in that same batch gets drained. Hit exactly this on 2026-08-07:
+# ipc5 (first in the control-plane-secondary batch) drained fine, its own
+# drain took long enough that the PDB was back by the time ipc6 (second in
+# that batch) started draining, ipc6's virt-controller/virt-api pods got
+# stuck on the recreated PDB, hit the drain timeout, and -- because of
+# `set -e` -- the whole script aborted right there without ever reaching
+# the actual shutdown steps for ANY node, leaving ipc7/8/9 cordoned and
+# drained (their evicted pods stuck Pending, since every node was already
+# cordoned) with nothing shut down, undetected until the next morning-on
+# cron happened to uncordon everything ~8h later. Delete immediately before
+# EVERY individual node's drain, not once per batch.
 drop_kubevirt_pdbs() {
     kubectl delete pdb -n kubevirt --all --ignore-not-found 2>/dev/null || true
 }
 
 echo ""
-echo "==> Removing KubeVirt PodDisruptionBudgets before drain (recreated by virt-operator on restart)..."
-drop_kubevirt_pdbs
-
-echo ""
 echo "==> Draining worker nodes..."
 for node in $WORKERS; do
+    drop_kubevirt_pdbs
     echo "    draining $node"
     kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=120s
 done
 
-drop_kubevirt_pdbs
 echo ""
 echo "==> Draining secondary control-plane nodes..."
 for node in $CONTROL_PLANE_SECONDARY; do
+    drop_kubevirt_pdbs
     echo "    draining $node"
     kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
 done
