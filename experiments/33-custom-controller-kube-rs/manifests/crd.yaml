@@ -40,8 +40,16 @@ spec:
                 description: Message written into each owned ConfigMap's data.
                 type: string
               replicas:
-                description: Desired number of owned ConfigMaps.
+                description: |-
+                  Desired number of owned ConfigMaps. Bounded 0..=20 at the schema
+                  level (rejected by the API server at admission time, before the
+                  controller ever sees a bad value) rather than silently clamped in
+                  application code -- 20 is an arbitrary but generous ceiling for a
+                  teaching demo, just enough to stop `spec.replicas: 1000000` from
+                  hammering the API server with a million creates in one reconcile.
                 format: int32
+                maximum: 20.0
+                minimum: 0.0
                 type: integer
             required:
             - message

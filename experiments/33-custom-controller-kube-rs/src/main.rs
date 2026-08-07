@@ -72,7 +72,13 @@ const WATCH_NAMESPACE: &str = "custom-controller-demo";
 pub struct StampSpec {
     /// Message written into each owned ConfigMap's data.
     pub message: String,
-    /// Desired number of owned ConfigMaps.
+    /// Desired number of owned ConfigMaps. Bounded 0..=20 at the schema
+    /// level (rejected by the API server at admission time, before the
+    /// controller ever sees a bad value) rather than silently clamped in
+    /// application code -- 20 is an arbitrary but generous ceiling for a
+    /// teaching demo, just enough to stop `spec.replicas: 1000000` from
+    /// hammering the API server with a million creates in one reconcile.
+    #[schemars(range(min = 0, max = 20))]
     pub replicas: i32,
 }
 
@@ -114,7 +120,9 @@ async fn owned_configmaps(
 /// ownerReference back to it so Kubernetes GC (and `.owns()` watches) apply.
 fn build_configmap(stamp: &Stamp, i: i32) -> ConfigMap {
     let name = stamp.name_any();
-    let uid = stamp.uid().expect("Stamp must have a uid to build owner refs");
+    let uid = stamp
+        .uid()
+        .expect("Stamp came from the API server, which always sets metadata.uid");
     let owner_ref = OwnerReference {
         api_version: "edu.k3s-experiments.dev/v1alpha1".to_string(),
         kind: "Stamp".to_string(),
@@ -195,7 +203,15 @@ async fn apply(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError>
         .namespace()
         .expect("Stamp is namespaced; API server always sets metadata.namespace");
     let name = stamp.name_any();
-    let desired = stamp.spec.replicas.max(0);
+    // No .max(0) clamp here: the CRD schema's `minimum: 0` on spec.replicas
+    // (see StampSpec) already rejects a negative value at admission time,
+    // before the controller ever sees it -- clamping here would be a no-op
+    // for the loop below anyway (`0..desired` for a negative desired is
+    // already a valid empty range in Rust, no underflow), and would only
+    // serve to hide the true bad value in the "reconciled" log line below.
+    // Better to let a value that somehow got past admission show up honestly
+    // in the logs than to silently launder it into a plausible-looking 0.
+    let desired = stamp.spec.replicas;
 
     let cms: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
     let existing = owned_configmaps(client, &ns, &name).await?;
@@ -238,6 +254,19 @@ async fn apply(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError>
                     Err(kube::Error::Api(e)) if e.code == 409 => {
                         // Already exists (e.g. from a concurrent reconcile) —
                         // fine, level-triggered means we'll converge next pass.
+                        //
+                        // NOTE: this does NOT make it safe to scale
+                        // manifests/deployment.yaml's `replicas` above 1.
+                        // kube-rs's Controller has no built-in leader
+                        // election (unlike controller-runtime's Manager) --
+                        // it would need to be added explicitly before
+                        // running more than one instance of this controller
+                        // concurrently. This 409 handler only covers the
+                        // narrow, currently-impossible-anyway race between
+                        // this controller and something else creating the
+                        // same-named ConfigMap; two replicas of this same
+                        // controller both reconciling the same Stamp would
+                        // race on a lot more than just create() calls.
                     }
                     Err(e) => return Err(e.into()),
                 }
