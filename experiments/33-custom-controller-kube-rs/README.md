@@ -42,8 +42,14 @@ reading the rest of this doc.
   generated output, checked in for convenience; regenerate it after changing
   `StampSpec`/`StampStatus` in `src/main.rs` rather than hand-editing it.
 - **Owned resources.** For each `Stamp`, the controller creates
-  `spec.replicas` ConfigMaps (each holding `spec.message` under key
-  `message`), each with an `ownerReference` back to the `Stamp`. The
+  `spec.replicas` ConfigMaps, each with an `ownerReference` back to the
+  `Stamp`. Each one holds a distinct value under key `message` —
+  `"{spec.message} (replica {i})"` — so the N ConfigMaps aren't identical
+  copies; you can tell them apart by content, not just by name. That value
+  is deterministic in `spec.message` and the replica index alone (no
+  wall-clock time, no external state), which matters: it's also the exact
+  value the drift check in `apply()` compares against, so once converged,
+  reconcile genuinely goes idle instead of re-patching forever. The
   `Controller` is built with `.owns(configmaps, ...)`, so ConfigMap events
   also trigger the owning `Stamp`'s reconcile — not just events on the `Stamp`
   itself.
@@ -128,8 +134,9 @@ kubectl -n custom-controller-demo get stamp hello -o jsonpath='{.status.readyRep
 ```
 
 You should see 3 ConfigMaps (`hello-0`, `hello-1`, `hello-2`), each
-containing `message: hello from kube-rs` and an `ownerReference` pointing
-back to the `hello` Stamp, and `status.readyReplicas` reading `3`.
+containing a distinct `message` (`hello from kube-rs (replica 0)`,
+`(replica 1)`, `(replica 2)`) and an `ownerReference` pointing back to the
+`hello` Stamp, and `status.readyReplicas` reading `3`.
 
 **Scale it** — change `spec.replicas` and confirm convergence:
 

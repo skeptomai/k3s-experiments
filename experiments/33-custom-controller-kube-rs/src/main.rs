@@ -116,6 +116,20 @@ async fn owned_configmaps(
     Ok(cms.list(&lp).await?.items)
 }
 
+/// The message stored in replica index `i` of `stamp`'s owned ConfigMaps.
+/// Deterministic in `stamp.spec.message` and `i` only -- no wall-clock time,
+/// no external state -- so it's stable across reconciles: the same `Stamp`
+/// and the same index always produce the same string. That determinism is
+/// what keeps this safe to use as the *comparison target* in apply()'s
+/// drift check below, not just what gets written. A per-reconcile-varying
+/// value (e.g. a timestamp updated on every pass) here would make every
+/// reconcile see a "drift" against what's already stored, triggering an
+/// unconditional re-patch every pass forever -- exactly the kind of
+/// perpetual churn a level-triggered reconciler is supposed to avoid.
+fn stamped_message(stamp: &Stamp, i: i32) -> String {
+    format!("{} (replica {i})", stamp.spec.message)
+}
+
 /// Builds the ConfigMap manifest for replica index `i` of `stamp`, with an
 /// ownerReference back to it so Kubernetes GC (and `.owns()` watches) apply.
 fn build_configmap(stamp: &Stamp, i: i32) -> ConfigMap {
@@ -136,7 +150,7 @@ fn build_configmap(stamp: &Stamp, i: i32) -> ConfigMap {
     labels.insert(OWNER_LABEL.to_string(), name.clone());
 
     let mut data = std::collections::BTreeMap::new();
-    data.insert("message".to_string(), stamp.spec.message.clone());
+    data.insert("message".to_string(), stamped_message(stamp, i));
 
     ConfigMap {
         metadata: kube::api::ObjectMeta {
@@ -237,7 +251,7 @@ async fn apply(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError>
                     .and_then(|d| d.get("message"))
                     .cloned()
                     .unwrap_or_default();
-                if current_message != stamp.spec.message {
+                if current_message != stamped_message(stamp, i) {
                     info!(stamp = %name, configmap = %cm_name, "message drifted, re-applying");
                     cms.patch(
                         &cm_name,
