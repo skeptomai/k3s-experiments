@@ -149,7 +149,9 @@ fn build_configmap(stamp: &Stamp, i: i32) -> ConfigMap {
 /// finalizer's own cleanup-then-confirm lifecycle, not because it is
 /// strictly necessary here.
 async fn cleanup(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError> {
-    let ns = stamp.namespace().unwrap_or_else(|| "default".to_string());
+    let ns = stamp
+        .namespace()
+        .expect("Stamp is namespaced; API server always sets metadata.namespace");
     let name = stamp.name_any();
     info!(stamp = %name, namespace = %ns, "finalizer cleanup: deleting owned ConfigMaps");
 
@@ -189,7 +191,9 @@ async fn cleanup(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileErro
 /// trusting any diff; (2) recount actual owned ConfigMaps and write that
 /// (not the desired count) to `status.readyReplicas`.
 async fn apply(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError> {
-    let ns = stamp.namespace().unwrap_or_else(|| "default".to_string());
+    let ns = stamp
+        .namespace()
+        .expect("Stamp is namespaced; API server always sets metadata.namespace");
     let name = stamp.name_any();
     let desired = stamp.spec.replicas.max(0);
 
@@ -276,7 +280,9 @@ async fn apply(client: &Client, stamp: &Stamp) -> Result<Action, ReconcileError>
 /// `kube::runtime::finalizer` to drive the add/cleanup/remove lifecycle
 /// around the actual `apply`/`cleanup` logic above.
 async fn reconcile(stamp: Arc<Stamp>, ctx: Arc<Context>) -> Result<Action, ReconcileError> {
-    let ns = stamp.namespace().unwrap_or_else(|| "default".to_string());
+    let ns = stamp
+        .namespace()
+        .expect("Stamp is namespaced; API server always sets metadata.namespace");
     let stamps: Api<Stamp> = Api::namespaced(ctx.client.clone(), &ns);
 
     finalizer(&stamps, FINALIZER, stamp, |event| async {
