@@ -12,6 +12,10 @@ Full design rationale and the discussion that shaped every choice below is in
 [**issue #15**](https://github.com/skeptomai/k3s-experiments/issues/15) — read
 it first.
 
+For how kube-runtime actually calls `reconcile()` under the hood — traced
+against its real source, not inferred — see
+[**reconcile-loop-internals.md**](reconcile-loop-internals.md).
+
 ## A note on naming
 
 The CRD is called `Stamp`, not something more "evocative." An earlier draft
