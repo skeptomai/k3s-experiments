@@ -131,7 +131,7 @@ This means:
   everything is gone.
 
 Other operators in this cluster that follow the same pattern and carry the same risk:
-cert-manager, Vault (Raft cluster init), and any Flux HelmRelease-managed operator that
+cert-manager, OpenBao (Raft cluster init), and any Flux HelmRelease-managed operator that
 installs CRDs via a hook. The gap between "pods gone" and "cluster fully clean" varies
 by operator but is never zero.
 

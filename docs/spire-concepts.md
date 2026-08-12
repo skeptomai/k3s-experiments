@@ -189,7 +189,7 @@ Properties:
 | Service-to-service where you control both ends | X.509 (mTLS) |
 | HTTP API, identity passed in header | JWT |
 | Identity through a TLS-terminating proxy | JWT |
-| Authenticating to Vault (JWT auth method) | JWT |
+| Authenticating to OpenBao (JWT auth method) | JWT |
 | Envoy/service mesh transparent mTLS | X.509 |
 
 **Why this cluster uses X.509:**
@@ -210,10 +210,10 @@ TLS layer.
 
 Common cases:
 
-- **Vault authentication** — Vault's JWT auth method expects a Bearer token, not a
-  client cert. A workload that needs to fetch secrets from Vault calls the Workload API
-  to get a JWT SVID with audience `vault`, presents it to Vault, and receives a Vault
-  token in return.
+- **OpenBao authentication** — OpenBao's JWT auth method expects a Bearer token, not a
+  client cert. A workload that needs to fetch secrets from OpenBao calls the Workload API
+  to get a JWT SVID with the configured audience, presents it to OpenBao, and receives
+  an OpenBao token in return. (Not currently configured in this cluster — see below.)
 - **REST APIs behind an API gateway** — the gateway terminates TLS; the workload's
   X.509 identity never reaches the backend. The workload instead fetches a JWT SVID and
   sends it as an `Authorization: Bearer` header that the gateway or backend can validate.
@@ -249,7 +249,7 @@ The called service has three options for how it performs this validation:
 **Using both simultaneously:**
 A workload at the boundary between these two worlds can hold both at once. For example:
 it participates in mTLS with internal peers (X.509, rotated automatically by the agent)
-while also authenticating to Vault and calling external REST APIs (JWT, re-fetched by the
+while also authenticating to OpenBao and calling external REST APIs (JWT, re-fetched by the
 application when needed). The Workload API issues whichever forms are requested; there is
 no restriction on fetching both. The same SPIRE trust bundle verifies both forms — its
 CA cert validates X.509 chains, its public key verifies JWT signatures.
@@ -1186,18 +1186,20 @@ proof. If that policy is ever violated — through a compromised ServiceAccount,
 misconfigured RBAC rule, or a cluster-admin mistake — the agent cannot detect it. The
 `spire` namespace is the security boundary, not individual workloads.
 
-### Vault Integration via JWT SVID
+### OpenBao Integration via JWT SVID
 
-A natural next step for this cluster (Vault is already deployed): pods can authenticate
-to Vault using a SPIRE-issued JWT SVID via Vault's JWT auth method. No Vault tokens or
-secrets need to be injected into pods. The flow is:
+A natural next step for this cluster (OpenBao is already deployed): pods can authenticate
+to OpenBao using a SPIRE-issued JWT SVID via OpenBao's JWT auth method. No OpenBao tokens
+or secrets need to be injected into pods. The flow is:
 
-1. Pod fetches JWT SVID (audience: `vault`)
-2. Pod calls `vault write auth/jwt/login jwt=<svid> role=<role>`
-3. Vault validates the JWT against the SPIRE trust bundle (configured as a JWKS endpoint)
-4. Vault returns a short-lived Vault token
+1. Pod fetches JWT SVID (audience: `vault` — OpenBao's auth method is API-compatible
+   with Vault's and uses the same audience convention)
+2. Pod calls `bao write auth/jwt/login jwt=<svid> role=<role>`
+3. OpenBao validates the JWT against the SPIRE trust bundle (configured as a JWKS endpoint)
+4. OpenBao returns a short-lived token
 
-This replaces Vault's Kubernetes auth method with a stronger, SPIFFE-native identity.
+This replaces OpenBao's Kubernetes auth method with a stronger, SPIFFE-native identity.
+Not currently configured.
 
 ---
 
@@ -1229,11 +1231,11 @@ the cascade is time-dependent:
   TLS error. If the service retries, it keeps failing until the server comes back and the
   agent can issue a fresh SVID.
 
-  *Vault authentication via JWT SVID* — the JWT has an `exp` claim. Vault validates it
-  on every login call and rejects expired tokens with `token is expired`. A pod that
-  fetches a Vault token at startup and holds it may continue working (Vault tokens have
-  their own TTL), but any pod that re-authenticates to Vault (e.g. to rotate secrets)
-  will fail until a fresh JWT SVID is available.
+  *OpenBao authentication via JWT SVID* — the JWT has an `exp` claim. OpenBao validates
+  it on every login call and rejects expired tokens with `token is expired`. A pod that
+  fetches an OpenBao token at startup and holds it may continue working (OpenBao tokens
+  have their own TTL), but any pod that re-authenticates to OpenBao (e.g. to rotate
+  secrets) will fail until a fresh JWT SVID is available.
 
   *Envoy mTLS sidecar* — Envoy holds the SVID and rotates it via the SPIFFE Workload
   API. When the SVID expires and rotation fails, Envoy's outbound TLS connections start

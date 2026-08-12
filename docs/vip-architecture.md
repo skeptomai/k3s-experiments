@@ -153,7 +153,7 @@ graph TB
     end
 
     svc1["Service: traefik\ntype: LoadBalancer\n→ .240"]
-    svc2["Service: vault\ntype: LoadBalancer\n→ .241"]
+    svc2["Service: example-svc\n(illustrative only)\ntype: LoadBalancer\n→ .241"]
 
     ctrl -->|"assigns .240"| svc1
     ctrl -->|"assigns .241"| svc2
@@ -203,7 +203,7 @@ matching traffic immediately — no restart required.
 graph LR
     client["Browser / curl"]
 
-    client -->|"GET /\nHost: grafana.home.skeptomai.com\nHTTPS :443"| vip
+    client -->|"GET /\nHost: hello.home.skeptomai.com\nHTTPS :443"| vip
 
     subgraph "MetalLB"
         vip["192.168.88.240\n(speaker node receives via ARP)"]
@@ -213,26 +213,26 @@ graph LR
     kp -->|"→ any Traefik pod\n(possibly different node)"| traefik["Traefik pod\n(terminates TLS,\nreads Host header)"]
 
     subgraph "Routing table (from Ingress / IngressRoute)"
-        r1["grafana.home.skeptomai.com"]
-        r2["prometheus.home.skeptomai.com"]
-        r3["vault.home.skeptomai.com"]
+        r1["hello.home.skeptomai.com"]
+        r2["gruesome.home.skeptomai.com"]
+        r3["ipvs-demo.home.skeptomai.com"]
     end
 
     traefik --> r1 & r2 & r3
 
-    r1 -->|"direct to pod IP\n(from EndpointSlice)"| gp["grafana pod\n10.x.x.x"]
-    r2 -->|"direct to pod IP\n(from EndpointSlice)"| pp["prometheus pod\n10.x.x.x"]
-    r3 -->|"direct to pod IP\n(from EndpointSlice)"| vp["vault pod\n10.x.x.x"]
+    r1 -->|"direct to pod IP\n(from EndpointSlice)"| gp["hello pod\n10.x.x.x"]
+    r2 -->|"direct to pod IP\n(from EndpointSlice)"| pp["gruesome pod\n10.x.x.x"]
+    r3 -->|"direct to pod IP\n(from EndpointSlice)"| vp["ipvs-demo pod\n10.x.x.x"]
 ```
 
 The flow for a single request:
-1. Client resolves `grafana.home.skeptomai.com` → `192.168.88.240` (DNS)
+1. Client resolves `hello.home.skeptomai.com` → `192.168.88.240` (DNS)
 2. TCP connection arrives at `.240:443`; the MetalLB speaker node receives it via L2/ARP
 3. kube-proxy iptables DNAT on the speaker node redirects to a Traefik pod — which may
    be on a different node entirely
 4. Traefik terminates TLS, reads the decrypted `Host:` header
-5. Matches routing table → `grafana-svc`
-6. Traefik watches EndpointSlices for `grafana-svc`, picks a healthy pod IP directly,
+5. Matches routing table → `hello-svc`
+6. Traefik watches EndpointSlices for `hello-svc`, picks a healthy pod IP directly,
    and proxies to it — **kube-proxy is not involved in this hop**
 
 The critical distinction: kube-proxy handles getting traffic *to* Traefik. Traefik
@@ -266,7 +266,7 @@ problem (where does the cert come from?) are completely separate.
 **Built-in ACME (Let's Encrypt)**
 Traefik has a built-in ACME client that can automatically obtain and renew certs. Two
 challenge types:
-- HTTP-01: Let's Encrypt verifies domain ownership by hitting `/.well-known/acme-challenge/` on port 80. Requires public inbound access — doesn't work for internal names like `grafana.home.skeptomai.com`.
+- HTTP-01: Let's Encrypt verifies domain ownership by hitting `/.well-known/acme-challenge/` on port 80. Requires public inbound access — doesn't work for internal names like `hello.home.skeptomai.com`.
 - DNS-01: Traefik writes a TXT record via your DNS provider's API to prove ownership. Works for internal names and wildcard certs with no public exposure required. Rate-limited by Let's Encrypt.
 
 Traefik stores ACME certs in a local JSON file (`acme.json`). In Kubernetes this is
@@ -283,7 +283,7 @@ care how cert-manager created them. cert-manager supports multiple issuers:
 | SelfSigned | Generates a self-signed cert | bootstrap only |
 | CA | Signs with a cert+key in a Kubernetes Secret | internal CA |
 | ACME | Gets certs from Let's Encrypt (HTTP-01 or DNS-01) | public hostnames |
-| Vault | Signs via Vault PKI secrets engine | private CA with audit trail |
+| OpenBao | Signs via OpenBao PKI secrets engine | private CA with audit trail |
 
 **Default fallback**
 If no cert matches the incoming hostname, Traefik falls back to a built-in self-signed
@@ -291,12 +291,12 @@ default cert — causing browser TLS warnings. This is the bare Traefik install 
 
 ### Certificate chain in this cluster
 
-This cluster uses a **Vault PKI intermediate CA** under a **self-signed internal root**:
+This cluster uses an **OpenBao PKI intermediate CA** under a **self-signed internal root**:
 
 ```
 internal-ca (self-signed, cert-manager manages, 10y lifetime)
-  └── Vault pki_int (intermediate CA, signed by internal-ca, 5y lifetime)
-        └── Leaf certs (issued by Vault PKI role 'home-lab', 1y max)
+  └── OpenBao pki_int (intermediate CA, signed by internal-ca, 5y lifetime)
+        └── Leaf certs (issued by OpenBao PKI role 'home-lab', 1y max)
               - *.home.skeptomai.com
               - *.svc.cluster.local
 ```
@@ -304,10 +304,10 @@ internal-ca (self-signed, cert-manager manages, 10y lifetime)
 **Why this hierarchy:**
 - The internal-ca root is a single cert you install once in your browser/OS trust store.
   Every cert in the cluster is then automatically trusted — no per-service warnings.
-- Vault PKI manages the intermediate CA key inside Vault's encrypted storage, with full
-  audit logging of every cert issuance. cert-manager asks Vault to sign certs; the
-  private key for the intermediate CA never leaves Vault.
-- The intermediate CA layer means you can rotate the Vault PKI without touching the
+- OpenBao PKI manages the intermediate CA key inside OpenBao's encrypted storage, with
+  full audit logging of every cert issuance. cert-manager asks OpenBao to sign certs;
+  the private key for the intermediate CA never leaves OpenBao.
+- The intermediate CA layer means you can rotate the OpenBao PKI without touching the
   root cert that's installed in browsers.
 
 ### How a certificate gets issued (request flow)
@@ -316,34 +316,34 @@ internal-ca (self-signed, cert-manager manages, 10y lifetime)
 sequenceDiagram
     participant app as App deployment
     participant cm as cert-manager controller
-    participant vault as Vault pki_int
+    participant bao as OpenBao pki_int
     participant traefik as Traefik
 
     app->>cm: Certificate resource (or Ingress TLS annotation)
-    cm->>vault: Authenticate via Kubernetes auth (SA token)
-    vault->>vault: Verify token via K8s TokenReview API
-    vault-->>cm: Vault token (1h TTL)
-    cm->>vault: POST pki_int/sign/home-lab (CSR for grafana.home.skeptomai.com)
-    vault-->>cm: Signed leaf cert + chain
+    cm->>bao: Authenticate via Kubernetes auth (SA token)
+    bao->>bao: Verify token via K8s TokenReview API
+    bao-->>cm: OpenBao token (1h TTL)
+    cm->>bao: POST pki_int/sign/home-lab (CSR for hello.home.skeptomai.com)
+    bao-->>cm: Signed leaf cert + chain
     cm->>cm: Store cert as kubernetes.io/tls Secret
     traefik->>cm: Watch for TLS Secrets (via Ingress spec.tls.secretName)
-    traefik-->>app: Serves HTTPS with the Vault-issued cert
+    traefik-->>app: Serves HTTPS with the OpenBao-issued cert
 ```
 
-### Vault Kubernetes auth — how it works
+### OpenBao Kubernetes auth — how it works
 
-cert-manager authenticates to Vault without a static token:
+cert-manager authenticates to OpenBao without a static token:
 
 1. cert-manager requests a short-lived token for its own ServiceAccount via the
    Kubernetes TokenRequest API.
-2. It sends that token to Vault's `auth/kubernetes/login` endpoint.
-3. Vault calls the Kubernetes TokenReview API to verify the token is valid and belongs to
-   the `cert-manager` SA in the `cert-manager` namespace.
-4. If valid, Vault returns a short-lived Vault token (1h) bound to the
+2. It sends that token to OpenBao's `auth/kubernetes/login` endpoint.
+3. OpenBao calls the Kubernetes TokenReview API to verify the token is valid and belongs
+   to the `cert-manager` SA in the `cert-manager` namespace.
+4. If valid, OpenBao returns a short-lived token (1h) bound to the
    `cert-manager-pki` policy.
 5. cert-manager uses that token to call `pki_int/sign/home-lab` and get the cert signed.
 
-No static Vault tokens are stored anywhere in Kubernetes.
+No static OpenBao tokens are stored anywhere in Kubernetes.
 
 ### Requesting a cert for an Ingress
 
@@ -352,50 +352,55 @@ No static Vault tokens are stored anywhere in Kubernetes.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: grafana
+  name: hello
+  namespace: https-demo
   annotations:
     cert-manager.io/cluster-issuer: vault-pki-issuer
 spec:
   tls:
-    - hosts: [grafana.home.skeptomai.com]
-      secretName: grafana-tls   # cert-manager fills this
+    - hosts: [hello.home.skeptomai.com]
+      secretName: hello-tls   # cert-manager fills this
   rules:
-    - host: grafana.home.skeptomai.com
+    - host: hello.home.skeptomai.com
       ...
 ```
 
 ```yaml
 # Option B: Explicit Certificate resource (more control over renewal timing, etc.)
+# (this is the actual pattern used by experiments/30-https-ingress/certificate.yaml)
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: grafana-tls
-  namespace: monitoring
+  name: hello-tls
+  namespace: https-demo
 spec:
-  secretName: grafana-tls
-  duration: 8760h
+  secretName: hello-tls
   issuerRef:
     name: vault-pki-issuer
     kind: ClusterIssuer
   dnsNames:
-    - grafana.home.skeptomai.com
+    - hello.home.skeptomai.com
 ```
 
 ### Setup
 
-Vault PKI must be configured before the ClusterIssuer will become Ready:
+OpenBao PKI must be configured before the ClusterIssuer will become Ready. Note the
+`manifests/vault-pki` directory and `vault-pki-issuer` ClusterIssuer name are kept
+as-is deliberately — renaming would force every Certificate's `issuerRef` to update
+(see comment in `manifests/vault-pki/clusterissuer.yaml`) — but the setup script itself
+was renamed when the backend moved to OpenBao:
 
 ```
-bash scripts/setup-vault-pki.sh
+bash scripts/setup-openbao-pki.sh
 kubectl apply -k manifests/vault-pki
 kubectl get clusterissuer vault-pki-issuer
 ```
 
 The setup script:
-1. Enables `pki_int` in Vault
-2. Generates the intermediate CA CSR (private key stays in Vault)
+1. Enables `pki_int` in OpenBao
+2. Generates the intermediate CA CSR (private key stays in OpenBao)
 3. Signs the CSR via cert-manager's `internal-ca-issuer`
-4. Imports the signed cert chain back into Vault
+4. Imports the signed cert chain back into OpenBao
 5. Creates the `home-lab` role and Kubernetes auth configuration
 
 ### Does SPIRE play any role here?
@@ -408,10 +413,10 @@ credentials used for pod-to-pod mTLS — they are not browser-trusted and are no
 for HTTP ingress TLS.
 
 In this cluster, SPIRE uses its own self-managed CA (trust domain `ipc.local`), entirely
-separate from the Vault PKI / internal-ca chain. The two trust hierarchies do not
+separate from the OpenBao PKI / internal-ca chain. The two trust hierarchies do not
 intersect:
 
-| | SPIRE SVIDs | Ingress TLS (Vault PKI) |
+| | SPIRE SVIDs | Ingress TLS (OpenBao PKI) |
 |---|---|---|
 | Purpose | Pod-to-pod mTLS (workload identity) | Browser HTTPS (ingress TLS) |
 | SANs | SPIFFE URI (`spiffe://ipc.local/...`) | DNS names (`*.home.skeptomai.com`) |
@@ -419,11 +424,11 @@ intersect:
 | Trust root | SPIRE's own CA (`ipc.local`) | internal-ca (self-signed) |
 | Browser trusted? | No | Yes, if internal-ca is installed |
 
-The integration point that *could* exist (but isn't configured here): Vault can be
-SPIRE's upstream authority, making Vault PKI the root for both SVID issuance and ingress
-TLS. In that scenario a single Vault PKI root would cover everything and you'd only need
-one cert in your browser trust store. This is a valid future evolution but adds
-operational complexity.
+The integration point that *could* exist (but isn't configured here): OpenBao can be
+SPIRE's upstream authority, making OpenBao PKI the root for both SVID issuance and
+ingress TLS. In that scenario a single OpenBao PKI root would cover everything and
+you'd only need one cert in your browser trust store. This is a valid future evolution
+but adds operational complexity.
 
 ---
 
