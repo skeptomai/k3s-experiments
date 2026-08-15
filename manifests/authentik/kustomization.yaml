@@ -5,3 +5,4 @@ resources:
   - helmrepository.yaml
   - blueprint-open-webui.yaml
   - helmrelease.yaml
+  - ingress-funnel.yaml

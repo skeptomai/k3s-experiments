@@ -1,0 +1,42 @@
+# Public internet exposure for Authentik itself (#18 follow-up) -- Open
+# WebUI's public Funnel hostname alone isn't enough for external users:
+# Open WebUI's backend discovers Authentik's OIDC endpoints ONCE at startup
+# from the fixed OPENID_PROVIDER_URL (authlib caches server_metadata for the
+# process lifetime), then hands EVERY user -- tailnet or external -- a login
+# URL built from whatever host that discovery doc was fetched from. As long
+# as OPENID_PROVIDER_URL points at the tailnet-only authentik.taildd208.ts.net
+# Service-mode hostname, external browsers get redirected to a host they
+# can't resolve/reach at all, no matter how well Open WebUI's own Funnel
+# Ingress is configured. Authentik needs its own public HTTPS entry point,
+# and OPENID_PROVIDER_URL (deployment.yaml, open-webui namespace) must be
+# repointed at it.
+#
+# ACL: no additional Tailscale ACL edit needed -- the existing nodeAttrs
+# funnel grant targets tag:k8s-operator broadly (see
+# manifests/open-webui/ingress-funnel.yaml's comment), which already covers
+# any Ingress the operator creates, this one included.
+#
+# tailscale.com/hostname is NOT honored in Ingress-mode (confirmed multiple
+# times in this project) -- actual device name is auto-generated as
+# <namespace>-<ingress-name>-ingress. Named this Ingress "public" so it
+# lands on authentik-public-ingress.taildd208.ts.net -- verify with
+# `kubectl describe ingress public -n authentik` after applying, don't
+# assume.
+#
+# Kept the existing Service-mode tailnet exposure (helmrelease.yaml) as-is
+# rather than replacing it -- this Funnel Ingress is a second, additional
+# public entry point to the same authentik-server Service.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: public
+  namespace: authentik
+  annotations:
+    tailscale.com/funnel: "true"
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: authentik-server
+      port:
+        number: 80

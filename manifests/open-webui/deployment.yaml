@@ -44,8 +44,21 @@ spec:
               value: "authentik"
             - name: OAUTH_MERGE_ACCOUNTS_BY_EMAIL
               value: "true"
+            # Public Funnel hostname (manifests/authentik/ingress-funnel.yaml),
+            # NOT the tailnet-only authentik.taildd208.ts.net Service-mode
+            # hostname used originally. Authlib fetches this discovery doc
+            # ONCE at process startup and caches server_metadata (incl.
+            # authorization_endpoint) for the pod's lifetime, then hands that
+            # SAME cached login URL to every user regardless of which
+            # hostname they arrived on. A tailnet-only discovery URL meant
+            # every login -- even from external Funnel users -- redirected
+            # to a host they couldn't reach at all. The public hostname
+            # resolves fine from both real browsers and in-cluster pods
+            # (verified: real public DNS record, not just tailnet MagicDNS,
+            # so no CoreDNS split-horizon hack needed here unlike
+            # authentik.taildd208.ts.net previously).
             - name: OPENID_PROVIDER_URL
-              value: "http://authentik.taildd208.ts.net/application/o/open-webui/.well-known/openid-configuration"
+              value: "https://authentik-public-ingress.taildd208.ts.net/application/o/open-webui/.well-known/openid-configuration"
             # OPENID_REDIRECT_URI intentionally NOT set (#18 phase 3) --
             # open_webui/utils/oauth.py's handle_login() does:
             #   redirect_uri = (client.server_metadata or {}).get('redirect_uri')
