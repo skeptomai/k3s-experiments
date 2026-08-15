@@ -1,0 +1,55 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: authentik
+  namespace: authentik
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: authentik
+      sourceRef:
+        kind: HelmRepository
+        name: authentik
+        namespace: authentik
+  values:
+    authentik:
+      # Core config (secret_key, postgresql password) AND the
+      # AUTHENTIK_BOOTSTRAP_* first-run vars all live in one out-of-band
+      # Secret, created once via kubectl, deliberately not in git (same
+      # pattern as manifests/tailscale-operator's operator-oauth Secret,
+      # manifests/open-webui/bootstrap-admin.yaml, manifests/jupyter's
+      # jupyter-token). The chart envFrom's this whole secret into both
+      # server and worker regardless of which values it's "supposed" to
+      # cover, so the bootstrap vars ride along for free:
+      #   kubectl create secret generic authentik-secrets -n authentik \
+      #     --from-literal=AUTHENTIK_SECRET_KEY=<random, 60+ chars, never change once set> \
+      #     --from-literal=AUTHENTIK_POSTGRESQL__PASSWORD=<random, must match authentik-postgresql secret below> \
+      #     --from-literal=AUTHENTIK_BOOTSTRAP_EMAIL=<email> \
+      #     --from-literal=AUTHENTIK_BOOTSTRAP_PASSWORD=<random> \
+      #     --from-literal=AUTHENTIK_BOOTSTRAP_TOKEN=<random, for API automation without the manual signin dance>
+      existingSecret:
+        secretName: authentik-secrets
+      error_reporting:
+        enabled: false
+    postgresql:
+      enabled: true
+      auth:
+        # Same out-of-band pattern; password value must match
+        # AUTHENTIK_POSTGRESQL__PASSWORD in authentik-secrets above:
+        #   kubectl create secret generic authentik-postgresql -n authentik \
+        #     --from-literal=postgres-password=<same random value> \
+        #     --from-literal=password=<same random value>
+        existingSecret: authentik-postgresql
+      primary:
+        persistence:
+          enabled: true
+          storageClass: nfs
+          size: 10Gi
+    server:
+      service:
+        annotations:
+          # Tailnet exposure, same proven Service-mode pattern as
+          # manifests/gruesome, manifests/open-webui, manifests/jupyter.
+          tailscale.com/expose: "true"
+          tailscale.com/hostname: "authentik"
