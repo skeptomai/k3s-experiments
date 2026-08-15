@@ -28,8 +28,11 @@ spec:
               value: "http://100.79.172.75:8000/v1"
             - name: OPENAI_API_KEY
               value: "not-needed"
-            - name: WEBUI_AUTH
-              value: "false"
+            # WEBUI_AUTH intentionally omitted (default: auth enabled) --
+            # a real admin account now exists (see bootstrap-admin.yaml),
+            # and Open WebUI refuses to boot with auth disabled once any
+            # user exists, by design (would let anyone act as that user
+            # with no login at all).
           volumeMounts:
             - name: data
               mountPath: /app/backend/data
