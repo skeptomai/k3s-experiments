@@ -51,7 +51,12 @@ data:
           redirect_uris:
             - url: "http://open-webui.taildd208.ts.net/oauth/oidc/callback"
               matching_mode: "strict"
-            - url: "https://open-webui-public.taildd208.ts.net/oauth/oidc/callback"
+            # Not "open-webui-public.taildd208.ts.net" -- the Ingress's
+            # tailscale.com/hostname annotation isn't honored, the real
+            # device name is auto-generated as <namespace>-<ingress-name>
+            # -ingress (verified via `kubectl describe ingress public -n
+            # open-webui` after applying, not guessed).
+            - url: "https://open-webui-public-ingress.taildd208.ts.net/oauth/oidc/callback"
               matching_mode: "strict"
           signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
           property_mappings:
