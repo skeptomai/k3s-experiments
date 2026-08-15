@@ -51,6 +51,14 @@ spec:
         secretName: authentik-secrets
       error_reporting:
         enabled: false
+    # Declarative provider/application config (see blueprint-open-webui.yaml)
+    # -- captures what would otherwise be pure live-database state from the
+    # imperative API calls made while first wiring up Open WebUI's OIDC
+    # login (#18), so it survives a Postgres wipe instead of silently
+    # vanishing with no record in git.
+    blueprints:
+      configMaps:
+        - authentik-blueprint-open-webui
     postgresql:
       enabled: true
       auth:
