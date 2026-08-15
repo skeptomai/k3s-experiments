@@ -33,6 +33,40 @@ spec:
             # and Open WebUI refuses to boot with auth disabled once any
             # user exists, by design (would let anyone act as that user
             # with no login at all).
+            #
+            # Authentik OIDC (#18 phase 1) -- ENABLE_LOGIN_FORM/
+            # ENABLE_PASSWORD_AUTH deliberately left at their defaults
+            # (both true) for now, so local login stays as a fallback
+            # while OIDC gets tested. Revisit once confirmed working.
+            - name: ENABLE_OAUTH_SIGNUP
+              value: "true"
+            - name: OAUTH_PROVIDER_NAME
+              value: "authentik"
+            - name: OAUTH_MERGE_ACCOUNTS_BY_EMAIL
+              value: "true"
+            - name: OPENID_PROVIDER_URL
+              value: "http://authentik.taildd208.ts.net/application/o/open-webui/.well-known/openid-configuration"
+            - name: OPENID_REDIRECT_URI
+              value: "http://open-webui.taildd208.ts.net/oauth/oidc/callback"
+            - name: WEBUI_URL
+              value: "http://open-webui.taildd208.ts.net"
+            # open-webui-oidc Secret created once via kubectl, not in git
+            # (same out-of-band pattern as open-webui-admin, jupyter-token,
+            # authentik-secrets). Values come from the Authentik OAuth2
+            # Provider created for the "open-webui" Application (pk=1):
+            #   kubectl create secret generic open-webui-oidc -n open-webui \
+            #     --from-literal=OAUTH_CLIENT_ID=<from Authentik provider> \
+            #     --from-literal=OAUTH_CLIENT_SECRET=<from Authentik provider>
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-oidc
+                  key: OAUTH_CLIENT_ID
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-oidc
+                  key: OAUTH_CLIENT_SECRET
           volumeMounts:
             - name: data
               mountPath: /app/backend/data
