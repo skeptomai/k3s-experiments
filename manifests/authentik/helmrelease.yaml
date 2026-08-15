@@ -5,6 +5,12 @@ metadata:
   namespace: authentik
 spec:
   interval: 30m
+  # Default 5m install timeout is too tight for this chart's real startup
+  # sequence (Postgres init on NFS storage + system migrations + Django
+  # migrations + gunicorn boot measured ~4-5min empirically) -- Helm gave
+  # up and reported "install failed" right as the pods actually finished
+  # coming up healthy. Give it real headroom.
+  timeout: 10m
   chart:
     spec:
       chart: authentik
