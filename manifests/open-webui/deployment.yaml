@@ -46,8 +46,21 @@ spec:
               value: "true"
             - name: OPENID_PROVIDER_URL
               value: "http://authentik.taildd208.ts.net/application/o/open-webui/.well-known/openid-configuration"
-            - name: OPENID_REDIRECT_URI
-              value: "http://open-webui.taildd208.ts.net/oauth/oidc/callback"
+            # OPENID_REDIRECT_URI intentionally NOT set (#18 phase 3) --
+            # open_webui/utils/oauth.py's handle_login() does:
+            #   redirect_uri = (client.server_metadata or {}).get('redirect_uri')
+            #     or request.url_for('oauth_login_callback', provider=provider)
+            # Setting this env var forces the FIRST branch unconditionally,
+            # pinning every login to one fixed hostname regardless of which
+            # one the request actually came in on -- broke SSO for the
+            # public Funnel hostname (ingress-funnel.yaml) since Authentik
+            # would only ever redirect back to the tailnet-only one, which a
+            # public/non-tailnet user can't reach. Leaving it unset falls
+            # through to request.url_for(), which correctly derives the
+            # right scheme+host per request, letting both hostnames work.
+            # Authentik's provider must have BOTH exact redirect_uris
+            # registered (see blueprint-open-webui.yaml) since matching_mode
+            # is strict.
             - name: WEBUI_URL
               value: "http://open-webui.taildd208.ts.net"
             # open-webui-oidc Secret created once via kubectl, not in git

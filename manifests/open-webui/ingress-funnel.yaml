@@ -1,0 +1,35 @@
+# Public internet exposure via Tailscale Funnel (#18 phase 3) -- separate
+# from the existing Service-mode tailnet-only exposure (tailscale.com/expose
+# on the Service in service.yaml), since Funnel is Ingress-mode only.
+# Requires a one-time ACL grant in the tailnet policy (not automatable, no
+# API credential held here has ACL-editing scope):
+#   nodeAttrs: [{ "target": ["tag:k8s-operator"], "attr": ["funnel"] }]
+# Real security dependency for this being safe at all: Authentik OIDC login
+# (see blueprint-open-webui.yaml, deployment.yaml) must actually be the
+# thing standing between the internet and this app -- confirmed working
+# via real browser login before this Ingress was added.
+#
+# DELIBERATELY a different hostname (open-webui-public) rather than reusing
+# "open-webui" from the existing Service-mode exposure: (1) would otherwise
+# collide -- two different Tailscale proxy mechanisms both claiming the same
+# device name, and (2) Funnel/Ingress-mode is HTTPS-only, which would force
+# a scheme change breaking the already-working OIDC redirect_uris (Authentik
+# provider, WEBUI_URL, OPENID_REDIRECT_URI) all pinned to
+# http://open-webui.taildd208.ts.net. The tailnet-only plain-HTTP hostname
+# stays exactly as-is; this is a second, additional, public HTTPS entry
+# point to the same backend Service.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: open-webui-funnel
+  namespace: open-webui
+  annotations:
+    tailscale.com/funnel: "true"
+    tailscale.com/hostname: "open-webui-public"
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: open-webui
+      port:
+        number: 80

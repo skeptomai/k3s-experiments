@@ -43,8 +43,15 @@ data:
           grant_types:
             - "authorization_code"
             - "refresh_token"
+          # Both hostnames registered (#18 phase 3): Open WebUI's
+          # OPENID_REDIRECT_URI is deliberately unset so it derives the
+          # redirect_uri per-request (see deployment.yaml's comment), so
+          # whichever hostname a login actually started from must have its
+          # exact URI here too -- matching_mode is strict, no wildcard.
           redirect_uris:
             - url: "http://open-webui.taildd208.ts.net/oauth/oidc/callback"
+              matching_mode: "strict"
+            - url: "https://open-webui-public.taildd208.ts.net/oauth/oidc/callback"
               matching_mode: "strict"
           signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
           property_mappings:
