@@ -23,3 +23,22 @@ data:
         fallthrough
       }
     }
+  # Same split-horizon problem, this time for Authentik (#18): Open WebUI's
+  # backend calls OPENID_PROVIDER_URL = http://authentik.taildd208.ts.net/...
+  # server-to-server to fetch OIDC discovery metadata and exchange tokens,
+  # but pods aren't on the tailnet and can't resolve MagicDNS names either
+  # ("httpx.ConnectError: Name or service not known"). Unlike nazgul (a real
+  # LAN host), Authentik itself runs in this cluster, so the fix is even
+  # simpler: point pods at its Service ClusterIP directly rather than a LAN
+  # IP. Browsers still resolve the same hostname via real Tailscale MagicDNS
+  # to the tailscale-operator's proxy device, unaffected by this override.
+  # ClusterIP is stable for a Service's lifetime; if authentik-server is ever
+  # deleted/recreated (not just its pods), re-check with:
+  #   kubectl get svc authentik-server -n authentik -o jsonpath='{.spec.clusterIP}'
+  authentik.server: |
+    authentik.taildd208.ts.net:53 {
+      hosts {
+        10.43.137.208 authentik.taildd208.ts.net
+        fallthrough
+      }
+    }
