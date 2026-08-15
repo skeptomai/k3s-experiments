@@ -1,0 +1,57 @@
+# Idempotently ensures the admin account exists, sourced from the
+# out-of-band `open-webui-admin` Secret (create once, not in git — same
+# pattern as manifests/tailscale-operator's operator-oauth Secret):
+#   kubectl create secret generic open-webui-admin -n open-webui \
+#     --from-literal=email=<email> --from-literal=password=<password>
+#
+# Runs on a schedule rather than as a one-shot Job so it's self-healing: if
+# the open-webui-data PVC is ever wiped/recreated, onboarding resets and
+# this quietly re-creates the account on its next run without anyone having
+# to remember to do it by hand. No-ops harmlessly once onboarding is done —
+# /api/config's `onboarding` flag flips false and the script exits early.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: open-webui-bootstrap-admin
+  namespace: open-webui
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: bootstrap-admin
+              image: curlimages/curl:8.11.1
+              env:
+                - name: ADMIN_EMAIL
+                  valueFrom:
+                    secretKeyRef:
+                      name: open-webui-admin
+                      key: email
+                - name: ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: open-webui-admin
+                      key: password
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  onboarding=$(curl -s http://open-webui/api/config | grep -o '"onboarding":[a-z]*' | cut -d: -f2)
+                  if [ "$onboarding" != "true" ]; then
+                    echo "Already onboarded, nothing to do."
+                    exit 0
+                  fi
+                  echo "Onboarding still pending — creating admin account."
+                  curl -sf -X POST http://open-webui/api/v1/auths/signup \
+                    -H "Content-Type: application/json" \
+                    -d "{\"name\":\"admin\",\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
+                    -o /dev/null
+                  echo "Admin account created."
