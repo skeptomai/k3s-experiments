@@ -59,6 +59,7 @@ spec:
     blueprints:
       configMaps:
         - authentik-blueprint-open-webui
+        - authentik-blueprint-google-source
     postgresql:
       enabled: true
       auth:

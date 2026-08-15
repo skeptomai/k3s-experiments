@@ -4,5 +4,6 @@ resources:
   - namespace.yaml
   - helmrepository.yaml
   - blueprint-open-webui.yaml
+  - blueprint-google-source.yaml
   - helmrelease.yaml
   - ingress-funnel.yaml

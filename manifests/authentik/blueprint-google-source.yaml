@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-google-source
+  namespace: authentik
+data:
+  # Google federated login (Login with Google), added after gp_chef@gmail.ca
+  # asked for SSO instead of a local Authentik password. Deliberately gated
+  # by an email allow-list -- without it, ANY Google account could
+  # self-enroll and get Open WebUI access (the application itself has no
+  # access policy, see blueprint-open-webui.yaml), turning an invite-only
+  # homelab app into public signup. See k3s-experiments home-network docs
+  # (orgfiles) for the broader threat-model note on Funnel exposure.
+  #
+  # consumer_key/consumer_secret deliberately NOT pinned here (state:
+  # present only touches attrs actually listed) -- same reasoning as
+  # open-webui-provider's client_id/secret in blueprint-open-webui.yaml.
+  # Unlike that case, these come FROM Google (fixed values, not
+  # Authentik-generated), so a DB wipe can't regenerate them -- they're
+  # saved in 1Password ("Google OAuth Client - Authentik (k3s cluster)").
+  # After a wipe, re-PATCH them in:
+  #   TOKEN=$(op item get "Authentik (k3s cluster)" --fields "api-token" --reveal)
+  #   ID=$(op item get "Google OAuth Client - Authentik (k3s cluster)" --fields "username" --reveal)
+  #   SECRET=$(op item get "Google OAuth Client - Authentik (k3s cluster)" --fields "credential" --reveal)
+  #   SRC=$(curl -s "https://authentik-public-ingress.taildd208.ts.net/api/v3/sources/oauth/?slug=google" \
+  #     -H "Authorization: Bearer $TOKEN" | jq -r '.results[0].pk')
+  #   curl -X PATCH "https://authentik-public-ingress.taildd208.ts.net/api/v3/sources/oauth/$SRC/" \
+  #     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  #     -d "{\"consumer_key\": \"$ID\", \"consumer_secret\": \"$SECRET\"}"
+  #
+  # Policy BINDINGS (source, enrollment flow, authentication flow) are also
+  # NOT expressed here -- PolicyBinding blueprint entries need a stable
+  # identifier and a generated-UUID target/policy pair isn't one. After a
+  # wipe, recreate all three (defense in depth: gate both the source itself
+  # and its enrollment/authentication flows, so a failure in one evaluation
+  # context still fails closed rather than open):
+  #   POLICY=$(curl -s "https://authentik-public-ingress.taildd208.ts.net/api/v3/policies/expression/?name=google-source-email-allowlist" \
+  #     -H "Authorization: Bearer $TOKEN" | jq -r '.results[0].pk')
+  #   for TARGET in $SRC <enrollment-flow-pk> <authentication-flow-pk>; do
+  #     curl -X POST "https://authentik-public-ingress.taildd208.ts.net/api/v3/policies/bindings/" \
+  #       -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  #       -d "{\"target\": \"$TARGET\", \"policy\": \"$POLICY\", \"order\": 0, \"enabled\": true}"
+  #   done
+  #
+  # Fails closed by design: the expression denies (returns False) if it
+  # can't find an email in the evaluation context, so a misconfigured or
+  # missing binding means "doesn't work yet", never "opens to the public".
+  google-source.yaml: |
+    version: 1
+    metadata:
+      name: google-federated-login
+    entries:
+      - model: "authentik_sources_oauth.oauthsource"
+        id: "google-source"
+        identifiers:
+          slug: "google"
+        state: "present"
+        attrs:
+          name: "Google"
+          slug: "google"
+          provider_type: "google"
+          enabled: true
+          enrollment_flow: !Find [authentik_flows.flow, [slug, default-source-enrollment]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-source-authentication]]
+      - model: "authentik_policies_expression.expressionpolicy"
+        id: "google-allowlist-policy"
+        identifiers:
+          name: "google-source-email-allowlist"
+        state: "present"
+        attrs:
+          name: "google-source-email-allowlist"
+          # request.context["prompt_data"]["email"] is the documented key
+          # for source-driven enrollment/auth flows (Authentik docs:
+          # "Allow only specific email domains"). Falls back to
+          # request.user.email for the source-level binding evaluation
+          # context, which may differ from the flow-level one.
+          expression: |
+            ALLOWED_EMAILS = ["gp_chef@gmail.ca"]
+            email = request.context.get("prompt_data", {}).get("email") or getattr(request.user, "email", None)
+            return email in ALLOWED_EMAILS
+      # Adds the "Login with Google" button to the shared login page used by
+      # both Open WebUI hostnames and Authentik's own UI -- the button is
+      # just visibility, the allow-list policy above is the actual gate, so
+      # showing it broadly is low-risk on a single-admin personal cluster.
+      - model: "authentik_stages_identification.identificationstage"
+        id: "default-authentication-identification-stage"
+        identifiers:
+          name: "default-authentication-identification"
+        state: "present"
+        attrs:
+          sources:
+            - !KeyOf google-source
