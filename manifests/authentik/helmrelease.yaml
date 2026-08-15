@@ -22,9 +22,22 @@ spec:
       # jupyter-token). The chart envFrom's this whole secret into both
       # server and worker regardless of which values it's "supposed" to
       # cover, so the bootstrap vars ride along for free:
+      # IMPORTANT: setting existingSecret skips the chart's ENTIRE generated
+      # config secret (templates/secret.yaml's condition is `not
+      # existingSecret.secretName` -- all-or-nothing), not just secret_key
+      # and the password. That means AUTHENTIK_POSTGRESQL__HOST/NAME/USER/
+      # PORT never get set either unless included explicitly below --
+      # learned this the hard way (server/worker crash-looped on
+      # "PostgreSQL connection failed ... host: 'localhost'" until these
+      # were added). Host must match the postgresql subchart's Service name
+      # (`{{ .Release.Name }}-postgresql`, i.e. "authentik-postgresql" here).
       #   kubectl create secret generic authentik-secrets -n authentik \
       #     --from-literal=AUTHENTIK_SECRET_KEY=<random, 60+ chars, never change once set> \
       #     --from-literal=AUTHENTIK_POSTGRESQL__PASSWORD=<random, must match authentik-postgresql secret below> \
+      #     --from-literal=AUTHENTIK_POSTGRESQL__HOST=authentik-postgresql \
+      #     --from-literal=AUTHENTIK_POSTGRESQL__NAME=authentik \
+      #     --from-literal=AUTHENTIK_POSTGRESQL__USER=authentik \
+      #     --from-literal=AUTHENTIK_POSTGRESQL__PORT=5432 \
       #     --from-literal=AUTHENTIK_BOOTSTRAP_EMAIL=<email> \
       #     --from-literal=AUTHENTIK_BOOTSTRAP_PASSWORD=<random> \
       #     --from-literal=AUTHENTIK_BOOTSTRAP_TOKEN=<random, for API automation without the manual signin dance>
