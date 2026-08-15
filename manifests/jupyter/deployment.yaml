@@ -15,6 +15,15 @@ spec:
       labels:
         app: jupyter
     spec:
+      # Kubernetes auto-injects legacy Docker-links-style env vars for every
+      # Service in the namespace (<NAME>_SERVICE_HOST, <NAME>_PORT, ...).
+      # The Service here is named "jupyter", which collides with Jupyter's
+      # own JUPYTER_PORT env var -- got JUPYTER_PORT=tcp://10.43.x.x:80
+      # instead of a plain integer, crashing the server on startup
+      # (traitlets int() parse error). enableServiceLinks: false stops the
+      # injection entirely, which is the documented fix for this exact
+      # collision class.
+      enableServiceLinks: false
       # No service account token mounted at all -- arbitrary code runs here
       # by design (that's the whole point), so it must have zero path to
       # the Kubernetes API regardless of RBAC. This matters more than any
