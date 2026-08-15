@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyter
+  namespace: jupyter
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jupyter
+  template:
+    metadata:
+      labels:
+        app: jupyter
+    spec:
+      # No service account token mounted at all -- arbitrary code runs here
+      # by design (that's the whole point), so it must have zero path to
+      # the Kubernetes API regardless of RBAC. This matters more than any
+      # network-level restriction for this specific workload.
+      automountServiceAccountToken: false
+      # jupyter/docker-stacks images run as jovyan (uid 1000, gid 100 "users"
+      # by convention) -- fsGroup ensures the NFS-backed PVC is writable by
+      # that group when mounted, since it starts out root-owned otherwise.
+      securityContext:
+        fsGroup: 100
+      containers:
+        - name: jupyter
+          image: quay.io/jupyter/scipy-notebook:latest
+          ports:
+            - containerPort: 8888
+          env:
+            # jupyter-token Secret created once, out-of-band, not in git
+            # (same pattern as manifests/open-webui/bootstrap-admin.yaml
+            # and manifests/tailscale-operator's operator-oauth Secret):
+            #   kubectl create secret generic jupyter-token -n jupyter \
+            #     --from-literal=token=<random token>
+            - name: JUPYTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: jupyter-token
+                  key: token
+            - name: JUPYTER_ENABLE_LAB
+              value: "yes"
+            # Accessed via the Tailscale-proxied hostname, not localhost --
+            # Jupyter's origin/host checks would otherwise reject it.
+            - name: NOTEBOOK_ARGS
+              value: "--ServerApp.allow_origin='*' --ServerApp.disable_check_xsrf=True"
+          volumeMounts:
+            - name: data
+              mountPath: /home/jovyan/work
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 8Gi
+          readinessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jupyter-data
