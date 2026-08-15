@@ -3,6 +3,14 @@ kind: Service
 metadata:
   name: open-webui
   namespace: open-webui
+  annotations:
+    # Service-mode tailnet exposure -> open-webui.taildd208.ts.net, matching
+    # the proven pattern from manifests/gruesome (an Ingress-based attempt
+    # here produced an ugly auto-generated hostname instead of respecting
+    # tailscale.com/hostname -- this annotation-on-Service form is the one
+    # that actually works in this cluster).
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "open-webui"
 spec:
   selector:
     app: open-webui
