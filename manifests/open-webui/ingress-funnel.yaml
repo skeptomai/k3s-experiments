@@ -18,14 +18,24 @@
 # http://open-webui.taildd208.ts.net. The tailnet-only plain-HTTP hostname
 # stays exactly as-is; this is a second, additional, public HTTPS entry
 # point to the same backend Service.
+#
+# tailscale.com/hostname is NOT actually honored in Ingress-mode (confirmed
+# twice now, first with this same chart's earlier Ingress attempt for
+# tailnet-only exposure) -- the device name is auto-generated as
+# <namespace>-<ingress-name>-ingress regardless of this annotation. Named
+# the Ingress resource itself "public" (not "open-webui-funnel") so the
+# auto-generated result lands on open-webui-public-ingress.taildd208.ts.net
+# -- close enough to intended, and the actual mechanism that determines it.
+# The registered redirect_uris in blueprint-open-webui.yaml MUST match
+# whatever hostname this actually resolves to -- verify after every change
+# here rather than assuming the annotation took effect.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: open-webui-funnel
+  name: public
   namespace: open-webui
   annotations:
     tailscale.com/funnel: "true"
-    tailscale.com/hostname: "open-webui-public"
 spec:
   ingressClassName: tailscale
   defaultBackend:
