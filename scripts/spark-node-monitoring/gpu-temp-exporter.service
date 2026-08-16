@@ -1,0 +1,6 @@
+[Unit]
+Description=Write GPU temperature to node_exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gpu-temp-exporter.sh

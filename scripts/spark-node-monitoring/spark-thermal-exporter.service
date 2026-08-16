@@ -1,0 +1,6 @@
+[Unit]
+Description=Write CPU/NVMe/WiFi-radio temperatures to node_exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/spark-thermal-exporter.sh

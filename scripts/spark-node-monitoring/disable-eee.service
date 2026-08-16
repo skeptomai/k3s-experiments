@@ -1,0 +1,11 @@
+[Unit]
+Description=Disable Energy Efficient Ethernet (EEE) on enP7s7 -- DGX Spark known bug, see forums.developer.nvidia.com/t/354764. EEE enters low-power states too aggressively post-Nov-2025-OTA, causing link flapping/silent stalls. No-op until this interface has a cable connected.
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ethtool --set-eee enP7s7 eee off
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

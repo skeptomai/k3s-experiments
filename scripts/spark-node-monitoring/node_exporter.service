@@ -1,0 +1,13 @@
+[Unit]
+Description=Prometheus Node Exporter
+After=network.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter --collector.textfile.directory=/var/lib/node_exporter/textfile_collector --no-collector.hwmon --no-collector.thermal_zone --no-collector.cpufreq
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
