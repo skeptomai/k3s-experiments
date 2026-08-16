@@ -19,7 +19,8 @@ COPY cluster-kasa-outlet.py .
 COPY shutdown-cluster.sh .
 COPY night-off.sh .
 COPY morning-on.sh .
+COPY pushover-alert.sh .
 
-RUN chmod +x silence-alerts.sh cluster-kasa-outlet.py shutdown-cluster.sh night-off.sh morning-on.sh
+RUN chmod +x silence-alerts.sh cluster-kasa-outlet.py shutdown-cluster.sh night-off.sh morning-on.sh pushover-alert.sh
 
 ENTRYPOINT ["/bin/bash"]
