@@ -1,0 +1,6 @@
+[Unit]
+Description=Count wlP9s9 AP-reassociation events into node_exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/spark-wifi-roam-exporter.sh
