@@ -1,0 +1,74 @@
+---
+# Builds the web-search image on the cluster using pelagos build.
+# Usage: kubectl apply -f scripts/web-search-image/build-job.yaml
+# After a successful run refresh on nazgul if needed:
+#   pelagos image rm localhost:5004/web-search:latest
+#   pelagos image pull --insecure localhost:5004/web-search:latest
+# Pinned to ipc4 so the pelagos hostPath mount is consistent.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: web-search-build
+  namespace: default
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: ipc4
+
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: pelagos-bin
+          hostPath:
+            path: /usr/local/bin/pelagos
+            type: File
+        - name: pelagos-store
+          hostPath:
+            path: /var/lib/pelagos
+            type: Directory
+
+      initContainers:
+        - name: clone
+          image: alpine/git:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              git clone --depth 1 https://github.com/skeptomai/k3s-experiments /workspace/repo
+              echo "cloned, context at /workspace/repo/scripts/web-search-image/"
+              ls /workspace/repo/scripts/web-search-image/
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+
+      containers:
+        - name: build-and-push
+          image: ubuntu:24.04
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eux
+              apt-get update -qq && apt-get install -y -qq ca-certificates
+              /pelagos build \
+                --tag 192.168.89.2:5004/web-search:latest \
+                --network host \
+                /workspace/repo/scripts/web-search-image
+              /pelagos image push --insecure 192.168.89.2:5004/web-search:latest
+              echo "pushed: 192.168.89.2:5004/web-search:latest"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: pelagos-bin
+              mountPath: /pelagos
+            - name: pelagos-store
+              mountPath: /var/lib/pelagos
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"

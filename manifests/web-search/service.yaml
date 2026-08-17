@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-search
+  namespace: web-search
+  annotations:
+    # Tailnet exposure, same proven Service-mode pattern as
+    # manifests/gruesome, manifests/open-webui, manifests/jupyter.
+    # Purpose: gptel's web_search tool calls this from omen, which is
+    # deliberately kept stateless (no local Python/ddgs install there) --
+    # see scripts/web-search-image/README.md.
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "web-search"
+spec:
+  selector:
+    app: web-search
+  ports:
+    - port: 80
+      targetPort: 8080
