@@ -14,6 +14,13 @@ spec:
   chart:
     spec:
       chart: authentik
+      # Pinned 2026-08-18: 2026.8.0's image (ghcr.io/goauthentik/server:2026.8.0)
+      # is published as a nested OCI index (top-level index -> per-arch entries
+      # that are themselves indices, not manifests) which Pelagos's image puller
+      # doesn't support ("nested image index not supported"), so the upgrade can
+      # never pull and just crash-loops/ImagePullBackOffs forever. Filed against
+      # pelagos-containers/pelagos; unpin once fixed and confirmed pullable.
+      version: 2026.5.6
       sourceRef:
         kind: HelmRepository
         name: authentik
