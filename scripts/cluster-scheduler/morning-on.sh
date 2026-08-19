@@ -72,13 +72,28 @@ echo "==> Recycling SPIRE agent pods to force fresh bootstrap bundle fetch..."
 # After one or more CA rotations, the stale bootstrap bundle causes TLS handshake
 # failure on reconnect. Deleting pods here is cheap: init container takes <30s.
 kubectl delete pods -n spire -l app=spire-agent --ignore-not-found
-echo "    Waiting 45s for SPIRE agents to re-attest..."
-sleep 45
-SPIRE_READY=$(kubectl get pods -n spire -l app=spire-agent --no-headers 2>/dev/null | grep -c "1/1" || true)
+echo "    Waiting for SPIRE agents to re-attest..."
+# Bounded retry instead of one fixed sleep+check: ipc8/ipc9 use Infineon SLB9672
+# TPMs, which have been observed taking up to ~70s for CreatePrimary during
+# attestation (vs. Nuvoton on ipc4-7) -- a single 45s check produced false-positive
+# alerts for a transient, still-converging state.
+SPIRE_WAIT_MAX=12   # 12 * 15s = 3 minutes
+spire_wait_count=0
+SPIRE_READY=0
+until [ "$SPIRE_READY" -eq 6 ]; do
+    SPIRE_READY=$(kubectl get pods -n spire -l app=spire-agent --no-headers 2>/dev/null | grep -c "1/1" || true)
+    [ "$SPIRE_READY" -eq 6 ] && break
+    spire_wait_count=$((spire_wait_count + 1))
+    if [ "$spire_wait_count" -ge "$SPIRE_WAIT_MAX" ]; then
+        break
+    fi
+    echo "    $SPIRE_READY/6 SPIRE agents Ready, retrying in 15s..."
+    sleep 15
+done
 echo "    $SPIRE_READY/6 SPIRE agents Ready"
 if [ "$SPIRE_READY" -lt 6 ]; then
     "$PUSHOVER" "morning-on: SPIRE agents incomplete" \
-        "Only $SPIRE_READY/6 SPIRE agents Ready after recycling (45s wait). Cluster is otherwise up. Check: kubectl get pods -n spire -l app=spire-agent -o wide"
+        "Only $SPIRE_READY/6 SPIRE agents Ready after 3 minutes of retrying post-recycle. Cluster is otherwise up. Check: kubectl get pods -n spire -l app=spire-agent -o wide"
 fi
 
 echo ""
