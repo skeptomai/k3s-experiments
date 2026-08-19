@@ -1,0 +1,28 @@
+[Unit]
+Description=vLLM Nemotron-3-Super-120B-A12B-NVFP4 inference server (spark-0d93)
+After=network-online.target pelagos-cri.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=-/usr/bin/pelagos rm -f vllm-nemotron
+ExecStart=/usr/bin/pelagos run --name vllm-nemotron --device nvidia.com/gpu=all --no-ipc-ns \
+    --ulimit memlock=18446744073709551615:18446744073709551615 --ulimit stack=67108864:67108864 \
+    -p 8000:8000 \
+    --bind /home/cb/.cache/huggingface/hub:/root/.cache/huggingface/hub \
+    --bind /home/cb/.cache/huggingface/token:/root/.cache/huggingface/token \
+    eugr/spark-vllm:nightly-20260805 \
+    vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
+      --gpu-memory-utilization 0.85 --max-num-seqs 4 --max-model-len 131072 \
+      --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+      --enable-chunked-prefill --enable-prefix-caching
+ExecStop=/usr/bin/pelagos stop vllm-nemotron
+Restart=on-failure
+RestartSec=30
+# Model load (weights + JIT compile) measured ~4-5min; give real headroom
+# before systemd decides the start failed.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
