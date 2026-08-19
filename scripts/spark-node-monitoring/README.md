@@ -53,6 +53,27 @@ Worked around with `memlock=18446744073709551615:18446744073709551615`
 (u64::MAX). Not filed upstream since it's a minor ergonomics regression, not
 a functional blocker — revisit if it gets more annoying.
 
+**`--reasoning-parser nemotron_v3`** (added 2026-08-19): after a handful of
+gptel interactions via this server, the model occasionally emitted a
+plausible-looking but fake agent-framework error as its actual reply content
+(e.g. `[ERROR: Agent failed (Function process_single_item_agent timed out
+after 90.0 seconds), API failed (API request returned None after all
+retries)]`) — confirmed via server logs that every request that session
+returned a clean `200 OK`, so nothing actually failed at the vLLM/infra
+level; the model hallucinated the error text itself, plausibly having been
+trained on agent-benchmark transcripts full of this exact kind of log
+format. Without `--reasoning-parser`, vLLM has no configured way to
+separate/strip Nemotron's `<think>`/`</think>` reasoning-trace content from
+the visible response even with `chat_template_kwargs:
+{"enable_thinking": false}` set client-side (gptel's Spark backend, see
+`dotfiles/doomemacs/doom/config.el`) — any imperfect suppression would have
+nowhere to go but straight into `content`. Adding vLLM's built-in
+`nemotron_v3` reasoning parser gives leaked reasoning content a dedicated
+`reasoning` field in the API response instead (confirmed present, `null`,
+in a clean test response after this change) rather than bleeding into the
+visible reply. Not a guaranteed fix for a hallucination (that's inherent
+model behavior), but removes one concrete mechanism that could produce it.
+
 ## Install (fresh spark)
 
 ```bash
