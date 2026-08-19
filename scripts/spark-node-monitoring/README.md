@@ -25,6 +25,33 @@ timers, writing to node_exporter's textfile collector.
 | `spark-thermal-exporter.service` / `.timer` | `/etc/systemd/system/` |
 | `disable-eee.service` | `/etc/systemd/system/disable-eee.service` |
 | `wifi-powersave-off.conf` | `/etc/NetworkManager/conf.d/wifi-powersave-off.conf` |
+| `vllm-nemotron.service` | `/etc/systemd/system/vllm-nemotron.service` |
+
+### `vllm-nemotron.service`
+
+Runs the Nemotron-3-Super-120B-A12B-NVFP4 vLLM server under Pelagos
+(`eugr/spark-vllm:nightly-20260805`, port 8000). Added 2026-08-19 after
+discovering this container had **no persistence at all** — it had only ever
+been started by hand (the exact command was buried in a
+[k3s-experiments#16](https://github.com/skeptomai/k3s-experiments/issues/16)
+comment) and didn't survive the reboot from the wired-move. This unit
+restores it on boot and on crash.
+
+Install:
+```bash
+sudo cp vllm-nemotron.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now vllm-nemotron.service
+```
+
+Check readiness (model load takes ~4-5min): `curl -s localhost:8000/v1/models`.
+
+**Known Pelagos CLI quirk:** `--ulimit memlock=unlimited` (the syntax
+originally used interactively) is rejected by the current Pelagos version —
+it now requires `SOFT:HARD` as literal integers, no `unlimited` keyword.
+Worked around with `memlock=18446744073709551615:18446744073709551615`
+(u64::MAX). Not filed upstream since it's a minor ergonomics regression, not
+a functional blocker — revisit if it gets more annoying.
 
 ## Install (fresh spark)
 
