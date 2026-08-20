@@ -271,8 +271,6 @@ cluster is running:
   demonstrate (TLS via cert-manager, NetworkPolicy enforcement, IPVS kube-proxy
   mode).
 
----
-
 \newpage
 
 ## Appendix A: Hardware & OS Reference
@@ -309,31 +307,49 @@ cluster is running:
 
 ## Appendix B: Software Component Reference
 
-| Component | Category | Reason for being | Depends on / notes |
-|---|---|---|---|
-| SPIRE | Identity | TPM-attested workload identity, SVID issuance | TPM hardware (server pinned to *ipc4*), k8s API |
-| OpenBao | Secrets | Secret storage, Transit auto-unseal, PKI backend | Replaces old 3-node Raft HA Vault |
-| Cilium | Networking | CNI, NetworkPolicy enforcement via eBPF | Replaces flannel; needs `allow-kubelet-probes` netpol per namespace |
-| CoreDNS | Networking | Cluster-internal DNS resolution | k3s-bundled, not a deliberate choice |
-| kube-vip | Networking | HA control-plane VIP | L2/ARP, *ipc4-6* |
-| MetalLB | Networking | LoadBalancer IP pool | L2/ARP mode; replaces k3s ServiceLB |
-| Traefik | Networking | Ingress controller / reverse proxy (LAN path) | Sits behind MetalLB `.240` |
-| Tailscale Operator | Networking | Ingress path for tailnet-only exposure | Per-service proxy pods, `tailscale` namespace |
-| Flux | GitOps | Reconciles `manifests/` from GitHub | Not all workloads are Flux-managed |
-| cert-manager | PKI | Automated cert issuance/renewal | Issuers backed by OpenBao + self-signed |
-| local-path-provisioner | Storage | Fast node-local dynamic PVs | No cross-node availability |
-| nfs-subdir-external-provisioner | Storage | Shared network storage | Backed by an NFS export |
-| kube-state-metrics / node-exporter | Observability | Cluster/node metrics feed | Scraped by external Prometheus (*nazgul*) |
-| Prometheus / Grafana / Alertmanager | Observability | Metrics, dashboards, alerting | Runs outside k3s, on *nazgul*, by design |
-| metrics-server | Observability | Live resource metrics for `kubectl top` / HPA | Separate from Prometheus's persisted history |
-| Pelagos | Container Runtime | CRI implementation (custom Rust, not Docker) | Every node; also the project this cluster validates |
-| KubeVirt | Virtualization | Runs VMs as k8s-managed workloads | virt-handler/controller/api/operator |
-| gruesome | Workload | Hosted Z-Machine interpreter (text adventures) | Built via Pelagos, pushed to local registry |
-| open-webui | Workload | Chat UI for LLM interaction | Talks to spark's vLLM endpoint |
-| web-search | Workload | Self-hosted DuckDuckGo proxy for tool-calling | Used by gptel's `web_search` tool |
-| jupyter | Workload | Interactive notebook environment | |
-| Authentik | Workload | Human-facing SSO/identity provider | Distinct from SPIRE (workload identity) |
-| https-demo / netpol-demo / ipvs-demo | Workload | Living examples from `experiments/` | Kept running as continuous verification |
+\begingroup
+\small
+\begin{longtable}{p{0.20\linewidth} p{0.12\linewidth} p{0.33\linewidth} p{0.30\linewidth}}
+\toprule
+\textbf{Component} & \textbf{Category} & \textbf{Reason for being} & \textbf{Depends on / notes} \\
+\midrule
+\endfirsthead
+
+\multicolumn{4}{l}{\textit{Appendix B (cont'd)}} \\
+\addlinespace
+\toprule
+\textbf{Component} & \textbf{Category} & \textbf{Reason for being} & \textbf{Depends on / notes} \\
+\midrule
+\endhead
+
+\bottomrule
+\endlastfoot
+
+SPIRE & Identity & TPM-attested workload identity, SVID issuance & TPM hardware (server pinned to \textit{ipc4}), k8s API \\
+OpenBao & Secrets & Secret storage, Transit auto-unseal, PKI backend & Replaces old 3-node Raft HA Vault \\
+Cilium & Networking & CNI, NetworkPolicy enforcement via eBPF & Replaces flannel; needs \texttt{allow-kubelet-probes} netpol per namespace \\
+CoreDNS & Networking & Cluster-internal DNS resolution & Default that ships with k3s \\
+kube-vip & Networking & HA control-plane VIP & L2/ARP, \textit{ipc4-6} \\
+MetalLB & Networking & LoadBalancer IP pool & L2/ARP mode; replaces k3s ServiceLB \\
+Traefik & Networking & Ingress controller / reverse proxy (LAN path) & Sits behind MetalLB \texttt{.240} \\
+Tailscale Operator & Networking & Ingress path for tailnet-only exposure & Per-service proxy pods, \texttt{tailscale} namespace \\
+Flux & GitOps & Reconciles \texttt{manifests/} from GitHub & Not all workloads are Flux-managed \\
+cert-manager & PKI & Automated cert issuance/renewal & Issuers backed by OpenBao + self-signed \\
+local-path-provisioner & Storage & Fast node-local dynamic PVs & No cross-node availability \\
+nfs-subdir-external-provisioner & Storage & Shared network storage & Backed by an NFS export \\
+kube-state-metrics / node-exporter & Observability & Cluster/node metrics feed & Scraped by external Prometheus (\textit{nazgul}) \\
+Prometheus / Grafana / Alertmanager & Observability & Metrics, dashboards, alerting & Runs outside k3s, on \textit{nazgul}, by design \\
+metrics-server & Observability & Live resource metrics for \texttt{kubectl top} / HPA & Separate from Prometheus's persisted history \\
+Pelagos & Container Runtime & CRI implementation (custom Rust, not Docker) & Every node; also the project this cluster validates \\
+KubeVirt & Virtualization & Runs VMs as k8s-managed workloads & virt-handler/controller/api/operator \\
+gruesome & Workload & Hosted Z-Machine interpreter (text adventures) & Built via Pelagos, pushed to local registry \\
+open-webui & Workload & Chat UI for LLM interaction & Talks to spark's vLLM endpoint \\
+web-search & Workload & Self-hosted DuckDuckGo proxy for tool-calling & Used by gptel's \texttt{web\_search} tool \\
+jupyter & Workload & Interactive notebook environment & \\
+Authentik & Workload & Human-facing SSO/identity provider & Distinct from SPIRE (workload identity) \\
+https-demo / netpol-demo / ipvs-demo & Workload & Living examples from \texttt{experiments/} & Kept running as continuous verification \\
+\end{longtable}
+\endgroup
 
 \newpage
 
