@@ -5,6 +5,93 @@ component serves, not by installation order or namespace. Hardware/OS specifics 
 a quick-reference software component table are in the appendices, kept separate so this
 body stays about reasoning rather than inventory.
 
+```mermaid
+flowchart TB
+    GH["GitHub repo<br/>manifests/"]
+
+    subgraph EXT["Adjacent, not cluster members"]
+        OMEN["omen<br/>dev laptop"]
+        NAZGUL["nazgul<br/>NAS / home server"]
+        SPARK["spark-0d93<br/>DGX Spark + vLLM"]
+    end
+
+    subgraph FOUND["Foundation"]
+        K3S["k3s + etcd<br/>control plane"]
+        PELAGOS["Pelagos<br/>CRI runtime"]
+        CILIUM["Cilium<br/>CNI + NetworkPolicy"]
+    end
+
+    subgraph NET["Ingress & Load Balancing"]
+        KUBEVIP["kube-vip<br/>HA API VIP"]
+        METALLB["MetalLB<br/>LB pool"]
+        TRAEFIK["Traefik<br/>LAN ingress"]
+        TSOP["Tailscale Operator<br/>tailnet-only ingress"]
+    end
+
+    subgraph PLATFORM["Platform Services"]
+        SPIRE["SPIRE<br/>workload identity"]
+        OPENBAO["OpenBao<br/>secrets + PKI"]
+        CERTMGR["cert-manager<br/>TLS"]
+        STORAGE["storage provisioners<br/>local-path / nfs-subdir"]
+    end
+
+    subgraph VIRT["Virtualization"]
+        KUBEVIRT["KubeVirt<br/>VM workloads"]
+    end
+
+    subgraph WORK["Workloads"]
+        GRUESOME["gruesome"]
+        LLMTOOL["LLM tooling<br/>open-webui, web-search, jupyter"]
+        AUTHENTIK["Authentik<br/>human SSO"]
+        BUILDJOBS["Pelagos build jobs"]
+        DEMOS["demo / experiment apps"]
+    end
+
+    subgraph OBS["Observability, on nazgul"]
+        PROM["Prometheus"]
+        GRAFANA["Grafana"]
+        ALERT["Alertmanager"]
+    end
+
+    GH --> FLUX["Flux<br/>GitOps reconciler"]
+    FLUX -->|reconciles manifests/| K3S
+    OMEN -->|manual kubectl apply| K3S
+
+    K3S --> PELAGOS
+    K3S --> CILIUM
+    K3S --> KUBEVIRT
+    CILIUM --> KUBEVIP
+    CILIUM --> METALLB
+    METALLB --> TRAEFIK
+    K3S --> TSOP
+
+    K3S --> SPIRE
+    K3S --> OPENBAO
+    OPENBAO --> CERTMGR
+    K3S --> STORAGE
+
+    TRAEFIK --> GRUESOME
+    TRAEFIK --> DEMOS
+    TSOP --> GRUESOME
+    TSOP --> LLMTOOL
+    TSOP --> AUTHENTIK
+    K3S --> BUILDJOBS
+    BUILDJOBS -->|pelagos build / push| NAZGUL
+
+    PELAGOS -.->|runs containers for| WORK
+    SPIRE -.->|issues SVIDs to| WORK
+    OPENBAO -.->|secrets for| WORK
+    STORAGE -.->|PVs for| WORK
+
+    NAZGUL --> OBS
+    K3S -.->|metrics scraped by| PROM
+    SPARK -.->|vLLM API over tailnet| LLMTOOL
+```
+
+\begin{flushleft}
+{\footnotesize\itshape Figure 1. Layered view of the cluster's platform services and workloads, grouped by architectural role.}
+\end{flushleft}
+
 ## 1. Identity & Workload Attestation
 
 **[SPIRE](#ref-spire)** provides cryptographic identity for workloads, not just network-perimeter
@@ -50,6 +137,11 @@ routine health checks confirm `client` → `backend` is blocked and `frontend` �
 NetworkPolicy would be caught immediately rather than discovered the next time it
 actually mattered.
 
+Underneath all of this, **[CoreDNS](#ref-coredns)** is the cluster's internal DNS
+— every in-cluster Service name (`openbao.openbao.svc`, etc.) resolves through it.
+It's the default that ships with k3s, unlike SPIRE or Cilium which were
+deliberately chosen — but nothing else in this document works without it.
+
 ## 4. Ingress & Load Balancing
 
 The underlying bare-metal hosts have no load-balancer services, so three
@@ -63,6 +155,17 @@ components stand in for one:
   only path.
 - **[Traefik](#ref-traefik)** sits on the MetalLB-assigned `.240` address as the
   actual ingress controller/reverse proxy in front of HTTP(S) services.
+
+That's the LAN-facing path. There's a second, independent one for tailnet-only
+reach: the **Tailscale Kubernetes Operator** (running in the `tailscale`
+namespace) watches for either an `Ingress` using the `tailscale` IngressClass or
+a plain Service annotated `tailscale.com/expose: "true"`, and spins up a
+dedicated proxy pod for it. `authentik` and `open-webui` use this path
+exclusively — no Traefik route exists for either of them, they're reachable only
+on the [tailnet](#ref-tailscale). `jupyter` and `web-search` use the simpler
+Service-annotation form, same effect. `gruesome` is the interesting case: it uses
+*both* paths at once — `gruesome.home.skeptomai.com` via Traefik on the LAN, and
+its own tailnet hostname via the operator, simultaneously.
 
 ## 5. GitOps & Delivery
 
@@ -112,6 +215,11 @@ metrics exposed via a NodePort patch. Alerts route to Pushover; some (SPIRE
 exporter down, etc.) are expected to fire during the nightly shutdown window and
 self-clear on the morning startup, which is a real distinction from an alert that
 indicates an actual fault.
+
+Separately, **[metrics-server](#ref-metrics-server)** provides the live,
+short-lived resource metrics behind `kubectl top` and any future
+horizontal-pod-autoscaling — a different job from Prometheus's persisted,
+alertable history, even though both are "metrics."
 
 ## 9. Container Runtime
 
@@ -206,15 +314,18 @@ cluster is running:
 | SPIRE | Identity | TPM-attested workload identity, SVID issuance | TPM hardware (server pinned to *ipc4*), k8s API |
 | OpenBao | Secrets | Secret storage, Transit auto-unseal, PKI backend | Replaces old 3-node Raft HA Vault |
 | Cilium | Networking | CNI, NetworkPolicy enforcement via eBPF | Replaces flannel; needs `allow-kubelet-probes` netpol per namespace |
+| CoreDNS | Networking | Cluster-internal DNS resolution | k3s-bundled, not a deliberate choice |
 | kube-vip | Networking | HA control-plane VIP | L2/ARP, *ipc4-6* |
 | MetalLB | Networking | LoadBalancer IP pool | L2/ARP mode; replaces k3s ServiceLB |
-| Traefik | Networking | Ingress controller / reverse proxy | Sits behind MetalLB `.240` |
+| Traefik | Networking | Ingress controller / reverse proxy (LAN path) | Sits behind MetalLB `.240` |
+| Tailscale Operator | Networking | Ingress path for tailnet-only exposure | Per-service proxy pods, `tailscale` namespace |
 | Flux | GitOps | Reconciles `manifests/` from GitHub | Not all workloads are Flux-managed |
 | cert-manager | PKI | Automated cert issuance/renewal | Issuers backed by OpenBao + self-signed |
 | local-path-provisioner | Storage | Fast node-local dynamic PVs | No cross-node availability |
 | nfs-subdir-external-provisioner | Storage | Shared network storage | Backed by an NFS export |
 | kube-state-metrics / node-exporter | Observability | Cluster/node metrics feed | Scraped by external Prometheus (*nazgul*) |
 | Prometheus / Grafana / Alertmanager | Observability | Metrics, dashboards, alerting | Runs outside k3s, on *nazgul*, by design |
+| metrics-server | Observability | Live resource metrics for `kubectl top` / HPA | Separate from Prometheus's persisted history |
 | Pelagos | Container Runtime | CRI implementation (custom Rust, not Docker) | Every node; also the project this cluster validates |
 | KubeVirt | Virtualization | Runs VMs as k8s-managed workloads | virt-handler/controller/api/operator |
 | gruesome | Workload | Hosted Z-Machine interpreter (text adventures) | Built via Pelagos, pushed to local registry |
@@ -234,6 +345,7 @@ Canonical project source for every named technology in this document, alphabetic
 - []{#ref-authentik} **Authentik** — <https://github.com/goauthentik/authentik>
 - []{#ref-cert-manager} **cert-manager** — <https://github.com/cert-manager/cert-manager>
 - []{#ref-cilium} **Cilium** — <https://github.com/cilium/cilium>
+- []{#ref-coredns} **CoreDNS** — <https://github.com/coredns/coredns>
 - []{#ref-duckduckgo} **DuckDuckGo** — <https://duckduckgo.com/>
 - []{#ref-flux} **Flux** — <https://github.com/fluxcd/flux2>
 - []{#ref-grafana} **Grafana** — <https://github.com/grafana/grafana>
@@ -245,6 +357,7 @@ Canonical project source for every named technology in this document, alphabetic
 - []{#ref-kubevirt} **KubeVirt** — <https://github.com/kubevirt/kubevirt>
 - []{#ref-local-path-provisioner} **local-path-provisioner** — <https://github.com/rancher/local-path-provisioner>
 - []{#ref-metallb} **MetalLB** — <https://github.com/metallb/metallb>
+- []{#ref-metrics-server} **metrics-server** — <https://github.com/kubernetes-sigs/metrics-server>
 - []{#ref-nemotron} **Nemotron-3-Super** — <https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4>
 - []{#ref-nfs-subdir-external-provisioner} **nfs-subdir-external-provisioner** — <https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner>
 - []{#ref-open-webui} **open-webui** — <https://github.com/open-webui/open-webui>
