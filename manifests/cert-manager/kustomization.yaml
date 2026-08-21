@@ -2,3 +2,59 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+patches:
+  # Upstream ships no resource requests on any of the three Deployments,
+  # which left the scheduler with no signal to spread them during a mass
+  # reschedule (e.g. the nightly uncordon burst) -- they piled onto ipc4
+  # (2026-08-21, see k3s-experiments cluster-architecture doc history).
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: cert-manager
+        namespace: cert-manager
+      spec:
+        template:
+          spec:
+            containers:
+              - name: cert-manager-controller
+                resources:
+                  requests: {cpu: 20m, memory: 64Mi}
+                  limits: {cpu: 200m, memory: 256Mi}
+    target:
+      kind: Deployment
+      name: cert-manager
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: cert-manager-cainjector
+        namespace: cert-manager
+      spec:
+        template:
+          spec:
+            containers:
+              - name: cert-manager-cainjector
+                resources:
+                  requests: {cpu: 20m, memory: 64Mi}
+                  limits: {cpu: 200m, memory: 256Mi}
+    target:
+      kind: Deployment
+      name: cert-manager-cainjector
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: cert-manager-webhook
+        namespace: cert-manager
+      spec:
+        template:
+          spec:
+            containers:
+              - name: cert-manager-webhook
+                resources:
+                  requests: {cpu: 10m, memory: 32Mi}
+                  limits: {cpu: 100m, memory: 128Mi}
+    target:
+      kind: Deployment
+      name: cert-manager-webhook

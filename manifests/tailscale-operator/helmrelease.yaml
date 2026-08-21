@@ -32,6 +32,11 @@ spec:
     # entry — the OAuth client already owns tag:k8s-operator.
     proxyConfig:
       defaultTags: "tag:k8s-operator"
+    # No resources upstream -- see manifests/cert-manager/kustomization.yaml
+    # for why this matters (2026-08-21 ipc4 pod-pileup incident).
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 128Mi}
     # NOTE: no HOME override. pelagos >= 0.65.42 injects a default HOME for
     # containers whose image omits it (pelagos #421), so tsnet no longer fatals
     # with "neither $XDG_CONFIG_HOME nor $HOME are defined". On pelagos < 0.65.42

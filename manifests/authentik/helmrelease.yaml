@@ -80,9 +80,20 @@ spec:
           storageClass: nfs
           size: 10Gi
     server:
+      # No resources upstream -- left the scheduler with no signal to spread
+      # server/worker during a mass reschedule (e.g. the nightly uncordon
+      # burst); both piled onto ipc4 (2026-08-21 incident). Values per the
+      # chart's own suggested defaults.
+      resources:
+        requests: {cpu: 100m, memory: 512Mi}
+        limits: {cpu: 500m, memory: 512Mi}
       service:
         annotations:
           # Tailnet exposure, same proven Service-mode pattern as
           # manifests/gruesome, manifests/open-webui, manifests/jupyter.
           tailscale.com/expose: "true"
           tailscale.com/hostname: "authentik"
+    worker:
+      resources:
+        requests: {cpu: 100m, memory: 512Mi}
+        limits: {cpu: 500m, memory: 512Mi}
