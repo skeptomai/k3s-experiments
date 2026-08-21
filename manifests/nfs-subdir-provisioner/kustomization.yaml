@@ -1,0 +1,11 @@
+# nfs-subdir-external-provisioner was originally installed via a bare `helm
+# install` directly on the cluster (2026-06-02), with zero GitOps tracking --
+# a real gap against the "recreate from scratch" story in CLAUDE.md. This
+# HelmRelease adopts that existing release (same name + namespace) rather
+# than creating a second one, matching its live chart version/values exactly
+# except for adding resource requests, which it had none of.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - helmrepository.yaml
+  - helmrelease.yaml

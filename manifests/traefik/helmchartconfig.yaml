@@ -1,0 +1,29 @@
+---
+# Traefik itself is k3s's own bundled addon (installed via k3s's built-in
+# HelmChart controller, not Flux/Helm-controller) -- this HelmChartConfig is
+# the correct, safe way to customize it: k3s's own reconciler reads and
+# merges it into the bundled chart's install/upgrade, so it coexists rather
+# than fighting k3s's own continuous reconciliation of the HelmChart CR.
+#
+# No resources were set at all before this (2026-08-21 ipc4 pod-pileup
+# incident). Verified against the *rendered* Deployment, not just Helm's own
+# reported success -- the chart's values.yaml documents resources at the top
+# level (`resources: {}`, templates/_podtemplate.tpl:71-72), confirmed by
+# extracting the actual bundled chart tarball
+# (kubectl get --raw /static/charts/traefik-<version>.tgz) rather than
+# guessing from the values already in use (which are all under `deployment.`
+# and misled the first attempt).
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
