@@ -1,0 +1,64 @@
+# Rebalances pods after the nightly morning-on.sh uncordon burst -- see
+# docs/ipc4-pod-pileup-postmortem.md for why this exists. Resource requests
+# (added across the fleet in that same incident) fix the *scheduling*
+# signal for newly-placed pods; this is the complementary piece that
+# rebalances pods that are *already running* if drift happens again.
+#
+# LowNodeUtilization only, deliberately -- not the chart's full default
+# plugin bundle (RemoveDuplicates, RemovePodsViolatingNodeTaints, etc.).
+# Scoped to exactly the problem being solved.
+#
+# DRY RUN FIRST: cmdOptions.dry-run only logs what it would evict, it
+# doesn't actually evict anything yet. Watch its logs for a few nightly
+# cycles before flipping to live (kubectl logs -n descheduler
+# -l app.kubernetes.io/name=descheduler --tail=200).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: descheduler
+  namespace: descheduler
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: descheduler
+      version: "0.36.x" # allow patch releases; bump minor deliberately
+      sourceRef:
+        kind: HelmRepository
+        name: descheduler
+        namespace: flux-system
+  values:
+    kind: CronJob
+    # 10 minutes after morning-on.sh's 05:00 local start -- API server up,
+    # all 6 nodes uncordoned, and SPIRE agents re-attested (typically done
+    # by ~05:03-05:05, see project-nightly-automation) well before this runs.
+    schedule: "10 5 * * *"
+    timeZone: America/Los_Angeles
+    cmdOptions:
+      v: 3
+      dry-run: true
+    deschedulerPolicy:
+      profiles:
+        - name: default
+          pluginConfig:
+            - name: DefaultEvictor
+              args:
+                podProtections:
+                  defaultDisabled:
+                    - "PodsWithLocalStorage"
+                  extraEnabled:
+                    - "PodsWithPVC"
+            - name: LowNodeUtilization
+              args:
+                thresholds:
+                  cpu: 20
+                  memory: 20
+                  pods: 20
+                targetThresholds:
+                  cpu: 50
+                  memory: 50
+                  pods: 50
+          plugins:
+            balance:
+              enabled:
+                - LowNodeUtilization
