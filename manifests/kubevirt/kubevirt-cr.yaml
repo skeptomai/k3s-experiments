@@ -13,3 +13,28 @@ spec:
   customizeComponents: {}
   imagePullPolicy: IfNotPresent
   workloadUpdateStrategy: {}
+  # Required anti-affinity so virt-api/virt-controller replicas never co-locate
+  # on one node. Without this both replicas of each landed on ipc4, so draining
+  # ipc4 required evicting all 4 at once -- the PDB (minAvailable: 1) only
+  # allows one disruption at a time, and replacements had nowhere else
+  # guaranteed to land, so shutdown-cluster.sh's drain step hit its 2m global
+  # timeout and aborted (2026-08-21 night-off failure).
+  infra:
+    nodePlacement:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: kubevirt.io
+                    operator: In
+                    values:
+                      - virt-api
+              topologyKey: kubernetes.io/hostname
+            - labelSelector:
+                matchExpressions:
+                  - key: kubevirt.io
+                    operator: In
+                    values:
+                      - virt-controller
+              topologyKey: kubernetes.io/hostname
