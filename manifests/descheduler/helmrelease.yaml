@@ -8,9 +8,10 @@
 # plugin bundle (RemoveDuplicates, RemovePodsViolatingNodeTaints, etc.).
 # Scoped to exactly the problem being solved.
 #
-# DRY RUN FIRST: cmdOptions.dry-run only logs what it would evict, it
-# doesn't actually evict anything yet. Watch its logs for a few nightly
-# cycles before flipping to live (kubectl logs -n descheduler
+# LIVE as of 2026-08-22: dry-run watched for one nightly cycle (2026-08-22
+# 05:10 PDT), 0 evictions logged (cluster already balanced). Flipped to
+# active per explicit request. Revert to dry-run: true if it evicts
+# something unexpected (kubectl logs -n descheduler
 # -l app.kubernetes.io/name=descheduler --tail=200).
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -36,7 +37,7 @@ spec:
     timeZone: America/Los_Angeles
     cmdOptions:
       v: 3
-      dry-run: true
+      dry-run: false
     deschedulerPolicy:
       profiles:
         - name: default
