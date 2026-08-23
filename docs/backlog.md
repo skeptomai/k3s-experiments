@@ -1,5 +1,11 @@
 # Infrastructure Backlog
 
+## Cluster Hostname Rename
+
+**Status**: Analyzed 2026-08-23, deferred — current names (ipc4-9) are staying.
+Full analysis + step-by-step plan in
+[`hostname-rename-plan.md`](hostname-rename-plan.md) if this comes up again.
+
 ## Serial Console
 
 **Status**: Hardware ready, not yet configured. Blocked on: physical serial cables.
