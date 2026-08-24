@@ -15,7 +15,8 @@
 #
 # Usage: ./install-pelagos.sh [--version vX.Y.Z] [node...]
 #   --version: pin a specific release (default: latest)
-#   node: ipc4 | ipc5 | ipc6 | ipc7 | ipc8 | ipc9 (default: all six)
+#   node: ipc4 | ipc5 | ipc6 | ipc7 | ipc8 | ipc9 | a cloud agent hostname
+#         (default: all six ipc nodes; cloud nodes must be named explicitly)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,6 +24,10 @@ SERVER="ipc4.taildd208.ts.net"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
 DEFAULT_NODES=(ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
 declare -A NODE_IP=([ipc4]="" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
+# Cloud agents have no LAN IP -- reached directly via their own Tailscale
+# MagicDNS name instead of jumping through ipc4. SSH user differs too
+# (cloud images default to a vendor user, e.g. "ubuntu", not "cb").
+declare -A CLOUD_NODE_USER=([aws-graviton-build]="ubuntu")
 
 VERSION_PIN=""
 NODES=()
@@ -53,25 +58,38 @@ if [[ -n "$VERSION_PIN" ]]; then
 else
     LATEST=$(gh release list --repo pelagos-containers/pelagos --limit 1 --json tagName --jq '.[0].tagName')
 fi
-DEB_URL=$(gh release view "$LATEST" --repo pelagos-containers/pelagos --json assets \
-    --jq '.assets[] | select(.name | test("amd64[.]deb")) | .url')
-echo "Version: $LATEST  deb: $DEB_URL"
+echo "Version: $LATEST"
 
 install_node() {
     local node=$1
-    local ssh_cmd svc k3s_config_b64 registries_b64
+    local ssh_cmd svc k3s_config_b64 registries_b64 arch deb_arch deb_url
 
     if [ "$node" = "ipc4" ]; then
         ssh_cmd="ssh -o StrictHostKeyChecking=no cb@$SERVER"
-    else
+    elif [[ -n "${NODE_IP[$node]:-}" ]]; then
         ssh_cmd="ssh -o StrictHostKeyChecking=no -J cb@$SERVER cb@${NODE_IP[$node]}"
+    else
+        # No LAN IP entry -> a cloud node, reached directly over Tailscale.
+        ssh_cmd="ssh -o StrictHostKeyChecking=no ${CLOUD_NODE_USER[$node]:-ubuntu}@${node}.taildd208.ts.net"
     fi
     svc=$(k3s_service "$node")
+
+    # Release asset arch matches the target node's actual CPU, not a fleet-wide
+    # assumption -- lets one invocation mix amd64 (ipc4-9) and arm64 (cloud) nodes.
+    arch=$($ssh_cmd uname -m)
+    case "$arch" in
+        x86_64)  deb_arch="amd64" ;;
+        aarch64) deb_arch="arm64" ;;
+        *) echo "ERROR: unrecognized arch '$arch' on $node" >&2; return 1 ;;
+    esac
+    deb_url=$(gh release view "$LATEST" --repo pelagos-containers/pelagos --json assets \
+        --jq ".assets[] | select(.name | test(\"${deb_arch}[.]deb\")) | .url")
 
     # Role-aware k3s config:
     #   - etcd seed (ipc4)        -> server config (cluster-init)
     #   - joining server (ipc5/6) -> server-join config, token injected
-    #   - agent (ipc7-9)          -> agent config
+    #   - LAN agent (ipc7-9)      -> agent config (node-class=fastest)
+    #   - cloud agent             -> cloud agent config (node-class=cloud-arm64)
     if [ "$node" = "$CLUSTER_INIT_NODE" ]; then
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
     elif is_server_node "$node"; then
@@ -79,15 +97,17 @@ install_node() {
         # Match either placeholder name (IPC1 on master / SEED on the migration branch).
         k3s_config_b64=$(sed -E "s|<INJECTED_AT_INSTALL_FROM_[A-Z0-9]+_TOKEN>|${SERVER_TOKEN}|" \
             "$REPO_ROOT/config/k3s-server-join.yaml" | base64 -w0)
-    else
+    elif [[ -n "${NODE_IP[$node]:-}" ]]; then
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent.yaml")
+    else
+        k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent-cloud.yaml")
     fi
     registries_b64=$(base64 -w0 < "$REPO_ROOT/config/pelagos-registries.toml")
 
     echo ""
-    echo "=== Installing Pelagos $LATEST on $node ==="
+    echo "=== Installing Pelagos $LATEST ($deb_arch) on $node ==="
 
-    $ssh_cmd bash -s "$DEB_URL" "$svc" "$k3s_config_b64" "$registries_b64" <<'REMOTE'
+    $ssh_cmd bash -s "$deb_url" "$svc" "$k3s_config_b64" "$registries_b64" <<'REMOTE'
 set -euo pipefail
 DEB_URL=$1
 K3S_SERVICE=$2

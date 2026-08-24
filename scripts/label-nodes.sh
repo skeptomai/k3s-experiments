@@ -20,11 +20,14 @@ SSH="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 $IPC4"
 
 PERFORMANCE="ipc4 ipc5 ipc6"   # i5-12500T (35W), 6c/12t, 32GB
 FASTEST="ipc7 ipc8 ipc9"       # i5-12500 non-T (65W), 6c/12t, 32GB
+CLOUD="aws-graviton-build"     # Graviton4 c8g, arm64, tainted cloud=aws:NoSchedule
 
 echo "=== labelling performance (i5-12500T, 35W): $PERFORMANCE ==="
 $SSH "sudo kubectl label node $PERFORMANCE node-class=performance --overwrite"
 echo "=== labelling fastest (i5-12500 non-T, 65W): $FASTEST ==="
 $SSH "sudo kubectl label node $FASTEST node-class=fastest --overwrite"
+echo "=== labelling cloud-arm64 (Graviton4, tainted): $CLOUD ==="
+$SSH "sudo kubectl label node $CLOUD node-class=cloud-arm64 --overwrite"
 
 echo "--- result ---"
 $SSH "sudo kubectl get nodes -L node-class -L node-role.kubernetes.io/control-plane"

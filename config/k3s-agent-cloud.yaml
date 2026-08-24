@@ -1,0 +1,15 @@
+container-runtime-endpoint: "unix:///run/pelagos/cri.sock"
+kube-proxy-arg:
+  - "proxy-mode=nftables"  # IPVS conflicts with Cilium BPF service hooks; nftables does not
+# Registered by VPC private IP, not the Tailscale IP -- reachable symmetrically
+# from every LAN node via the site-to-site WireGuard tunnel (k3s-experiments#20),
+# same as ipc4-9 reach each other. The earlier Tailscale-IP registration split
+# cluster traffic across two asymmetric paths (direct P2P one way, relayed
+# subnet-route the other) and silently dropped Cilium's vxlan traffic on the
+# relayed hop -- see docs/aws-graviton-build-node.md.
+node-ip: "172.31.47.167"
+# node-label persists node-class through a reinstall (applied at registration).
+# Cloud-hosted arm64 build node(s). Distinct label from ipc7-9's "fastest"
+# so build Jobs target it explicitly rather than by accident.
+node-label:
+  - "node-class=cloud-arm64"

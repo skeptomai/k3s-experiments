@@ -1,0 +1,19 @@
+#cloud-config
+# Bootstraps Tailscale only. k3s/Pelagos are installed manually as a separate
+# step after connectivity + MTU are verified (see docs/aws-graviton-build-node.md).
+#
+# hostname MUST match the Tailscale hostname below and the k3s --node-name
+# passed at join time -- k3s defaults to the OS hostname for the node name,
+# and Canonical's AMI otherwise leaves it as the AWS-assigned ip-x-x-x-x.
+
+hostname: ${hostname}
+preserve_hostname: false
+
+ssh_authorized_keys:
+  - ${ssh_public_key}
+
+package_update: true
+
+runcmd:
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  - tailscale up --authkey=${authkey} --hostname=${hostname} --advertise-tags=${tags} --accept-routes

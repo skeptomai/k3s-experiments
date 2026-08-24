@@ -15,8 +15,16 @@ CLUSTER_INIT_NODE="ipc4"
 
 # Control-plane / etcd members.
 SERVER_NODES=(ipc4 ipc5 ipc6)
-# Worker / agent nodes.
+# Worker / agent nodes (LAN, "fastest" tier).
 AGENT_NODES=(ipc7 ipc8 ipc9)
+# Cloud-hosted agent nodes -- SSH/admin reached over Tailscale, cluster
+# traffic reached via a site-to-site WireGuard tunnel to the LAN (not the
+# ipc4-jump pattern used for ipc7-9) -- see docs/aws-graviton-build-node.md.
+# Kept separate from AGENT_NODES since they're a different network path,
+# config (config/k3s-agent-cloud.yaml), and node-class label -- scripts that
+# need "the LAN fastest tier" specifically (label-nodes.sh) should not
+# silently pick these up too.
+CLOUD_AGENT_NODES=(aws-graviton-build)
 
 # is_server_node <node> -> 0 if the node is a control-plane server, else 1.
 is_server_node() {
