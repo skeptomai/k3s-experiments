@@ -183,7 +183,19 @@ If the instance is ever replaced (not just stopped/started):
 
 ## Usage
 
-**Start/stop**: `scripts/aws-build-node.sh start` / `stop` / `status`.
+**Start/stop**: `scripts/aws-build-node.sh start` / `stop` / `status`. Since
+the node stops instead of terminating, a stopped instance is still a real k8s
+Node object sitting NotReady with its DaemonSet pods unready
+(`cilium`/`cilium-envoy`/`node-exporter`/`spire-agent` all schedule there) —
+`stop` creates two targeted Alertmanager silences (`KubeNodeNotReady` +
+`KubeDaemonSetNotFullyReady` scoped to those four DaemonSets) so this doesn't
+page for an intentional state; `start` removes them immediately. Each silence
+has a 24h safety cap regardless, in case `start` never runs (instance
+replaced some other way). **Known scoping gap**: `KubeDaemonSetNotFullyReady`
+has no per-node label, so the silence is DaemonSet-name-scoped but not
+node-scoped — a genuine DaemonSet problem on ipc4-9 during that same window
+would also go quiet. Acceptable for a short, on-demand window; would need
+revisiting if this node's uptime pattern ever becomes longer-lived.
 
 **Submit a build Job**: target the node via `nodeSelector` on
 `kubernetes.io/arch: arm64` plus a toleration for `cloud=aws:NoSchedule` —
