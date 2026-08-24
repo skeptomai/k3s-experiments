@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pelagos-build-arm64-v0-65-94
+  namespace: default
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+        - key: cloud
+          operator: Equal
+          value: aws
+          effect: NoSchedule
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: build
+          image: 192.168.89.2:5004/pelagos-builder:rust-protoc-34.1
+          env:
+            - name: GIT_REF
+              value: "v0.65.94"
+            - name: CARGO_HOME
+              value: /cache/cargo
+            - name: CARGO_TARGET_DIR
+              value: /cache/target
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              uname -m
+              protoc --version
+              REPO=/cache/repo
+              if [ -d "$REPO/.git" ]; then
+                git -C "$REPO" fetch --all -q
+              else
+                git clone -q https://github.com/pelagos-containers/pelagos.git "$REPO"
+              fi
+              cd "$REPO"
+              git checkout -q "$GIT_REF"
+              if git rev-parse --verify -q "origin/$GIT_REF" >/dev/null 2>&1; then
+                git reset --hard -q "origin/$GIT_REF"
+              fi
+              echo "==> building $(git rev-parse --short HEAD) ($GIT_REF) on $(uname -m)"
+              cargo build --release -p pelagos -p pelagos-cri -p pelagos-dockerd
+              echo "==> unit tests (cargo test --lib)"
+              cargo test --release --lib -p pelagos -p pelagos-cri
+              install -m0755 "$CARGO_TARGET_DIR/release/pelagos" \
+                             "$CARGO_TARGET_DIR/release/pelagos-cri" \
+                             "$CARGO_TARGET_DIR/release/pelagos-dockerd" /out/
+              echo "==> done: /out/pelagos /out/pelagos-cri /out/pelagos-dockerd"
+              file /out/pelagos
+              ls -lh /out/
+          resources:
+            requests:
+              cpu: "6"
+              memory: "10Gi"
+            limits:
+              cpu: "7"
+              memory: "14Gi"
+          volumeMounts:
+            - { name: cache,   mountPath: /cache }
+            - { name: output,  mountPath: /out }
+      volumes:
+        - name: cache
+          hostPath: { path: /srv/pelagos-build/cache, type: DirectoryOrCreate }
+        - name: output
+          hostPath: { path: /srv/pelagos-build/out, type: DirectoryOrCreate }
