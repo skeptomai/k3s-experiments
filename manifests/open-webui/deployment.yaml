@@ -4,7 +4,11 @@ metadata:
   name: open-webui
   namespace: open-webui
 spec:
-  replicas: 1
+  # Temporarily 0 -- mid-migration from NFS-backed storage to local-path
+  # (SQLite WAL mode over NFS is a documented-bad combination; see
+  # storage.yaml). Stopped here first to get a consistent snapshot of
+  # webui.db before copying, rather than cloning a live WAL file.
+  replicas: 0
   strategy:
     type: Recreate
   selector:
