@@ -30,7 +30,13 @@ SILENCE_CREATED_BY="aws-build-node.sh"
 # Safety cap, not the expected lifetime -- start always deletes these
 # immediately. This just bounds the damage if start is never called
 # (e.g. the instance gets terminated and rebuilt some other way).
-SILENCE_MAX_DURATION_H=24
+#
+# Was 24h -- too short for how this node is actually used (stopped for
+# days between build sessions, not just overnight). The silence lapsed
+# mid-stop and KubeNodeNotReady/KubeDaemonSetNotFullyReady fired for a
+# full day before anyone noticed (2026-08-25). Raised to a week; still
+# bounded (not infinite) and still cleared immediately on the next start.
+SILENCE_MAX_DURATION_H=168
 
 instance_id() {
     aws ec2 describe-instances --profile "$PROFILE" --region "$REGION" \
