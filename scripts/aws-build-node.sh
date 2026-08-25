@@ -27,16 +27,20 @@ ALERTMANAGER="http://192.168.89.2:9093"
 # regardless of where it's invoked from.
 LAN_JUMP="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 cb@ipc4.taildd208.ts.net"
 SILENCE_CREATED_BY="aws-build-node.sh"
-# Safety cap, not the expected lifetime -- start always deletes these
-# immediately. This just bounds the damage if start is never called
-# (e.g. the instance gets terminated and rebuilt some other way).
-#
-# Was 24h -- too short for how this node is actually used (stopped for
-# days between build sessions, not just overnight). The silence lapsed
-# mid-stop and KubeNodeNotReady/KubeDaemonSetNotFullyReady fired for a
-# full day before anyone noticed (2026-08-25). Raised to a week; still
-# bounded (not infinite) and still cleared immediately on the next start.
-SILENCE_MAX_DURATION_H=168
+# NOT a real expiry -- the thing that should decide "is this node expected
+# to be up" is the stop/start action itself, not a clock. A TTL here is a
+# guess about how long you'll leave it stopped, and any guess is wrong
+# often enough: first tried 24h, it lapsed mid-stop and
+# KubeNodeNotReady/KubeDaemonSetNotFullyReady fired for a full day before
+# anyone noticed (2026-08-25); raising it to a week just moves the same
+# failure mode further out, it doesn't remove it. Alertmanager's API
+# requires *some* endsAt, so this is a far-future placeholder, not a
+# lifetime -- `start` always deletes the silence outright, and `status`
+# below cross-checks silence state against actual instance state so drift
+# (e.g. the instance stopped/started outside this script, or torn down by
+# `terraform destroy` without running `start` first) is visible instead of
+# silent.
+SILENCE_ENDS_AT="2099-12-31T00:00:00Z"
 
 instance_id() {
     aws ec2 describe-instances --profile "$PROFILE" --region "$REGION" \
@@ -59,11 +63,9 @@ instance_id() {
 
 am_post_silence() {
     local matchers_json="$1" comment="$2"
-    local now ends_at payload result
+    local now payload result
     now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    ends_at=$(date -u -v+${SILENCE_MAX_DURATION_H}H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
-        || date -u -d "+${SILENCE_MAX_DURATION_H} hours" +"%Y-%m-%dT%H:%M:%SZ")
-    payload="{\"matchers\": $matchers_json, \"startsAt\": \"$now\", \"endsAt\": \"$ends_at\", \"createdBy\": \"$SILENCE_CREATED_BY\", \"comment\": \"$comment\"}"
+    payload="{\"matchers\": $matchers_json, \"startsAt\": \"$now\", \"endsAt\": \"$SILENCE_ENDS_AT\", \"createdBy\": \"$SILENCE_CREATED_BY\", \"comment\": \"$comment\"}"
     if ! result=$($LAN_JUMP "curl -sf --max-time 10 -X POST '$ALERTMANAGER/api/v2/silences' -H 'Content-Type: application/json' -d '$payload'"); then
         echo "WARNING: could not reach Alertmanager (via ipc4) to create silence ($comment)" >&2
         return 1
@@ -82,14 +84,14 @@ silence_on() {
         "$INSTANCE_NAME intentionally stopped (DaemonSets scheduled on it)") \
         || { echo "  (KubeDaemonSetNotFullyReady silence failed -- continuing anyway)" >&2; }
     if [[ -n "${node_id:-}" || -n "${ds_id:-}" ]]; then
-        echo "  Alerts silenced for up to ${SILENCE_MAX_DURATION_H}h (removed automatically on next 'start')."
+        echo "  Alerts silenced until stopped=false (removed automatically on next 'start')."
     fi
 }
 
 silence_off() {
     local body ids
     if ! body=$($LAN_JUMP "curl -sf --max-time 10 '$ALERTMANAGER/api/v2/silences'"); then
-        echo "  WARNING: could not reach Alertmanager (via ipc4) to remove silences -- they'll self-expire within ${SILENCE_MAX_DURATION_H}h" >&2
+        echo "  WARNING: could not reach Alertmanager (via ipc4) to remove silences -- they will NOT self-expire (endsAt is far-future by design); re-run 'stop' or 'start' once connectivity is back, or check 'status' for drift" >&2
         return 0
     fi
     ids=$(echo "$body" | python3 -c "
@@ -112,7 +114,7 @@ for s in json.load(sys.stdin):
         if $LAN_JUMP "curl -sf --max-time 10 -X DELETE '$ALERTMANAGER/api/v2/silence/$id'" </dev/null >/dev/null; then
             echo "  Removed silence $id"
         else
-            echo "  WARNING: failed to remove silence $id -- it'll self-expire within ${SILENCE_MAX_DURATION_H}h" >&2
+            echo "  WARNING: failed to remove silence $id -- it will NOT self-expire (endsAt is far-future); it'll show up as drift in 'status' until manually cleared" >&2
         fi
     done <<< "$ids"
 }
@@ -141,11 +143,43 @@ case "${1:-status}" in
         silence_on
         ;;
     status)
+        STATE=$(aws ec2 describe-instances --profile "$PROFILE" --region "$REGION" --instance-ids "$ID" \
+            --query 'Reservations[0].Instances[0].State.Name' --output text)
         aws ec2 describe-instances --profile "$PROFILE" --region "$REGION" --instance-ids "$ID" \
             --query 'Reservations[0].Instances[0].[InstanceId,State.Name,InstanceType]' --output table
+
+        # Drift check: does silence state actually match instance state?
+        # This is the real safety net (not a TTL) -- catches the instance
+        # being stopped/started outside this script, or a silence left
+        # behind by a failed 'start' call.
+        SILENCE_COUNT=$($LAN_JUMP "curl -sf --max-time 10 '$ALERTMANAGER/api/v2/silences'" 2>/dev/null \
+            | python3 -c "
+import sys, json
+try:
+    print(sum(1 for s in json.load(sys.stdin) if s.get('createdBy') == '$SILENCE_CREATED_BY' and s['status']['state'] == 'active'))
+except Exception:
+    print(-1)
+" 2>/dev/null)
+        if [[ "$SILENCE_COUNT" == "-1" || -z "$SILENCE_COUNT" ]]; then
+            echo "  (could not check silence state -- Alertmanager unreachable via ipc4)"
+        elif [[ "$STATE" == "stopped" && "$SILENCE_COUNT" -eq 0 ]]; then
+            echo "  DRIFT: instance is stopped but no silence is active -- alerts WILL fire. Run '$0 stop' to re-silence."
+        elif [[ "$STATE" == "running" && "$SILENCE_COUNT" -gt 0 ]]; then
+            echo "  DRIFT: instance is running but $SILENCE_COUNT silence(s) still active -- run '$0 start' to clear them."
+        else
+            echo "  Silence state consistent with instance state ($SILENCE_COUNT active silence(s))."
+        fi
+        ;;
+    unsilence)
+        # Clears silences WITHOUT touching instance state -- for cleaning up
+        # stale/duplicate silences, or as the last step of decommissioning
+        # this node (terraform destroy) so a silence for an instance that
+        # no longer exists doesn't sit active until 2099.
+        echo "=== Clearing silences for $INSTANCE_NAME (instance state untouched) ==="
+        silence_off
         ;;
     *)
-        echo "Usage: $0 <start|stop|status>" >&2
+        echo "Usage: $0 <start|stop|status|unsilence>" >&2
         exit 1
         ;;
 esac
