@@ -23,7 +23,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER="ipc4.taildd208.ts.net"
 source "$REPO_ROOT/scripts/lib/node-roles.sh"
 DEFAULT_NODES=(ipc4 ipc5 ipc6 ipc7 ipc8 ipc9)
-declare -A NODE_IP=([ipc4]="" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
+# ipc4's entry is used both for SSH-jump decisions (see install_node) and,
+# since 2026-08-24, injected into k3s-server.yaml's node-ip placeholder --
+# ipc4's branch in ssh_cmd is keyed on `node == ipc4` directly, not on this
+# map being non-empty, so populating it here doesn't change SSH routing.
+declare -A NODE_IP=([ipc4]="192.168.88.55" [ipc5]="192.168.88.56" [ipc6]="192.168.88.57" [ipc7]="192.168.88.63" [ipc8]="192.168.88.64" [ipc9]="192.168.88.65")
 # Cloud agents have no LAN IP -- reached directly via their own Tailscale
 # MagicDNS name instead of jumping through ipc4. SSH user differs too
 # (cloud images default to a vendor user, e.g. "ubuntu", not "cb").
@@ -91,11 +95,12 @@ install_node() {
     #   - LAN agent (ipc7-9)      -> agent config (node-class=fastest)
     #   - cloud agent             -> cloud agent config (node-class=cloud-arm64)
     if [ "$node" = "$CLUSTER_INIT_NODE" ]; then
-        k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-server.yaml")
+        k3s_config_b64=$(sed -E "s|<NODE_IP>|${NODE_IP[$node]}|" \
+            "$REPO_ROOT/config/k3s-server.yaml" | base64 -w0)
     elif is_server_node "$node"; then
         [[ -n "$SERVER_TOKEN" ]] || { echo "ERROR: server token not fetched for $node" >&2; return 1; }
         # Match either placeholder name (IPC1 on master / SEED on the migration branch).
-        k3s_config_b64=$(sed -E "s|<INJECTED_AT_INSTALL_FROM_[A-Z0-9]+_TOKEN>|${SERVER_TOKEN}|" \
+        k3s_config_b64=$(sed -E "s|<INJECTED_AT_INSTALL_FROM_[A-Z0-9]+_TOKEN>|${SERVER_TOKEN}|; s|<NODE_IP>|${NODE_IP[$node]}|" \
             "$REPO_ROOT/config/k3s-server-join.yaml" | base64 -w0)
     elif [[ -n "${NODE_IP[$node]:-}" ]]; then
         k3s_config_b64=$(base64 -w0 < "$REPO_ROOT/config/k3s-agent.yaml")

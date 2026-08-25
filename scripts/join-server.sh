@@ -46,7 +46,7 @@ echo "--- uninstall any prior k3s/k3s-agent on $node, write server-join config, 
 # Config (token injected) is base64-encoded and passed as an ARGUMENT — do NOT pipe
 # data to `ssh "bash -s" <<HEREDOC`: the heredoc wins stdin, so the pipe gets SIGPIPE.
 CFG_B64=$(grep -vE '^\s*#' "$REPO_ROOT/config/k3s-server-join.yaml" \
-    | sed "s|<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>|${TOKEN}|" | base64 -w0)
+    | sed "s|<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>|${TOKEN}|; s|<NODE_IP>|${NODE_IP[$node]}|" | base64 -w0)
 ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=10 "cb@$node" "set -e
   sudo systemctl is-active pelagos-cri >/dev/null 2>&1 || { echo 'ERROR: pelagos-cri not active — run install-pelagos.sh first'; exit 1; }
   if [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh >/dev/null 2>&1; \

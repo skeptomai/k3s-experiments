@@ -19,6 +19,11 @@ disable:
   - network-policy    # Cilium enforces NetworkPolicy; disable k3s built-in controller
 server: "https://192.168.88.58:6443"   # kube-vip VIP (HA endpoint — NOT a single node)
 token: "<INJECTED_AT_INSTALL_FROM_SEED_TOKEN>"
+# Pin etcd/kubelet to the LAN IPv4 address explicitly -- see the matching
+# comment in k3s-server.yaml (root cause: k3s's auto-detected primary
+# address is non-deterministic on a dual-stack interface across a reboot;
+# confirmed on ipc6 2026-08-24). Injected per-node from install-pelagos.sh.
+node-ip: "<NODE_IP>"
 # Include the kube-vip control-plane VIP in the apiserver serving cert SAN.
 tls-san:
   - "192.168.88.58"

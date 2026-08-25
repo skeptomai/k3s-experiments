@@ -9,6 +9,15 @@ disable:
 # Initialize the embedded-etcd datastore (HA control plane with ipc5/ipc6).
 # This member is the cluster-init seed (ipc4); ipc5/ipc6 join as additional servers.
 cluster-init: true
+# Pin etcd/kubelet to the LAN IPv4 address explicitly. Without this, k3s
+# auto-detects the node's primary address, which is non-deterministic on a
+# dual-stack interface (LAN IPv4 + SLAAC global IPv6) -- confirmed the hard
+# way on ipc6 (2026-08-24): after a physical reboot it auto-selected its
+# IPv6 address for etcd's listen-peer/client-urls, leaving no IPv4 listener
+# at all, so every other node's "connect to 192.168.88.57:2379" got
+# Connection refused and ipc6 spun forever in etcd's raft PreVote phase.
+# Injected per-node from scripts/install-pelagos.sh's NODE_IP map.
+node-ip: "<NODE_IP>"
 # Include the kube-vip control-plane VIP in the apiserver serving cert SAN so
 # kubeconfigs can target https://192.168.88.58:6443 (HA endpoint).
 tls-san:
