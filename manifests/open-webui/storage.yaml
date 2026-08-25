@@ -1,3 +1,13 @@
+# Migrated off NFS 2026-08-24: open-webui's SQLite DB runs in WAL mode
+# (webui.db-shm/-wal), and SQLite's own docs warn against WAL on network
+# filesystems -- NFS's locking semantics made admin-panel queries (heavier
+# than normal chat traffic) slow and sometimes hang. local-path is
+# node-local disk, so it's node-pinned (fine for this single-replica
+# deployment, which was already effectively pinned by the PV anyway).
+# Data copied via a one-off migration pod (rsync) while the deployment was
+# scaled to 0 for a consistent snapshot; old NFS PVC (open-webui-data, now
+# unused) left in place temporarily as a rollback safety net -- delete once
+# the new storage is confirmed stable for a while.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,6 +17,19 @@ spec:
   accessModes:
     - ReadWriteOnce
   storageClassName: nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: open-webui-data-local
+  namespace: open-webui
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
   resources:
     requests:
       storage: 20Gi
