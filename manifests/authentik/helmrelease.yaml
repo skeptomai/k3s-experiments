@@ -84,9 +84,16 @@ spec:
       # server/worker during a mass reschedule (e.g. the nightly uncordon
       # burst); both piled onto ipc4 (2026-08-21 incident). Values per the
       # chart's own suggested defaults.
+      #
+      # 512Mi turned out too tight: idle RSS alone sat at ~455Mi (89% of the
+      # limit), so any burst during a real OIDC login flow (token exchange +
+      # JWT signing + rendering) tipped it over -- observed 4x OOMKill in a
+      # few hours 2026-08-24, each restart causing a real user-visible
+      # failure ("login page doesn't load") for whichever request landed
+      # during the ~10-20s restart window. Doubled for headroom.
       resources:
-        requests: {cpu: 100m, memory: 512Mi}
-        limits: {cpu: 500m, memory: 512Mi}
+        requests: {cpu: 100m, memory: 1Gi}
+        limits: {cpu: 500m, memory: 1Gi}
       service:
         annotations:
           # Tailnet exposure, same proven Service-mode pattern as
