@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # descheduler-alert.sh
 #
-# Reminder to review the descheduler's dry-run logs each morning. It runs at
-# 05:10 America/Los_Angeles, right after morning-on.sh's uncordon burst --
-# see manifests/descheduler/helmrelease.yaml and
+# Nightly summary of what the descheduler actually did. It runs at 05:10
+# America/Los_Angeles, right after morning-on.sh's uncordon burst -- see
+# manifests/descheduler/helmrelease.yaml and
 # docs/ipc4-pod-pileup-postmortem.md for why it exists. Pulls the most
 # recent Job's pod logs, counts eviction-related lines, and sends a Pushover
 # summary so there's actually something to act on rather than a blind
 # "go check" ping.
 #
-# Deliberately stays a reminder, not automation: flipping dry-run off is a
-# manual decision (dry-run: false in manifests/descheduler/helmrelease.yaml,
-# after actually agreeing with what it would have evicted), not something
-# this script does on its own.
+# Originally a dry-run review reminder (watch what it *would* evict before
+# flipping dry-run off). That decision was made 2026-08-22 (dry-run: false
+# in manifests/descheduler/helmrelease.yaml, confirmed live in the
+# cluster) -- this now reports real eviction activity, not a proposal to
+# review. Rewritten 2026-08-26 after the original dry-run-era wording kept
+# firing daily well past the point it made sense, causing confusion
+# ("why am I still getting dry-run alerts?").
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,14 +43,13 @@ EVICT_LINES=$(echo "$LOGS" | grep -i "evict" || true)
 COUNT=$(printf '%s\n' "$EVICT_LINES" | grep -c . || true)
 
 if [[ "$COUNT" -eq 0 ]]; then
-    SUMMARY="No eviction-related log lines found -- cluster looked balanced to it this morning."
+    SUMMARY="No evictions logged -- cluster was already balanced this morning."
 else
-    SUMMARY="$COUNT eviction-related line(s) logged. Sample:
+    SUMMARY="$COUNT eviction(s) logged. Sample:
 $(printf '%s\n' "$EVICT_LINES" | head -5)"
 fi
 
-"$PUSHOVER" "descheduler: review dry-run logs ($JOB)" \
+"$PUSHOVER" "descheduler: nightly run ($JOB)" \
     "$SUMMARY
 
-Full logs: kubectl logs -n descheduler -l job-name=$JOB --tail=200
-When satisfied, flip dry-run: false in manifests/descheduler/helmrelease.yaml"
+Full logs: kubectl logs -n descheduler -l job-name=$JOB --tail=200"
