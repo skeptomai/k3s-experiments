@@ -71,7 +71,19 @@ echo "==> Recycling SPIRE agent pods to force fresh bootstrap bundle fetch..."
 # init container (which fetches the trust bundle) only runs once per pod creation.
 # After one or more CA rotations, the stale bootstrap bundle causes TLS handshake
 # failure on reconnect. Deleting pods here is cheap: init container takes <30s.
-kubectl delete pods -n spire -l app=spire-agent --ignore-not-found
+#
+# --wait=false is required, not optional: `kubectl delete` blocks by default
+# until the pod is confirmed gone, and the spire-agent DaemonSet pod on
+# aws-graviton-build (stopped between build sessions) can NEVER confirm
+# termination -- its kubelet is unreachable while the node is off. Without
+# this flag the delete hung forever every morning the AWS node was stopped,
+# leaving the whole script (and its --rm container on nazgul) stuck
+# indefinitely -- discovered 2026-08-28 as 4 days' worth of never-exited
+# morning-on.sh containers piled up on nazgul. The SPIRE_READY retry loop
+# below already handles partial availability correctly (a stopped AWS node
+# means 5/6, not 6/6, which is expected and already produces a warning, not
+# a hard failure) -- deleting async here doesn't change that behavior at all.
+kubectl delete pods -n spire -l app=spire-agent --ignore-not-found --wait=false
 echo "    Waiting for SPIRE agents to re-attest..."
 # Bounded retry instead of one fixed sleep+check: ipc8/ipc9 use Infineon SLB9672
 # TPMs, which have been observed taking up to ~70s for CreatePrimary during
