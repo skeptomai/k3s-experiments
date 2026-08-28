@@ -8,6 +8,7 @@ the same library Open WebUI's own web_search tool already uses
 service instead of an Open WebUI-internal tool.
 """
 import json
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -42,17 +43,34 @@ class Handler(BaseHTTPRequestHandler):
             return
         max_results = min(int(qs.get("max_results", ["5"])[0]), 10)
 
-        try:
-            results = DDGS().text(query, max_results=max_results)
-            self._json(200, {
-                "query": query,
-                "results": [
-                    {"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")}
-                    for r in results
-                ],
-            })
-        except Exception as exc:
-            self._json(502, {"error": str(exc)})
+        # ddgs rotates across backends internally and sometimes *raises*
+        # (rather than returning []) when the backend it happened to pick
+        # is transiently flaky/rate-limited -- observed directly: the same
+        # query that raised "No results found." here succeeded immediately
+        # after with a fresh DDGS() instance run by hand. One retry with a
+        # fresh instance (it re-picks a backend/user-agent) absorbs that
+        # instead of surfacing a transient hiccup as a hard failure.
+        last_exc = None
+        for attempt in range(2):
+            try:
+                results = DDGS().text(query, max_results=max_results)
+                self._json(200, {
+                    "query": query,
+                    "results": [
+                        {"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")}
+                        for r in results
+                    ],
+                })
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt == 0:
+                    time.sleep(1)
+        # Distinct from a genuine zero-result search (200, empty results
+        # list) so callers -- gptel's web_search tool included -- can tell
+        # "the web really has nothing" apart from "the backend failed twice
+        # in a row" instead of collapsing both into one generic message.
+        self._json(502, {"error": str(last_exc)})
 
 
 if __name__ == "__main__":
