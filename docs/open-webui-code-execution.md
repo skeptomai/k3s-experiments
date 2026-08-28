@@ -168,6 +168,72 @@ isolation doesn't guarantee the live app is constructing the same
 request; verify via the DB's persisted `history.messages[].output` field,
 not just user-visible symptoms, when this class of bug recurs.)
 
+## Fix 7: broadened read-only cluster access (`k8s_explore`)
+
+`cluster_health` answers one fixed question. For genuine open-ended
+exploration ("why is this pod pending", "what deployments exist in
+namespace X"), added a second Tool, `k8s_explore`
+(`manifests/open-webui/tools/k8s_explore.py`), with three functions:
+
+- `k8s_get(resource, namespace, name, label_selector)` -- list or get any
+  resource in an explicit allowlist (`RESOURCE_MAP` in the file: nodes,
+  pods, services, endpoints, configmaps, events, namespaces, PVCs, RCs,
+  deployments, replicasets, daemonsets, statefulsets, jobs, cronjobs).
+- `k8s_describe(resource, name, namespace)` -- one object's status plus
+  its recent related Events, which are usually the actual answer to "why
+  is X pending/failing" and are deliberately surfaced *before* the raw
+  spec dump so they survive the `MAX_OUTPUT_CHARS` truncation (a pod with
+  many `volumeMounts` was observed pushing events past the truncation
+  point before this ordering fix).
+- `k8s_logs(pod_name, namespace, container, tail_lines)` -- recent log
+  tail only; not exec, no interactivity.
+
+**Design decision (2026-08-28):** considered MCP (open-webui has native
+support since v0.6.31) and a Jupyter-side `kubectl` install, rejected
+both -- MCP K8s server projects in this space are mostly immature
+single-maintainer efforts, and giving Jupyter cluster credentials would
+undo its deliberate isolation (`automountServiceAccountToken: false`,
+see Fix 4). Extending the already-proven Tool pattern was simpler and
+kept the trust boundary in one place. Mutating actions (restarts,
+deletes, applies) deliberately stay out of open-webui entirely and
+remain in gptel/Claude Code, which has a stronger trust boundary (a
+human physically present, SSH under the user's own key) than a chat
+session reachable via Funnel.
+
+**RBAC broadened accordingly** (`manifests/open-webui/rbac.yaml`, still
+`get`/`list`/`watch` only) to cover the resources above. Two things are
+permanently excluded and called out in the manifest's own comments:
+`secrets` (any verb -- read-only RBAC on other resources still doesn't
+protect secret *values*) and `pods/exec`/`pods/attach`/`pods/portforward`
+(interactive execution is a different risk class than reading state).
+`k8s_explore.py` also enforces its own `RESOURCE_MAP` allowlist in code,
+independent of RBAC, as defense-in-depth -- if RBAC is ever accidentally
+broadened later, the tool still refuses anything not on its own list.
+
+**Gotcha hit while deploying this:** `manifests/open-webui/` is
+Flux-managed straight from GitHub (see repo `CLAUDE.md`). A `kubectl
+apply -f manifests/open-webui/rbac.yaml` run manually against the live
+cluster *appeared* to succeed, but Flux's next reconcile silently
+reverted it back to whatever was last committed, since the broadened
+version hadn't been pushed yet -- caught by `kubectl auth can-i list
+deployments --as=system:serviceaccount:open-webui:open-webui` returning
+`no` even after the manual apply. **Lesson: for anything under Flux's
+management paths, the fix isn't real until it's committed and pushed,
+full stop** -- a live `kubectl apply` there is at best a temporary,
+Flux-will-undo-it test, never the actual deployment step.
+
+`scripts/open-webui-setup-tools.sh` was also refactored this round: the
+three separate SSH round-trips (Jupyter config, tool registration, model
+params) became one JSON payload built locally and piped through a single
+remote `python3 -c` invocation, ending in one pod restart. Hit and fixed
+a real bash-quoting bug along the way: a literal apostrophe *anywhere*
+inside the outer bash single-quoted `ssh ... '...'` block -- including
+inside an English comment ("open-webui's own...") or Python f-string
+dict-key syntax (`tool['id']`) -- prematurely terminates the outer bash
+string regardless of the inner language's own quoting rules. Fixed by
+rewording comments to avoid contractions and replacing f-string dict-key
+access with pre-extracted plain variables before printing.
+
 ## Known remaining gap: no default-on toggle for Code Interpreter
 
 Unlike Tools (`model.meta.toolIds`, a real default-attachment mechanism),

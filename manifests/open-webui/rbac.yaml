@@ -1,7 +1,21 @@
-# Read-only cluster access for the "cluster_health" Tool (config.el-equivalent
-# for open-webui -- see the Tool registration script). Scoped to exactly
-# get/list/watch on nodes and pods, cluster-wide (node health/temps and pod
-# status aren't namespaced concepts) -- no write verbs, no other resources.
+# Read-only cluster access for open-webui's Tools (cluster_health, k8s_explore
+# -- see manifests/open-webui/tools/ and the Tool registration script). Backs
+# genuine exploratory read access, not just the fixed health check, per the
+# 2026-08-28 architecture decision: broadened read scope stays in this Tool
+# (same trust boundary, RBAC-scoped, no Secrets/exec/mutations ever), while
+# anything requiring mutation or judgment (restarts, deletes, applies) stays
+# in gptel/Claude Code, which has a stronger trust boundary (human present,
+# SSH under the user's own key) than a chat session reachable via Funnel.
+#
+# Deliberately excluded, permanently -- do not add these:
+#   - "secrets" (any verb) -- read-only RBAC on other resources still doesn't
+#     protect secret *values*; the only safe rule is no access at all.
+#   - "pods/exec", "pods/attach", "pods/portforward" -- interactive command
+#     execution inside a container is a fundamentally different risk class
+#     from reading object state; never grant these to this ServiceAccount.
+#   - any verb other than get/list/watch, on anything, ever. If a mutation
+#     is ever genuinely needed here, that's a deliberate architecture change
+#     with its own review, not an incremental addition to this file.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -14,7 +28,29 @@ metadata:
   name: open-webui-cluster-health-reader
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "pods"]
+    resources:
+      - nodes
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - events
+      - namespaces
+      - persistentvolumeclaims
+      - replicationcontrollers
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
