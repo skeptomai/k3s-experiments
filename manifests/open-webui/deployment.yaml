@@ -15,12 +15,34 @@ spec:
       labels:
         app: open-webui
     spec:
+      # Read-only node/pod access for the cluster_health Tool (rbac.yaml) --
+      # was implicitly running as the "default" SA (token mounted, but zero
+      # RBAC bound to it, so any k8s API call from a Tool would 403) before
+      # this was made explicit.
+      serviceAccountName: open-webui
       containers:
         - name: open-webui
           image: ghcr.io/open-webui/open-webui:main
           ports:
             - containerPort: 8080
           env:
+            # Without this, open-webui auto-generates a random secret and
+            # writes it to /app/backend/.webui_secret_key -- OUTSIDE the PVC
+            # mount (/app/backend/data), so it lives on the ephemeral
+            # container filesystem. Every new pod (any rollout restart, any
+            # deployment change) got a fresh random key, instantly
+            # invalidating every existing session regardless of the 4-week
+            # JWT expiry -- confirmed as the actual cause of sessions
+            # "expiring" in minutes 2026-08-28. open-webui-secret-key
+            # created once, out-of-band, not in git (same pattern as
+            # open-webui-admin/open-webui-oidc):
+            #   kubectl create secret generic open-webui-secret-key \
+            #     -n open-webui --from-literal=key=$(openssl rand -base64 24)
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-secret-key
+                  key: key
             # spark-0d93's tailnet IP — stable (unlike the dynamic Pelagos
             # bridge IPs we chased earlier), reachable from cluster pods
             # (confirmed via a one-off curl pod before writing this).
