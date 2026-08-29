@@ -42,8 +42,22 @@ curl -s -G "$PROM/api/v1/query" \
   | sort
 
 echo
+echo "Spark (spark-0d93) temps:"
+# Spark's hwmon collector is disabled (see scripts/spark-node-monitoring/README.md
+# -- it blocked HTTP responses for 15s+ on this hardware), so its CPU/NVMe
+# temps come from a different metric (spark_thermal_celsius, textfile-collector
+# based) than the ipc nodes' CPU temps above -- not the same query with a
+# different label, genuinely a different metric name.
+cpu_temp=$(curl -s -G "$PROM/api/v1/query" \
+  --data-urlencode 'query=spark_thermal_celsius{chip="acpitz-acpi-0"}' \
+  | jq -r '.data.result[0].value[1] // empty')
+[ -n "$cpu_temp" ] && echo "  CPU: $(printf '%.0f' "$cpu_temp")°C"
+
 gpu_temp=$(curl -s -G "$PROM/api/v1/query" --data-urlencode 'query=spark_gpu_temperature_celsius' \
   | jq -r '.data.result[0].value[1] // empty')
-if [ -n "$gpu_temp" ]; then
-  echo "Spark GPU temp: $(printf '%.0f' "$gpu_temp")°C"
-fi
+[ -n "$gpu_temp" ] && echo "  GPU: $(printf '%.0f' "$gpu_temp")°C"
+
+nvme_temp=$(curl -s -G "$PROM/api/v1/query" \
+  --data-urlencode 'query=spark_thermal_celsius{chip="nvme-pci-40100",sensor="Composite"}' \
+  | jq -r '.data.result[0].value[1] // empty')
+[ -n "$nvme_temp" ] && echo "  NVMe: $(printf '%.0f' "$nvme_temp")°C"
