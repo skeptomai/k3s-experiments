@@ -1,0 +1,9 @@
+[Unit]
+Description=Run gpu-xid-exporter every 30s
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=30s
+
+[Install]
+WantedBy=timers.target

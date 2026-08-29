@@ -1,0 +1,6 @@
+[Unit]
+Description=Write GPU Xid error counts to node_exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gpu-xid-exporter.sh

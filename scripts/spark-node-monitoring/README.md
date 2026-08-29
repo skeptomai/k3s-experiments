@@ -21,11 +21,25 @@ timers, writing to node_exporter's textfile collector.
 | `node_exporter.service` | `/etc/systemd/system/node_exporter.service` |
 | `gpu-temp-exporter.sh` | `/usr/local/bin/gpu-temp-exporter.sh` |
 | `gpu-temp-exporter.service` / `.timer` | `/etc/systemd/system/` |
+| `gpu-xid-exporter.sh` | `/usr/local/bin/gpu-xid-exporter.sh` |
+| `gpu-xid-exporter.service` / `.timer` | `/etc/systemd/system/` |
 | `spark-thermal-exporter.sh` | `/usr/local/bin/spark-thermal-exporter.sh` |
 | `spark-thermal-exporter.service` / `.timer` | `/etc/systemd/system/` |
 | `disable-eee.service` | `/etc/systemd/system/disable-eee.service` |
 | `wifi-powersave-off.conf` | `/etc/NetworkManager/conf.d/wifi-powersave-off.conf` |
 | `vllm-nemotron.service` | `/etc/systemd/system/vllm-nemotron.service` |
+
+### `gpu-xid-exporter.sh` / `.service` / `.timer`
+
+Added 2026-08-29 after a GPU driver fault (NVIDIA Xid 13, see
+`docs/spark-vllm-xid13-postmortem.md`) silently crashed vLLM's engine with
+no alerting anywhere to catch it. Counts Xid occurrences from the current
+boot's kernel ring buffer (`journalctl -k -b 0`), exposed as
+`spark_gpu_xid_errors_total{xid="N"}` (a counter, one series per distinct
+Xid code seen). Alerting lives in the `home-monitoring` repo
+(`pelagos/config/prometheus/rules/alerts.yml`, `SparkGPUXidError`) and fires
+on any `increase()` — unlike temperature, there's no "elevated but fine"
+tier for a Xid, any occurrence is a real fault worth paging on.
 
 ### `vllm-nemotron.service`
 
@@ -86,7 +100,7 @@ sudo mkdir -p /var/lib/node_exporter/textfile_collector
 sudo chown -R node_exporter:node_exporter /var/lib/node_exporter
 # copy all files above to their target paths, chmod +x the two .sh scripts
 sudo systemctl daemon-reload
-sudo systemctl enable --now node_exporter gpu-temp-exporter.timer spark-thermal-exporter.timer disable-eee.service
+sudo systemctl enable --now node_exporter gpu-temp-exporter.timer gpu-xid-exporter.timer spark-thermal-exporter.timer disable-eee.service
 sudo nmcli connection reload
 ```
 
@@ -114,6 +128,7 @@ sudo nmcli connection reload
 ## See also
 
 - [k3s-experiments#16](https://github.com/skeptomai/k3s-experiments/issues/16) — full narrative: Pelagos GPU passthrough, vLLM/NVFP4 deployment, this monitoring work
+- `docs/spark-vllm-xid13-postmortem.md` — the 2026-08-28 Xid 13 incident that motivated the Xid exporter/alert
 - `home-monitoring/pelagos/config/prometheus/prometheus.yml` — `spark_node_exporter` scrape job
-- `home-monitoring/pelagos/config/prometheus/rules/alerts.yml` — `spark.thermal` alert group
+- `home-monitoring/pelagos/config/prometheus/rules/alerts.yml` — `spark.thermal` alert group (temps + `SparkGPUXidError`)
 - `home-monitoring/pelagos/config/grafana/provisioning/dashboards/node-temperatures.json` — spark panels
