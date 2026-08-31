@@ -41,6 +41,12 @@ Xid code seen). Alerting lives in the `home-monitoring` repo
 on any `increase()` — unlike temperature, there's no "elevated but fine"
 tier for a Xid, any occurrence is a real fault worth paging on.
 
+Also exposes `spark_gpu_xid_last_seen_timestamp_seconds{xid="N"}` (a gauge,
+added 2026-08-31) — the counter alone can't distinguish an ongoing problem
+from a one-off days in the past, so `scripts/spark-health.sh` uses this to
+report elapsed time since each Xid's last occurrence instead of just the
+raw since-boot count.
+
 ### `vllm-nemotron.service`
 
 Runs the Nemotron-3-Super-120B-A12B-NVFP4 vLLM server under Pelagos

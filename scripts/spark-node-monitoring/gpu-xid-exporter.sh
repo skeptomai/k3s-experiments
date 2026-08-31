@@ -24,5 +24,21 @@ TMP="${OUT}.$$"
     | grep -oE '[0-9]+$' \
     | sort -n | uniq -c \
     | awk '{printf "spark_gpu_xid_errors_total{xid=\"%s\"} %s\n", $2, $1}'
+
+  # A monotonic since-boot count alone can't say whether a fault is
+  # ongoing or a one-off from days ago -- also expose *when* each Xid was
+  # last seen, so callers can compute elapsed time and judge current
+  # health instead of just "has this ever happened since boot".
+  echo '# HELP spark_gpu_xid_last_seen_timestamp_seconds Unix timestamp of the most recent NVIDIA Xid kernel error since boot, by Xid code'
+  echo '# TYPE spark_gpu_xid_last_seen_timestamp_seconds gauge'
+  journalctl -k -b 0 --no-pager -o short-iso 2>/dev/null \
+    | grep -E 'NVRM: Xid \(PCI:[^)]+\): [0-9]+' \
+    | while IFS= read -r line; do
+        ts="${line%% *}"
+        xid=$(grep -oE 'NVRM: Xid \(PCI:[^)]+\): [0-9]+' <<<"$line" | grep -oE '[0-9]+$')
+        epoch=$(date -d "$ts" +%s 2>/dev/null) || continue
+        printf '%s %s\n' "$xid" "$epoch"
+      done \
+    | awk '{last[$1]=$2} END {for (x in last) printf "spark_gpu_xid_last_seen_timestamp_seconds{xid=\"%s\"} %s\n", x, last[x]}'
 } > "$TMP"
 mv "$TMP" "$OUT"
