@@ -21,6 +21,10 @@ q() {
   curl -s -G "$PROM/api/v1/query" --data-urlencode "query=$1" | jq -r '.data.result[0].value[1] // empty'
 }
 
+q1() {
+  curl -s -G "$PROM/api/v1/query" --data-urlencode "query=$1"
+}
+
 up=$(q "up{job=\"$JOB\"}")
 
 if [ "$up" != "1" ]; then
@@ -47,11 +51,9 @@ nvme_temp=$(q 'spark_thermal_celsius{chip="nvme-pci-40100",sensor="Composite"}')
 
 echo
 echo "GPU Xid faults (a nonzero count just means one happened at some point since boot; elapsed time since the last occurrence is the better \"is it healthy right now\" signal -- see docs/spark-vllm-xid13-postmortem.md for the known 2026-08-28 Xid 13 incident):"
-counts=$(curl -s -G "$PROM/api/v1/query" --data-urlencode 'query=spark_gpu_xid_errors_total' \
-  | jq -r '.data.result[] | .metric.xid + " " + .value[1]')
+counts=$(q1 'spark_gpu_xid_errors_total' | jq -r '.data.result[] | .metric.xid + " " + .value[1]')
 if [ -n "$counts" ]; then
-  elapsed=$(curl -s -G "$PROM/api/v1/query" \
-    --data-urlencode 'query=(time() - spark_gpu_xid_last_seen_timestamp_seconds)/3600' \
+  elapsed=$(q1 '(time() - spark_gpu_xid_last_seen_timestamp_seconds)/3600' \
     | jq -r '.data.result[] | .metric.xid + " " + .value[1]')
   join -j1 <(echo "$counts" | sort) <(echo "$elapsed" | sort) \
     | awk '{printf "  Xid %s: %s occurrence(s) since boot, last seen %.1f hours ago\n", $1, $2, $3}'

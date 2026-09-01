@@ -46,7 +46,9 @@ Each of these is an independent point of failure:
   `install-node-monitoring.sh`, `install-nut-clients.sh`,
   `install-pelagos-local-build.sh`, `install-pelagos.sh`, `upgrade-agents.sh`,
   `upgrade-server.sh`, `cluster-scheduler/shutdown-cluster.sh`
-- `dotfiles/scripts/check-temps.sh` — a **third, cross-repo** copy of the same mapping
+- ~~`dotfiles/scripts/check-temps.sh` — a **third, cross-repo** copy of the same mapping~~
+  resolved 2026-08-31: trimmed to `check-nazgul-temps.sh`, nazgul only, no ipc4-9
+  IP mapping left in it (that half moved to `cluster-health.sh`'s Prometheus queries)
 - `scripts/cluster-kasa-outlet.py` + its duplicate under `cluster-scheduler/` —
   name→Kasa-outlet-label dict
 - Hardcoded `-J cb@ipc4.taildd208.ts.net` bastion strings in ~20 scripts (ipc4
