@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homelab-rag
+  namespace: homelab-rag
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: homelab-rag
+  template:
+    metadata:
+      labels:
+        app: homelab-rag
+    spec:
+      # Stateless, no k8s API access needed (same as manifests/web-search).
+      automountServiceAccountToken: false
+      containers:
+        - name: homelab-rag
+          image: 192.168.89.2:5004/homelab-rag:latest
+          ports:
+            - containerPort: 8080
+          env:
+            # Secret created once, out-of-band, not in git - see
+            # scripts/homelab-rag-image/README.md.
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-rag-secrets
+                  key: openai-api-key
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-rag-secrets
+                  key: postgres-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30

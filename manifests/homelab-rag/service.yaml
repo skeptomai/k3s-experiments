@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: homelab-rag
+  namespace: homelab-rag
+  annotations:
+    # Tailnet exposure, same proven Service-mode pattern as
+    # manifests/web-search, manifests/gruesome, manifests/jupyter,
+    # manifests/open-webui, manifests/postgres-pgvector.
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "homelab-rag"
+spec:
+  selector:
+    app: homelab-rag
+  ports:
+    - port: 80
+      targetPort: 8080
