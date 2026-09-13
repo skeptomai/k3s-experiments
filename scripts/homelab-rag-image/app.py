@@ -38,7 +38,12 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
 
-VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://spark-0d93.taildd208.ts.net:8000/v1")
+# Reached via the Tailscale operator's egress pattern (an ExternalName
+# Service annotated tailscale.com/tailnet-fqdn, see
+# manifests/homelab-rag/spark-egress.yaml) - a plain cluster pod has no
+# outbound tailnet route to a tailnet-only host otherwise (confirmed: DNS
+# resolution for the tailnet hostname fails outright without this).
+VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://spark-0d93.homelab-rag.svc.cluster.local:8000/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4")
 VLLM_API_KEY = os.getenv("VLLM_API_KEY", "not-needed")
 

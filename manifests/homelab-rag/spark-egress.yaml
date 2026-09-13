@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-0d93
+  namespace: homelab-rag
+  annotations:
+    # Tailscale egress: lets pods in this namespace reach the Spark (a
+    # tailnet-only host outside the cluster) via normal cluster DNS
+    # (spark-0d93.homelab-rag.svc.cluster.local) instead of needing outbound
+    # tailnet routing themselves - the inbound "expose" annotation used
+    # elsewhere (postgres-pgvector, homelab-rag itself) is the opposite
+    # direction and doesn't grant this.
+    tailscale.com/tailnet-fqdn: "spark-0d93.taildd208.ts.net"
+spec:
+  externalName: "placeholder"
+  type: ExternalName
