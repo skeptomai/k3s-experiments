@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pgvector-data
+  namespace: postgres-pgvector
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # local-path, not the cluster's nfs default (see manifests/jupyter) --
+  # NFS's file-locking semantics are a documented poor fit for Postgres's
+  # data directory/WAL. local-path is node-local, which is fine here since
+  # this runs as a single, non-migrating replica.
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-pgvector
+  namespace: postgres-pgvector
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres-pgvector
+  template:
+    metadata:
+      labels:
+        app: postgres-pgvector
+    spec:
+      # Same collision class as manifests/jupyter's enableServiceLinks
+      # comment: Kubernetes auto-injects <SERVICE>_PORT env vars for every
+      # Service in the namespace, which for a Service named
+      # "postgres-pgvector" would collide with nothing Postgres itself
+      # reads today, but this is cheap defensive insurance against a
+      # future rename colliding with a real Postgres env var (e.g. PGPORT).
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 999 # postgres image runs as uid/gid 999
+      containers:
+        - name: postgres-pgvector
+          image: pgvector/pgvector:pg17
+          ports:
+            - containerPort: 5432
+          env:
+            # Secret created once, out-of-band, not in git (same pattern as
+            # manifests/jupyter's jupyter-token and
+            # manifests/open-webui/bootstrap-admin.yaml):
+            #   kubectl create secret generic postgres-pgvector-password \
+            #     -n postgres-pgvector --from-literal=password=<random>
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-pgvector-password
+                  key: password
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-pgvector-data

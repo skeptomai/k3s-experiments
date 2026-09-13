@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-pgvector
+  namespace: postgres-pgvector
+  annotations:
+    # Service-mode tailnet exposure -> postgres-pgvector.taildd208.ts.net,
+    # same proven pattern as manifests/gruesome, manifests/jupyter,
+    # manifests/open-webui, manifests/web-search - all HTTP there, but the
+    # Tailscale k8s operator proxies whatever port is declared below, not
+    # just port 80. Auth is Postgres's own password (see deployment.yaml),
+    # same security model as jupyter's JUPYTER_TOKEN over an open Service.
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "postgres-pgvector"
+spec:
+  selector:
+    app: postgres-pgvector
+  ports:
+    - port: 5432
+      targetPort: 5432
