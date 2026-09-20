@@ -56,6 +56,50 @@ and post-install steps to rejoin the ipc node to k3s as a worker.
 
 ---
 
+## Secrets Management (External Secrets Operator + 1Password)
+
+**Status**: Proposed 2026-09-20, not started — deliberately deferred, not a small
+change. Triggered by a real incident: the `homelab-rag-secrets` Secret's
+`openai-api-key` went stale when the key was rotated in 1Password, silently breaking
+the `homelab-rag` service (HTTP 401 from OpenAI on every query) with no signal until
+someone actually read a response body — see
+[`orgfiles/home-network/homelab-rag.md`](../../orgfiles/home-network/homelab-rag.md)
+("Known issues") for the full incident writeup.
+
+**Problem**: every secret in this repo follows the same pattern — created once via a
+bare `kubectl create secret` command, documented only as a comment in the owning
+manifest, deliberately never committed to git (jupyter-token, open-webui's
+bootstrap-admin, `authentik-secrets`, `authentik-postgresql`, `homelab-rag-secrets`,
+`postgres-pgvector-password`, tailscale-operator's OAuth client, ...). This is
+consistent and intentional (secrets don't belong in git), but it means **nothing
+propagates a rotation** — if the underlying credential changes anywhere else (1Password,
+an upstream API), the in-cluster Secret silently goes stale until something fails.
+
+**Why not just SOPS-encrypted secrets in git**: that only solves "secret material isn't
+plaintext in git," not the actual failure mode above — a SOPS-encrypted Secret still
+needs a human to notice the rotation and manually re-encrypt + commit. Doesn't fix
+anything.
+
+**Proposed fix**: [External Secrets Operator](https://external-secrets.io/), backed by
+a 1Password provider (Connect server or the 1Password SDK provider) — 1Password is
+already the de facto source of truth for every credential in this homelab (Admin
+Forgejo, Authentik automation token, OpenAI key, etc.). Git would declare *which*
+1Password item/field backs each k8s Secret (an `ExternalSecret` resource, fully
+GitOps-managed, safe to commit — it's just a reference, not a value); ESO polls
+1Password and keeps the real Secret in sync automatically. Pair with
+[Reloader](https://github.com/stakater/Reloader) (annotate the Deployment, no per-app
+code needed) to auto-restart pods when their Secret's content actually changes, closing
+the loop end-to-end: rotate in 1Password → propagates to the cluster → pod picks it up,
+no manual step anywhere.
+
+**Scope**: touches every out-of-band secret listed above, not just one — a real
+migration, not a one-file fix. **Suggested approach when picked up**: pilot on
+`homelab-rag-secrets` alone first (smallest blast radius, and it's the one that already
+broke once), confirm the ESO+1Password+Reloader loop actually works end-to-end, then
+roll the pattern out to the rest.
+
+---
+
 ## Ideas / Future Experiments
 
 - **Enforcing CNI (Cilium or Calico)** — flannel+wireguard-native does not enforce
