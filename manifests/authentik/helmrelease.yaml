@@ -65,6 +65,7 @@ spec:
       configMaps:
         - authentik-blueprint-open-webui
         - authentik-blueprint-google-source
+        - authentik-blueprint-forgejo
     postgresql:
       enabled: true
       auth:
