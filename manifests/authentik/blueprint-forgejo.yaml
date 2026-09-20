@@ -17,10 +17,24 @@ data:
   #   TOKEN=$(op item get "Authentik (k3s cluster)" --fields "api-token" --reveal)
   #   curl http://authentik.taildd208.ts.net/api/v3/providers/oauth2/?name=Forgejo \
   #     -H "Authorization: Bearer $TOKEN" | jq '.results[0] | {client_id, client_secret}'
-  #   ssh -i ~/.ssh/Omen root@nazgul.taildd208.ts.net pelagos exec forgejo-forgejo \
+  #   ssh -i ~/.ssh/Omen root@nazgul.taildd208.ts.net pelagos exec -u 1000:1000 forgejo-forgejo \
   #     forgejo admin auth add-oauth --name authentik --provider openidConnect \
   #     --key <client_id> --secret <client_secret> \
-  #     --auto-discover-url http://authentik.taildd208.ts.net/application/o/forgejo/.well-known/openid-configuration
+  #     --auto-discover-url https://authentik-public-ingress.taildd208.ts.net/application/o/forgejo/.well-known/openid-configuration
+  #
+  # Discovery/auto-discover-url MUST be the Funnel hostname
+  # (authentik-public-ingress.taildd208.ts.net), not authentik.taildd208.ts.net
+  # -- Forgejo's container runs on its own isolated Docker bridge network
+  # (compose-forgejo.reml's net-forgejo, 10.90.2.0/24) with real internet
+  # egress but no Tailscale/MagicDNS presence, so it can't resolve or reach
+  # plain tailnet-only hostnames at all, only ones Funnel has made genuinely
+  # internet-routable (confirmed: plain `authentik.taildd208.ts.net` fails
+  # DNS resolution inside the container with NXDOMAIN; the funnel hostname
+  # resolves fine via public DNS and the well-known endpoint is reachable).
+  # This matters for the whole login flow, not just initial setup -- token
+  # exchange and userinfo calls happen container-to-Authentik on every
+  # login, so the funnel hostname is a hard requirement here, not just a
+  # one-time discovery-URL convenience.
   #
   # grant_types must be set explicitly at creation time -- Authentik's API
   # silently defaults it to [] (no grants at all) otherwise (bit us on the
