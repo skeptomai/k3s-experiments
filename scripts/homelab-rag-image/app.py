@@ -100,32 +100,46 @@ def _model() -> OpenAIChatModel:
     )
 
 
-agent = Agent(
-    _model(),
-    deps_type=Deps,
-    instructions=(
-        "You answer questions about Christopher's homelab (k3s cluster, "
-        "the DGX Spark, Claude Code skills, and his active projects) using "
-        "the retrieved documentation. For every factual claim, cite the "
-        "doc it came from in square brackets right after the claim. If "
-        "you state something not supported by any retrieved doc, mark it "
-        "'[not in retrieved docs]' instead of a citation."
-    ),
-)
+def build_agents() -> tuple[Agent, Agent]:
+    """Fresh Agent instances per call, not module-level singletons.
 
-conclude_agent = Agent(
-    _model(),
-    instructions=(
-        "You answer questions about Christopher's homelab using the "
-        "documentation excerpts already retrieved below - you have no "
-        "search tool, so answer from what's given, or say what's missing. "
-        "Cite the doc each claim came from in square brackets, or mark "
-        "'[not in retrieved docs]' if it isn't supported by any of them."
-    ),
-)
+    Each HTTP request runs under its own asyncio.run() call (see do_GET -
+    ThreadingHTTPServer, no shared event loop across requests). A
+    module-level Agent's internal async HTTP client (via OpenAIProvider)
+    gets bound to whichever event loop first uses it, and crashes with
+    "Event loop is closed" the first time a *different* request's loop
+    tries to reuse it - confirmed directly: a reindex request that worked
+    once server-side then failed instantly and reproducibly on every
+    subsequent call, with agent/conclude_agent built once at import time.
+    Constructing them fresh here (cheap - no network I/O until .run() is
+    actually awaited) avoids any state crossing between event loops."""
+    agent = Agent(
+        _model(),
+        deps_type=Deps,
+        instructions=(
+            "You answer questions about Christopher's homelab (k3s cluster, "
+            "the DGX Spark, Claude Code skills, and his active projects) using "
+            "the retrieved documentation. For every factual claim, cite the "
+            "doc it came from in square brackets right after the claim. If "
+            "you state something not supported by any retrieved doc, mark it "
+            "'[not in retrieved docs]' instead of a citation."
+        ),
+    )
+    conclude_agent = Agent(
+        _model(),
+        instructions=(
+            "You answer questions about Christopher's homelab using the "
+            "documentation excerpts already retrieved below - you have no "
+            "search tool, so answer from what's given, or say what's missing. "
+            "Cite the doc each claim came from in square brackets, or mark "
+            "'[not in retrieved docs]' if it isn't supported by any of them."
+        ),
+    )
+    agent.tool(retrieve)
+    agent.tool(reindex_docs)
+    return agent, conclude_agent
 
 
-@agent.tool
 async def retrieve(context: RunContext[Deps], search_query: str) -> str:
     """Retrieve homelab documentation sections based on a search query."""
     context.deps.retrieve_calls += 1
@@ -144,7 +158,6 @@ async def retrieve(context: RunContext[Deps], search_query: str) -> str:
     return result
 
 
-@agent.tool
 async def reindex_docs(context: RunContext[Deps]) -> str:
     """Reindex the homelab documentation search database. Incremental -
     only files that changed since the last reindex are re-embedded, so
@@ -169,6 +182,7 @@ async def answer_question(question: str) -> dict:
         host=PG_HOST, port=PG_PORT, user=PG_USER, password=PG_PASSWORD, database=PG_DATABASE
     )
     try:
+        agent, conclude_agent = build_agents()
         deps = Deps(openai=openai, pool=pool)
         try:
             result = await agent.run(
