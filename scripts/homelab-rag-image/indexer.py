@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import asyncpg
@@ -222,17 +223,26 @@ def _git_env(repo: dict) -> dict:
 
 def clone_or_update(repo: dict) -> str:
     """Clone if missing, else fetch+reset to the remote's default branch.
-    Runs git as a blocking subprocess - called via asyncio.to_thread."""
+    Runs git as a blocking subprocess - called via asyncio.to_thread.
+
+    Full history, NOT --depth 1: the freshness guard (see
+    _git_commit_time_from_clone below) needs `git log -1 -- <path>` to
+    return the commit that actually last touched a file, not just "the
+    single commit a shallow clone happens to have" - a shallow clone would
+    report every unchanged file as freshly-committed (the tip commit's
+    date), which could make this indexer's stamps look artificially newer
+    than a correct local reindex's and wrongly let it win a freshness
+    comparison it shouldn't."""
     dest = SOURCES_ROOT / repo["name"]
     env = _git_env(repo)
     if not dest.exists():
         subprocess.run(
-            ["git", "clone", "--quiet", "--depth", "1", repo["url"], str(dest)],
+            ["git", "clone", "--quiet", repo["url"], str(dest)],
             env=env, check=True, capture_output=True, text=True,
         )
         return "cloned"
     subprocess.run(
-        ["git", "-C", str(dest), "fetch", "--quiet", "--depth", "1", "origin"],
+        ["git", "-C", str(dest), "fetch", "--quiet", "origin"],
         env=env, check=True, capture_output=True, text=True,
     )
     head = subprocess.run(
@@ -314,6 +324,23 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _git_commit_time(path: Path) -> str:
+    """ISO8601 timestamp of the commit that actually last touched this
+    file, per the same freshness-guard logic as pydantic-agent's local
+    rag_homelab.py - see that function's docstring for why "differs from
+    my manifest" isn't the same as "is actually newer". Clones here are
+    always clean (reset --hard to the remote tip, never locally edited),
+    so there's no "dirty means now" case to handle, unlike the local
+    indexer's live working directory."""
+    log = subprocess.run(
+        ["git", "-C", str(path.parent), "log", "-1", "--format=%cI", "--", path.name],
+        capture_output=True, text=True,
+    )
+    if log.returncode == 0 and log.stdout.strip():
+        return log.stdout.strip()
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _manifest_meta() -> dict:
     return {"embedding_model": EMBEDDING_MODEL, "max_chunk_chars": MAX_CHUNK_CHARS}
 
@@ -331,15 +358,19 @@ def save_manifest(manifest: dict) -> None:
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, sort_keys=True))
 
 
-async def insert_doc_section(sem: asyncio.Semaphore, openai: AsyncOpenAI, pool: asyncpg.Pool, chunk: dict) -> None:
+async def insert_doc_section(
+    sem: asyncio.Semaphore, openai: AsyncOpenAI, pool: asyncpg.Pool, chunk: dict, source_updated_at: str | None
+) -> None:
     async with sem:
         embedding = await openai.embeddings.create(
             input=f"{chunk['title']}\n\n{chunk['content']}", model=EMBEDDING_MODEL
         )
         embedding_json = pydantic_core.to_json(embedding.data[0].embedding).decode()
         await pool.execute(
-            "INSERT INTO doc_sections (source, title, content, embedding) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO doc_sections (source, title, content, embedding, source_updated_at) "
+            "VALUES ($1, $2, $3, $4, $5)",
             chunk["source"], chunk["title"], chunk["content"], embedding_json,
+            datetime.fromisoformat(source_updated_at) if source_updated_at else None,
         )
 
 
@@ -349,6 +380,12 @@ async def reindex(pool: asyncpg.Pool) -> str:
     human-readable summary."""
     SOURCES_ROOT.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
+
+    # Idempotent - safe to run every call. This service doesn't own table
+    # creation (rag_homelab.py's build_search_db() does, and already ran
+    # against the shared DB), but defensively ensures the freshness-guard
+    # column exists regardless of which indexer initializes the table.
+    await pool.execute("ALTER TABLE doc_sections ADD COLUMN IF NOT EXISTS source_updated_at timestamptz")
 
     clone_results = await asyncio.gather(
         *(asyncio.to_thread(clone_or_update, repo) for repo in GIT_REPOS),
@@ -372,22 +409,53 @@ async def reindex(pool: asyncpg.Pool) -> str:
         if prior_files.get(label, {}).get("hash") != hashes[label]
     ]
     removed_labels = set(prior_files) - current_labels
-
-    all_chunks: list[dict] = []
-    for path, label in changed:
-        all_chunks.extend(chunk_file(path, label))
+    freshness = {label: _git_commit_time(path) for path, label in changed}
 
     openai = AsyncOpenAI()
-    if changed or removed_labels:
-        stale_labels = removed_labels | {label for _, label in changed}
+    to_write: list[tuple] = []
+    skipped_stale: list[str] = []
+    if changed:
+        # Freshness guard (mirrors pydantic-agent's local rag_homelab.py):
+        # "differs from my manifest" only means this clone's content
+        # changed since I last looked, not that it's newer than what's
+        # already in the DB - don't let a clone that happens to be behind
+        # (e.g. this pod hasn't reindexed in a while and someone force-
+        # pushed a revert upstream) clobber fresher content with older.
+        existing = {
+            row["source"]: row["max"]
+            for row in await pool.fetch(
+                "SELECT source, max(source_updated_at) FROM doc_sections "
+                "WHERE source = ANY($1::text[]) GROUP BY source",
+                [label for _, label in changed],
+            )
+        }
+        for path, label in changed:
+            current = existing.get(label)
+            if current is not None and datetime.fromisoformat(freshness[label]) < current:
+                skipped_stale.append(label)
+            else:
+                to_write.append((path, label))
+
+    all_chunks: list[dict] = []
+    for path, label in to_write:
+        all_chunks.extend(chunk_file(path, label))
+
+    if to_write or removed_labels:
+        stale_labels = removed_labels | {label for _, label in to_write}
         await pool.execute("DELETE FROM doc_sections WHERE source = ANY($1::text[])", list(stale_labels))
         sem = asyncio.Semaphore(10)
-        await asyncio.gather(*(insert_doc_section(sem, openai, pool, c) for c in all_chunks))
+        await asyncio.gather(
+            *(insert_doc_section(sem, openai, pool, c, freshness.get(c["source"])) for c in all_chunks)
+        )
 
+    written_labels = {label for _, label in to_write}
     for label in removed_labels:
         del manifest["files"][label]
     for _, label in changed:
-        chunk_count = sum(1 for c in all_chunks if c["source"] == label)
+        if label in written_labels:
+            chunk_count = sum(1 for c in all_chunks if c["source"] == label)
+        else:
+            chunk_count = prior_files.get(label, {}).get("chunk_count", 0)
         manifest["files"][label] = {"hash": hashes[label], "chunk_count": chunk_count}
     save_manifest(manifest)
 
@@ -397,6 +465,8 @@ async def reindex(pool: asyncpg.Pool) -> str:
         f"{len(files)} source files, {len(changed)} changed/new, {len(removed_labels)} removed, "
         f"{len(all_chunks)} chunks (re)embedded. Total {elapsed:.1f}s."
     )
+    if skipped_stale:
+        summary += f" Skipped {len(skipped_stale)} file(s) as older than what's already indexed."
     if failures:
         summary += f" CLONE FAILURES (stale data for these repos): {'; '.join(failures)}"
     return summary
