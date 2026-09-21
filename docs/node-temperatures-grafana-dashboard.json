@@ -1,16 +1,28 @@
 {
   "title": "k3s Node Temperatures",
   "uid": "k3s-node-temps",
-  "tags": ["k3s", "hardware", "temperature"],
+  "tags": [
+    "k3s",
+    "hardware",
+    "temperature"
+  ],
   "timezone": "browser",
   "schemaVersion": 36,
   "refresh": "1m",
-  "time": {"from": "now-3h", "to": "now"},
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
   "panels": [
     {
       "type": "text",
       "id": 1,
-      "gridPos": {"h": 2, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "options": {
         "mode": "markdown",
         "content": "### CPU Package Temperature (current)  \nIntel i5-12500T (ipc4-6, 35W) · Intel i5-12500 (ipc7-9, 65W) · high=80°C · crit=100°C"
@@ -20,66 +32,359 @@
       "type": "stat",
       "id": 2,
       "title": "ipc4 CPU",
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 2},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc4\"}", "legendFormat": "ipc4"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 2
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc4\"}",
+          "legendFormat": "ipc4"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 3,
       "title": "ipc5 CPU",
-      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 2},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc5\"}", "legendFormat": "ipc5"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 2
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc5\"}",
+          "legendFormat": "ipc5"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 4,
       "title": "ipc6 CPU",
-      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 2},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc6\"}", "legendFormat": "ipc6"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 2
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc6\"}",
+          "legendFormat": "ipc6"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 5,
       "title": "ipc7 CPU",
-      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 2},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc7\"}", "legendFormat": "ipc7"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 2
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc7\"}",
+          "legendFormat": "ipc7"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 6,
       "title": "ipc8 CPU",
-      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 2},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc8\"}", "legendFormat": "ipc8"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 2
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc8\"}",
+          "legendFormat": "ipc8"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 7,
       "title": "ipc9 CPU",
-      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 2},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc9\"}", "legendFormat": "ipc9"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 2
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\",node=\"ipc9\"}",
+          "legendFormat": "ipc9"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "text",
       "id": 8,
-      "gridPos": {"h": 2, "w": 24, "x": 0, "y": 6},
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
       "options": {
         "mode": "markdown",
         "content": "### NVMe Temperature (current)  \nSamsung MZVL2256HCHQ-00BH1 (all nodes) · composite sensor · high=80.8°C · crit=84.8°C"
@@ -89,93 +394,1361 @@
       "type": "stat",
       "id": 9,
       "title": "ipc4 NVMe",
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc4\"}", "legendFormat": "ipc4"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc4\"}",
+          "legendFormat": "ipc4"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 10,
       "title": "ipc5 NVMe",
-      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc5\"}", "legendFormat": "ipc5"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc5\"}",
+          "legendFormat": "ipc5"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 11,
       "title": "ipc6 NVMe",
-      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc6\"}", "legendFormat": "ipc6"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc6\"}",
+          "legendFormat": "ipc6"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 12,
       "title": "ipc7 NVMe",
-      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc7\"}", "legendFormat": "ipc7"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc7\"}",
+          "legendFormat": "ipc7"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 13,
       "title": "ipc8 NVMe",
-      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc8\"}", "legendFormat": "ipc8"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc8\"}",
+          "legendFormat": "ipc8"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "stat",
       "id": 14,
       "title": "ipc9 NVMe",
-      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc9\"}", "legendFormat": "ipc9"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}, "mappings": []}},
-      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "auto"}
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\",node=\"ipc9\"}",
+          "legendFormat": "ipc9"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     },
     {
       "type": "timeseries",
       "id": 15,
       "title": "CPU Package Temperature — all nodes",
-      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 12},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\"}", "legendFormat": "{{node}}"}],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"platform_coretemp_0\",sensor=\"temp1\"}",
+          "legendFormat": "{{node}}"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
-          "custom": {"lineWidth": 2, "fillOpacity": 10},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 65}, {"color": "red", "value": 80}]}
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
         }
       },
-      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}}
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     },
     {
       "type": "timeseries",
       "id": 16,
       "title": "NVMe Composite Temperature — all nodes",
-      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 12},
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\"}", "legendFormat": "{{node}}"}],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "node_hwmon_temp_celsius{job=\"k3s_nodes\",chip=\"nvme_nvme0\",sensor=\"temp1\"}",
+          "legendFormat": "{{node}}"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
-          "custom": {"lineWidth": 2, "fillOpacity": 10},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 55}, {"color": "red", "value": 70}]}
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          }
         }
       },
-      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}}
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "type": "text",
+      "id": 17,
+      "title": null,
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## spark-0d93 (DGX Spark)\nStandalone node_exporter, not part of the k3s DaemonSet -- hwmon/thermal_zone/cpufreq collectors disabled on this host (see k3s-experiments#16), thermal data via textfile-collector scripts instead."
+      }
+    },
+    {
+      "type": "stat",
+      "id": 18,
+      "title": "spark-0d93 CPU (acpitz)",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "spark_thermal_celsius{chip=\"acpitz-acpi-0\",sensor=\"temp1\"}",
+          "legendFormat": "spark-0d93"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 85
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 19,
+      "title": "spark-0d93 GPU",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "spark_gpu_temperature_celsius",
+          "legendFormat": "spark-0d93"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 20,
+      "title": "spark-0d93 NVMe",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "spark_thermal_celsius{chip=\"nvme-pci-40100\",sensor=\"Composite\"}",
+          "legendFormat": "spark-0d93"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 21,
+      "title": "spark-0d93 WiFi radio",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "spark_thermal_celsius{chip=\"mt7925_phy0-pci-90100\",sensor=\"temp1\"}",
+          "legendFormat": "spark-0d93"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 23,
+      "title": "spark-0d93 GPU Xid errors (since boot)",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(spark_gpu_xid_errors_total) or vector(0)",
+          "legendFormat": "spark-0d93"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 22,
+      "title": "spark-0d93 — all thermal zones + GPU",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "spark_thermal_celsius or spark_gpu_temperature_celsius",
+          "legendFormat": "{{chip}} {{sensor}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 24,
+      "title": "spark-0d93 GPU Xid errors over time (by code)",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "increase(spark_gpu_xid_errors_total[$__rate_interval])",
+          "legendFormat": "Xid {{xid}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "drawStyle": "bars"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "type": "text",
+      "id": 25,
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## UPS Power (NUT)\nCyberPower LX1500GU3 on ipc4 and nazgul, each with its own local upsd · metrics via nut-textfile-exporter (30s)"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 26,
+      "title": "ipc4 UPS Load",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_load_percent{node=\"ipc4\"}",
+          "legendFormat": "ipc4"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 27,
+      "title": "nazgul UPS Load",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_load_percent{node=\"nazgul\"}",
+          "legendFormat": "nazgul"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 28,
+      "title": "ipc4 Battery Charge",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_battery_charge_percent{node=\"ipc4\"}",
+          "legendFormat": "ipc4"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 29,
+      "title": "nazgul Battery Charge",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_battery_charge_percent{node=\"nazgul\"}",
+          "legendFormat": "nazgul"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 30,
+      "title": "ipc4 On Battery",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_status_on_battery{node=\"ipc4\"}",
+          "legendFormat": "ipc4"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 31,
+      "title": "nazgul On Battery",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_status_on_battery{node=\"nazgul\"}",
+          "legendFormat": "nazgul"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 32,
+      "title": "UPS Load — ipc4 + nazgul",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 47
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_load_percent",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 33,
+      "title": "UPS Battery Charge — ipc4 + nazgul",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 47
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nut_ups_battery_charge_percent",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     }
   ]
 }
