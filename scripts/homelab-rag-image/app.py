@@ -17,6 +17,17 @@ raw retrieve step - a caller's own tool-calling loop (gptel's included) has
 none of the guardrails below, and exposing raw retrieval would risk
 reproducing the exact overquerying bug this project's history warns about.
 
+As of 2026-09-21 the agent behind `/ask` also has a `reindex_docs` tool, so
+a natural-language request like "reindex the docs" can trigger a real
+reindex - see that tool's docstring below and pydantic-agent's CLAUDE.md
+for why this pod can't do the reindex itself (no filesystem access to the
+source corpus, which only exists on omen) and instead triggers the real
+one over SSH, using a key restricted server-side (omen's authorized_keys
+forces the reindex script regardless of what's requested). There is no
+confirmation gate here beyond the tool's docstring - phrasing a question
+suggestively is enough to trigger it, same tradeoff documented in
+pydantic-agent's CLAUDE.md for the local `reindex_docs` tool this mirrors.
+
 API:
   GET /ask?q=<question>  -> {"question", "answer", "retrieve_calls", "elapsed_s"}
   GET /health            -> {"status": "ok"}
@@ -59,6 +70,18 @@ PG_DATABASE = "homelab_docs"
 
 RETRIEVE_CALL_LIMIT = 3  # see pydantic-agent CLAUDE.md - a hard framework
 # cap, not a prompt instruction, which this model ignores under uncertainty.
+
+# This pod has no filesystem access to the source docs (k3s-experiments,
+# dotfiles, orgfiles, pydantic-agent's own source, etc. - all only exist on
+# omen) - see pydantic-agent CLAUDE.md's "reindex_docs" section. So a
+# reindex request here can't run build_search_db() itself; it triggers the
+# real one on omen over SSH instead, using a key that's restricted
+# server-side (omen's authorized_keys `command=` forces
+# rebuild-rag-index.sh regardless of what's requested - verified directly:
+# an arbitrary command sent over this key runs the forced script instead).
+OMEN_SSH_HOST = os.getenv("OMEN_SSH_HOST", "omen.homelab-rag.svc.cluster.local")
+OMEN_SSH_KEY = "/etc/omen-ssh/id_ed25519"
+OMEN_SSH_KNOWN_HOSTS = "/etc/omen-ssh/known_hosts"
 
 
 @dataclass
@@ -125,6 +148,41 @@ async def retrieve(context: RunContext[Deps], search_query: str) -> str:
         f'# {row["title"]}\nSource: {row["source"]}\n\n{row["content"]}\n' for row in rows
     )
     context.deps.collected.append(f"Search query: {search_query!r}\n\n{result}")
+    return result
+
+
+@agent.tool
+async def reindex_docs(context: RunContext[Deps]) -> str:
+    """Reindex the homelab documentation search database. Incremental -
+    only files that changed since the last reindex are re-embedded, so
+    calling this when nothing changed is cheap (a few seconds).
+
+    ONLY call this when the user explicitly asks to reindex, rebuild,
+    refresh, or update the documentation search index - never as a step
+    toward answering an ordinary question, and never speculatively.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "ssh",
+        "-i", OMEN_SSH_KEY,
+        "-o", f"UserKnownHostsFile={OMEN_SSH_KNOWN_HOSTS}",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=10",
+        f"cb@{OMEN_SSH_HOST}",
+        # omen's authorized_keys forces the actual command for this key
+        # (rebuild-rag-index.sh) regardless of what's sent here - this
+        # placeholder documents intent, it has no effect on what runs.
+        "reindex",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    output = stdout.decode(errors="replace").strip()
+    if proc.returncode != 0:
+        result = f"Reindex FAILED (exit {proc.returncode}): {stderr.decode(errors='replace').strip() or output}"
+    else:
+        result = f"Reindex complete:\n{output}"
+    context.deps.collected.append(result)
     return result
 
 

@@ -17,6 +17,21 @@ spec:
     spec:
       # Stateless, no k8s API access needed (same as manifests/web-search).
       automountServiceAccountToken: false
+      volumes:
+        # omen-ssh-key holds a *dedicated* key, restricted on omen's side
+        # (authorized_keys `command=".../rebuild-rag-index.sh"`) to running
+        # only the reindex script - a compromised pod can't use it for
+        # anything else on omen. Created out-of-band, not in git - see
+        # scripts/homelab-rag-image/README.md.
+        - name: omen-ssh
+          secret:
+            secretName: homelab-rag-secrets
+            defaultMode: 0400
+            items:
+              - key: omen-ssh-private-key
+                path: id_ed25519
+              - key: omen-ssh-known-hosts
+                path: known_hosts
       containers:
         - name: homelab-rag
           image: 192.168.89.2:5004/homelab-rag:latest
@@ -35,6 +50,15 @@ spec:
                 secretKeyRef:
                   name: homelab-rag-secrets
                   key: postgres-password
+            # Cluster-internal name via the omen-egress ExternalName
+            # Service (manifests/homelab-rag/omen-egress.yaml) - a plain
+            # pod has no outbound tailnet route to omen otherwise.
+            - name: OMEN_SSH_HOST
+              value: "omen.homelab-rag.svc.cluster.local"
+          volumeMounts:
+            - name: omen-ssh
+              mountPath: /etc/omen-ssh
+              readOnly: true
           resources:
             requests:
               cpu: 100m
