@@ -8,7 +8,7 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends git ope
 RUN pip install --no-cache-dir "pydantic-ai>=2.43.0" asyncpg
 
 WORKDIR /app
-COPY app.py indexer.py .
+COPY app.py indexer.py ./
 
 EXPOSE 8080
 CMD ["python3", "app.py"]
