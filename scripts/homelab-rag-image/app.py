@@ -4,13 +4,12 @@
 vetted answer from a single HTTP call instead of driving the tool-calling
 loop itself.
 
-This is a self-contained reimplementation of pydantic-agent's
-examples/rag_homelab.py query path (that project has no git remote the
-cluster build Job can reach, so this can't just clone and reuse it - see
-that project's CLAUDE.md for the original, and keep this in sync by hand
-if the query-side logic changes there). The indexing side (building
-doc_sections) stays on omen via that project's systemd timer; this service
-only ever reads.
+The query path (retrieve/answer_question below) is a self-contained
+reimplementation of pydantic-agent's examples/rag_homelab.py query path -
+keep it in sync by hand if that logic changes there. The indexing side is
+NOT a reimplementation of anything on omen anymore (see indexer.py and the
+2026-09-21 note below) - it's this service's own thing now, omen plays no
+part in it.
 
 Deliberately exposes exactly one coarse-grained endpoint (`/ask`), not the
 raw retrieve step - a caller's own tool-calling loop (gptel's included) has
@@ -19,14 +18,19 @@ reproducing the exact overquerying bug this project's history warns about.
 
 As of 2026-09-21 the agent behind `/ask` also has a `reindex_docs` tool, so
 a natural-language request like "reindex the docs" can trigger a real
-reindex - see that tool's docstring below and pydantic-agent's CLAUDE.md
-for why this pod can't do the reindex itself (no filesystem access to the
-source corpus, which only exists on omen) and instead triggers the real
-one over SSH, using a key restricted server-side (omen's authorized_keys
-forces the reindex script regardless of what's requested). There is no
-confirmation gate here beyond the tool's docstring - phrasing a question
-suggestively is enough to trigger it, same tradeoff documented in
-pydantic-agent's CLAUDE.md for the local `reindex_docs` tool this mirrors.
+reindex. Originally (same day) this SSHed into omen to run the reindex
+there, since this pod had no filesystem access to the source corpus - but
+that made omen a hard dependency (a laptop that isn't always on and isn't
+the only machine work happens from), so it was replaced with a real
+in-cluster pipeline: indexer.py clones/pulls each source's own git repo
+into a PVC (see GIT_REPOS there for the exact, deliberately-scoped repo
+list - NOT "every project", see its module docstring for why) and runs
+the same content-hash-incremental chunk/embed logic locally against those
+clones. omen is no longer touched by this at all. There is no confirmation
+gate here beyond the tool's docstring - phrasing a question suggestively
+is enough to trigger it, same tradeoff documented in pydantic-agent's
+CLAUDE.md for the local `reindex_docs` tool this was originally mirroring
+(that one still exists, unchanged, for ad-hoc local use).
 
 API:
   GET /ask?q=<question>  -> {"question", "answer", "retrieve_calls", "elapsed_s"}
@@ -41,6 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import asyncpg
+import indexer
 import pydantic_core
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
@@ -70,18 +75,6 @@ PG_DATABASE = "homelab_docs"
 
 RETRIEVE_CALL_LIMIT = 3  # see pydantic-agent CLAUDE.md - a hard framework
 # cap, not a prompt instruction, which this model ignores under uncertainty.
-
-# This pod has no filesystem access to the source docs (k3s-experiments,
-# dotfiles, orgfiles, pydantic-agent's own source, etc. - all only exist on
-# omen) - see pydantic-agent CLAUDE.md's "reindex_docs" section. So a
-# reindex request here can't run build_search_db() itself; it triggers the
-# real one on omen over SSH instead, using a key that's restricted
-# server-side (omen's authorized_keys `command=` forces
-# rebuild-rag-index.sh regardless of what's requested - verified directly:
-# an arbitrary command sent over this key runs the forced script instead).
-OMEN_SSH_HOST = os.getenv("OMEN_SSH_HOST", "omen.homelab-rag.svc.cluster.local")
-OMEN_SSH_KEY = "/etc/omen-ssh/id_ed25519"
-OMEN_SSH_KNOWN_HOSTS = "/etc/omen-ssh/known_hosts"
 
 
 @dataclass
@@ -161,27 +154,10 @@ async def reindex_docs(context: RunContext[Deps]) -> str:
     refresh, or update the documentation search index - never as a step
     toward answering an ordinary question, and never speculatively.
     """
-    proc = await asyncio.create_subprocess_exec(
-        "ssh",
-        "-i", OMEN_SSH_KEY,
-        "-o", f"UserKnownHostsFile={OMEN_SSH_KNOWN_HOSTS}",
-        "-o", "StrictHostKeyChecking=yes",
-        "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=10",
-        f"cb@{OMEN_SSH_HOST}",
-        # omen's authorized_keys forces the actual command for this key
-        # (rebuild-rag-index.sh) regardless of what's sent here - this
-        # placeholder documents intent, it has no effect on what runs.
-        "reindex",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    output = stdout.decode(errors="replace").strip()
-    if proc.returncode != 0:
-        result = f"Reindex FAILED (exit {proc.returncode}): {stderr.decode(errors='replace').strip() or output}"
-    else:
-        result = f"Reindex complete:\n{output}"
+    try:
+        result = await indexer.reindex(context.deps.pool)
+    except Exception as exc:
+        result = f"Reindex FAILED: {exc}"
     context.deps.collected.append(result)
     return result
 

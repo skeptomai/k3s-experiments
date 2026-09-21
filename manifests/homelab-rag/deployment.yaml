@@ -15,23 +15,42 @@ spec:
       labels:
         app: homelab-rag
     spec:
-      # Stateless, no k8s API access needed (same as manifests/web-search).
+      # No longer stateless as of the 2026-09-21 in-cluster indexing
+      # redesign - homelab-rag-sources PVC holds the git clones indexer.py
+      # maintains, so reindexing stays incremental across pod restarts.
       automountServiceAccountToken: false
       volumes:
-        # omen-ssh-key holds a *dedicated* key, restricted on omen's side
-        # (authorized_keys `command=".../rebuild-rag-index.sh"`) to running
-        # only the reindex script - a compromised pod can't use it for
-        # anything else on omen. Created out-of-band, not in git - see
+        - name: sources
+          persistentVolumeClaim:
+            claimName: homelab-rag-sources
+        # One read-only deploy key per private repo in indexer.py's
+        # GIT_REPOS (file name == the `key` field there), plus a
+        # known_hosts pinning github.com's and Forgejo's real host keys.
+        # Created out-of-band, not in git - see
         # scripts/homelab-rag-image/README.md.
-        - name: omen-ssh
+        - name: git-keys
           secret:
             secretName: homelab-rag-secrets
             defaultMode: 0400
             items:
-              - key: omen-ssh-private-key
-                path: id_ed25519
-              - key: omen-ssh-known-hosts
+              - key: known-hosts
                 path: known_hosts
+              - key: github-dotfiles
+                path: github-dotfiles
+              - key: github-orgfiles
+                path: github-orgfiles
+              - key: github-hibernate_debugging
+                path: github-hibernate_debugging
+              - key: github-home-monitoring
+                path: github-home-monitoring
+              - key: forgejo-pydantic-agent
+                path: forgejo-pydantic-agent
+              - key: forgejo-claude-skills-mirror
+                path: forgejo-claude-skills-mirror
+              - key: forgejo-backup-kit
+                path: forgejo-backup-kit
+              - key: forgejo-agent-coordinator
+                path: forgejo-agent-coordinator
       containers:
         - name: homelab-rag
           image: 192.168.89.2:5004/homelab-rag:latest
@@ -50,14 +69,20 @@ spec:
                 secretKeyRef:
                   name: homelab-rag-secrets
                   key: postgres-password
-            # Cluster-internal name via the omen-egress ExternalName
-            # Service (manifests/homelab-rag/omen-egress.yaml) - a plain
-            # pod has no outbound tailnet route to omen otherwise.
-            - name: OMEN_SSH_HOST
-              value: "omen.homelab-rag.svc.cluster.local"
+            - name: SOURCES_ROOT
+              value: "/data/sources"
+            - name: GIT_KEYS_DIR
+              value: "/etc/git-keys"
+            # Cluster-internal name via the git-repos-egress ExternalName
+            # Service (manifests/homelab-rag/git-repos-egress.yaml) - a
+            # plain pod has no outbound tailnet route to Forgejo otherwise.
+            - name: FORGEJO_SSH_HOST
+              value: "git-repos.homelab-rag.svc.cluster.local"
           volumeMounts:
-            - name: omen-ssh
-              mountPath: /etc/omen-ssh
+            - name: sources
+              mountPath: /data/sources
+            - name: git-keys
+              mountPath: /etc/git-keys
               readOnly: true
           resources:
             requests:

@@ -5,4 +5,5 @@ resources:
   - deployment.yaml
   - service.yaml
   - spark-egress.yaml
-  - omen-egress.yaml
+  - git-repos-egress.yaml
+  - sources-pvc.yaml

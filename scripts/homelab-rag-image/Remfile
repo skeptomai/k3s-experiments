@@ -1,12 +1,14 @@
 FROM python:3.14-slim
 
-RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client \
+# git+openssh-client: indexer.py clones/pulls each source repo directly
+# (private ones over SSH with a mounted deploy key) into the PVC.
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends git openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir "pydantic-ai>=2.43.0" asyncpg
 
 WORKDIR /app
-COPY app.py .
+COPY app.py indexer.py .
 
 EXPOSE 8080
 CMD ["python3", "app.py"]

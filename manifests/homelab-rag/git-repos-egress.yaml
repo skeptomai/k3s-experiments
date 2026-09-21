@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-repos
+  namespace: homelab-rag
+  annotations:
+    # Tailscale-operator egress (same pattern as spark-egress.yaml) - lets
+    # pods in this namespace reach Forgejo on nazgul (a tailnet-only host)
+    # via cluster DNS (git-repos.homelab-rag.svc.cluster.local:2222) to
+    # clone the private repos in indexer.py's GIT_REPOS list. Named
+    # "git-repos", not "forgejo" or "nazgul", because this ExternalName
+    # points at a specific service (Forgejo's SSH port) not the whole
+    # host - keeps the DNS name meaningful if anything else on nazgul
+    # ever needs its own, differently-scoped egress route.
+    tailscale.com/tailnet-fqdn: "nazgul.taildd208.ts.net"
+spec:
+  externalName: "placeholder"
+  type: ExternalName

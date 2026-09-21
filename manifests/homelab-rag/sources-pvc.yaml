@@ -1,0 +1,18 @@
+---
+# Holds indexer.py's git clones (see its GIT_REPOS list) and the
+# content-hash manifest (.rag_manifest.json) that makes reindexing
+# incremental. Persists across pod restarts/redeploys, unlike the
+# container filesystem - a clean-slate reindex after every restart would
+# otherwise turn "cheap, incremental" back into "reclone+reembed
+# everything" on every rollout.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: homelab-rag-sources
+  namespace: homelab-rag
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
