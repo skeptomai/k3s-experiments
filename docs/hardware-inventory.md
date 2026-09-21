@@ -1,35 +1,46 @@
-# Hardware Inventory — ipc1–ipc9
+# Hardware Inventory — ipc4–ipc9 (ipc1-3 retired)
 
 Authoritative hardware findings for the physical cluster. ipc1-6 audited
 **2026-06-28**; **ipc7-9 added 2026-06-30** (`/proc/cpuinfo`, `lscpu`, `free -h`,
 `lsblk`). This is the source of truth for CPU/RAM/disk; `node-scheduling.md` covers
 roles/taints. **ipc7-9 (HP Elite Mini 800 G9 workers) joined the cluster 2026-07-01.**
 
+**ipc1-3 retired 2026-07-04/05** (see `migrate-control-plane-to-elite-minis.md`) -
+this doc predates that migration and, until this correction, still listed them as
+live. Confirmed via `kubectl get nodes` (2026-09-21): only ipc4-9 exist. Their
+historical specs are kept in the table below, clearly marked retired, since they're
+real hardware-history facts (and referenced by `workshop-cameras.md`'s repurpose
+idea for the pulled units) - just not part of the live cluster anymore.
+
 ## Summary
 
 | Node | CPU | Cores/Threads | RAM | Disk | Disk bus | `node-class` |
 |------|-----|---------------|-----|------|----------|--------------|
-| ipc1 | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | standard |
-| ipc2 | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | standard |
-| ipc3 | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | standard |
-| ipc4 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
-| ipc5 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
-| ipc6 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB (2×16 GiB) | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance |
+| ~~ipc1~~ *(retired 2026-07-04/05)* | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | *was: standard* |
+| ~~ipc2~~ *(retired)* | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | *was: standard* |
+| ~~ipc3~~ *(retired)* | Pentium Gold G5400T @ 3.10 GHz | 2c / 4t | 30 GiB | 238.5 GB SATA SSD (`DEM28-B56M41BW1D`) | SATA | *was: standard* |
+| ipc4 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance (now also control-plane/etcd - see below) |
+| ipc5 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance (now also control-plane/etcd) |
+| ipc6 | Core i5-12500**T** (35W, 12th Gen) | 6c / 12t | 30 GiB (2×16 GiB) | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | performance (now also control-plane/etcd) |
 | ipc7 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **30 GiB (32 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
 | ipc8 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **30 GiB (32 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
 | ipc9 | Core i5-12500 (**65W non-T**, 12th Gen) | 6c / 12t | **30 GiB (32 GB)** | 238.5 GB NVMe (Samsung `MZVL2256HCHQ-00BH1`) | NVMe | fastest |
 
-All nine: **Ubuntu 26.04 LTS**, pelagos CRI, `v1.35.5+k3s1`. ipc7-9 joined 2026-07-01
-(i5-12500 non-T — all three verified live; manual OS install, not PXE). RAM upgraded
-from 16 GB → **32 GB** on **2026-07-11**.
+Live fleet is six nodes (ipc4-9), all **Ubuntu 26.04 LTS**, pelagos CRI,
+`v1.35.5+k3s1`. ipc7-9 joined 2026-07-01 (i5-12500 non-T — all three verified
+live; manual OS install, not PXE). RAM upgraded from 16 GB → **32 GB** on
+**2026-07-11**.
 
 ## Hardware classes
 
-- **`standard` (ipc1-3)** — Pentium Gold G5400T, 2c/4t, **SATA SSD**. Weak CPUs (the
-  `slow:NoSchedule` taint), plenty of RAM. Light, always-on duty → the **control
-  plane / etcd**.
+- ~~`standard` (ipc1-3)~~ **retired 2026-07-04/05** — Pentium Gold G5400T, 2c/4t,
+  SATA SSD. Weak CPUs (had the `slow:NoSchedule` taint), plenty of RAM. Was the
+  light, always-on control plane / etcd - moved to ipc4-6 (below) instead of
+  replacing this hardware, since the driver was physical (big/fanless/heavy,
+  wouldn't rack), not a performance upgrade.
 - **`performance` (ipc4-6)** — Core i5-12500**T** (35W), 6c/12t, **32 GB** RAM,
-  **NVMe SSD**. Carry all standard workloads.
+  **NVMe SSD**. Carry all standard workloads, **and since 2026-07-04/05 also run
+  control-plane/etcd**, co-located rather than on dedicated nodes.
 - **`fastest` (ipc7-9)** — Core i5-12500 (**65W non-T** — higher base clock 3.0 vs
   2.0 GHz, highest sustained all-core clocks, hotter/more power), 6c/12t, **32 GB**
   RAM (upgraded 2026-07-11 via the G9's 2× DDR5 SO-DIMM slots), **NVMe SSD**.
