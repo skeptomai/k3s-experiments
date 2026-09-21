@@ -1,0 +1,6 @@
+[Unit]
+Description=Write UPS metrics to node_exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nut-textfile-exporter.sh
