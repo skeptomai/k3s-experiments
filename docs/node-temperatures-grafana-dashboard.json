@@ -1293,7 +1293,7 @@
     {
       "type": "stat",
       "id": 26,
-      "title": "ipc4 UPS Load",
+      "title": "k3s cluster UPS Load",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1311,7 +1311,7 @@
             "uid": "prometheus"
           },
           "expr": "nut_ups_load_percent{node=\"ipc4\"}",
-          "legendFormat": "ipc4"
+          "legendFormat": "k3s cluster"
         }
       ],
       "fieldConfig": {
@@ -1409,7 +1409,7 @@
     {
       "type": "stat",
       "id": 28,
-      "title": "ipc4 Battery Charge",
+      "title": "k3s cluster Battery Charge",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1427,7 +1427,7 @@
             "uid": "prometheus"
           },
           "expr": "nut_ups_battery_charge_percent{node=\"ipc4\"}",
-          "legendFormat": "ipc4"
+          "legendFormat": "k3s cluster"
         }
       ],
       "fieldConfig": {
@@ -1525,7 +1525,7 @@
     {
       "type": "stat",
       "id": 30,
-      "title": "ipc4 On Battery",
+      "title": "k3s cluster On Battery",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1543,7 +1543,7 @@
             "uid": "prometheus"
           },
           "expr": "nut_ups_status_on_battery{node=\"ipc4\"}",
-          "legendFormat": "ipc4"
+          "legendFormat": "k3s cluster"
         }
       ],
       "fieldConfig": {
@@ -1633,7 +1633,7 @@
     {
       "type": "timeseries",
       "id": 32,
-      "title": "UPS Load — ipc4 + nazgul",
+      "title": "UPS Load — k3s cluster + nazgul",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -1650,7 +1650,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "nut_ups_load_percent",
+          "expr": "label_replace(nut_ups_load_percent, \"node\", \"k3s cluster\", \"node\", \"ipc4\")",
           "legendFormat": "{{node}}"
         }
       ],
@@ -1693,7 +1693,7 @@
     {
       "type": "timeseries",
       "id": 33,
-      "title": "UPS Battery Charge — ipc4 + nazgul",
+      "title": "UPS Battery Charge — k3s cluster + nazgul",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -1710,7 +1710,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "nut_ups_battery_charge_percent",
+          "expr": "label_replace(nut_ups_battery_charge_percent, \"node\", \"k3s cluster\", \"node\", \"ipc4\")",
           "legendFormat": "{{node}}"
         }
       ],
@@ -1753,7 +1753,7 @@
     {
       "type": "stat",
       "id": 34,
-      "title": "ipc4 UPS Power",
+      "title": "k3s cluster UPS Power",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1869,7 +1869,7 @@
     {
       "type": "timeseries",
       "id": 36,
-      "title": "UPS Real Power — ipc4 + nazgul",
+      "title": "UPS Real Power — k3s cluster + nazgul",
       "gridPos": {
         "h": 8,
         "w": 16,
@@ -1886,7 +1886,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "nut_ups_realpower_watts",
+          "expr": "label_replace(nut_ups_realpower_watts, \"node\", \"k3s cluster\", \"node\", \"ipc4\")",
           "legendFormat": "{{node}} ({{source}})"
         }
       ],
