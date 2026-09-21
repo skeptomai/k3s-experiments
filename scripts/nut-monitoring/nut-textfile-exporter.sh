@@ -36,6 +36,27 @@ is_flag() { case " $STATUS " in *" $1 "*) echo 1 ;; *) echo 0 ;; esac; }
   echo '# TYPE nut_ups_load_percent gauge'
   echo "nut_ups_load_percent{ups=\"${UPS_NAME}\"} $(get ups.load)"
 
+  # ups.realpower (measured, watts) isn't exposed by every CyberPower HID
+  # data revision - nazgul's older USB HID profile only reports ups.load
+  # and ups.realpower.nominal, not a live wattage reading. Fall back to
+  # deriving it (load% * nominal watts) so both UPSes still get this
+  # metric, but tag the source so a consumer can tell measured from derived.
+  REALPOWER=$(get ups.realpower)
+  REALPOWER_SOURCE="measured"
+  if [ -z "$REALPOWER" ]; then
+    LOAD=$(get ups.load)
+    NOMINAL=$(get ups.realpower.nominal)
+    if [ -n "$LOAD" ] && [ -n "$NOMINAL" ]; then
+      REALPOWER=$(awk -v l="$LOAD" -v n="$NOMINAL" 'BEGIN{printf "%.1f", l/100*n}')
+      REALPOWER_SOURCE="derived"
+    fi
+  fi
+  if [ -n "$REALPOWER" ]; then
+    echo '# HELP nut_ups_realpower_watts Real power draw, watts (measured directly from ups.realpower when the UPS reports it; otherwise derived from ups.load percent times ups.realpower.nominal)'
+    echo '# TYPE nut_ups_realpower_watts gauge'
+    echo "nut_ups_realpower_watts{ups=\"${UPS_NAME}\",source=\"${REALPOWER_SOURCE}\"} ${REALPOWER}"
+  fi
+
   echo '# HELP nut_ups_input_voltage_volts Input (mains) voltage'
   echo '# TYPE nut_ups_input_voltage_volts gauge'
   echo "nut_ups_input_voltage_volts{ups=\"${UPS_NAME}\"} $(get input.voltage)"
