@@ -168,7 +168,18 @@ GIT_REPOS = [
         "url": "git@github.com:skeptomai/home-monitoring.git",
         "key": "github-home-monitoring",
         "overview": True,
-        "deep": [(".", "**/*.md", "home-monitoring")],
+        # Real ground truth here is the compose/scrape/alert configs, not
+        # just the docs - markdown-only indexing already burned this
+        # project once (see pydantic-agent CLAUDE.md's storage-class
+        # example). Real secrets (.env, alertmanager.yml, etc.) are
+        # gitignored/untracked, confirmed via `git ls-files`, so a clone
+        # never sees them regardless of this glob.
+        "deep": [
+            (".", "**/*.md", "home-monitoring"),
+            (".", "**/*.reml", "home-monitoring"),
+            (".", "**/*.yaml", "home-monitoring"),
+            (".", "**/*.yml", "home-monitoring"),
+        ],
     },
     # --- private Forgejo, deploy key required (reached via the
     # git-repos egress ExternalName Service, same tailnet-egress pattern
