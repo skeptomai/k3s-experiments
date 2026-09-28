@@ -11,3 +11,4 @@ resources:
   - namespace.yaml
   - helmrepository.yaml
   - helmrelease.yaml
+  - proxygroup.yaml

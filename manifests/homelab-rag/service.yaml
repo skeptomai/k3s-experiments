@@ -4,12 +4,14 @@ metadata:
   name: homelab-rag
   namespace: homelab-rag
   annotations:
-    # Tailnet exposure, same proven Service-mode pattern as
-    # manifests/web-search, manifests/gruesome, manifests/jupyter,
-    # manifests/open-webui, manifests/postgres-pgvector.
-    tailscale.com/expose: "true"
+    # Tailnet exposure via the shared ingress ProxyGroup (see
+    # manifests/tailscale-operator/proxygroup.yaml for why this moved off
+    # the old bare tailscale.com/expose annotation on 2026-09-27).
+    tailscale.com/proxy-group: "ingress-proxies"
     tailscale.com/hostname: "homelab-rag"
 spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
   selector:
     app: homelab-rag
   ports:

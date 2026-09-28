@@ -4,11 +4,13 @@ metadata:
   name: jupyter
   namespace: jupyter
   annotations:
-    # Service-mode tailnet exposure -> jupyter.taildd208.ts.net, same
-    # proven pattern as manifests/gruesome and manifests/open-webui.
-    tailscale.com/expose: "true"
+    # Service-mode tailnet exposure -> jupyter.taildd208.ts.net, via the
+    # shared ingress ProxyGroup (see manifests/tailscale-operator/proxygroup.yaml).
+    tailscale.com/proxy-group: "ingress-proxies"
     tailscale.com/hostname: "jupyter"
 spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
   selector:
     app: jupyter
   ports:

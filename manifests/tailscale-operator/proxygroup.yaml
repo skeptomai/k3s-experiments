@@ -1,0 +1,29 @@
+# Shared ingress ProxyGroup for Service-mode tailnet exposure (homelab-rag,
+# gruesome, open-webui, jupyter, web-search, authentik).
+#
+# Added 2026-09-27: the operator (v1.98.x) crashed at the cluster's scheduled
+# 05:00 daily power-on (CoreDNS briefly unreachable), and on restart its
+# "service-pg-reconciler" started explicitly skipping every Service using the
+# older bare tailscale.com/expose + tailscale.com/hostname annotations
+# ("no ProxyGroup annotation, skipping Tailscale Service provisioning") --
+# leaving all of them with no `tailscale serve` config and totally
+# unreachable, even though the pods stayed Running. This ProxyGroup plus the
+# tailscale.com/proxy-group annotation + LoadBalancer/loadBalancerClass on
+# each Service (see manifests/<app>/service.yaml) is the supported fix, per
+# https://tailscale.com/docs/kubernetes-operator/ingress/expose-workload-to-tailnet-l3
+# -- this L3 mode was deliberately chosen over a plain Ingress because
+# Ingress-mode does NOT honor tailscale.com/hostname (confirmed already in
+# manifests/open-webui/ingress-funnel.yaml's own comments) and would have
+# silently renamed every one of these tailnet hostnames.
+#
+# postgres-pgvector was NOT migrated -- its plain TCP Service-mode exposure
+# was unaffected by this incident (serve config is an HTTP/HTTPS-only
+# concept; raw TCP passthrough doesn't need it), so there was nothing to fix
+# there. Migrate it too if it ever hits the same issue.
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyGroup
+metadata:
+  name: ingress-proxies
+spec:
+  type: ingress
+  replicas: 2
