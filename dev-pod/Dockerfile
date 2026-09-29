@@ -27,6 +27,15 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /run/sshd
 
+# rust:1-bookworm's rustup/cargo/rustc do NOT include rust-analyzer -- it's
+# a separate rustup component. Without this, `rust-analyzer` on PATH is
+# just rustup's dispatch proxy (present, but errors "Unknown binary
+# 'rust-analyzer' in official toolchain..." on every invocation since no
+# component backs it), which looks like the LSP server crashing/restarting
+# in an Emacs/rustic-mode client rather than a missing-install problem.
+# Confirmed 2026-09-29 live on this exact symptom.
+RUN rustup component add rust-analyzer
+
 # Non-root dev user. UID/GID are arbitrary -- this is an isolated
 # container, not sharing files with the physical nodes. The actual home
 # directory content comes from the NFS-backed PVC mounted at /home/cb at

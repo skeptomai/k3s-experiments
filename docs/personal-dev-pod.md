@@ -139,6 +139,19 @@ not StrictModes): they're generated into a PVC subPath
 `/etc/ssh/host_keys`) the first time the pod starts, and reused after
 that.
 
+### rust-analyzer not included in rust:1-bookworm by default
+
+`rustup component add rust-analyzer` is required explicitly — `rust:1-bookworm`'s
+default toolchain (cargo/rustc) doesn't include it. Without this, `rust-analyzer`
+on `PATH` is just rustup's dispatch proxy stub, which errors
+(`Unknown binary 'rust-analyzer' in official toolchain...`) on every
+invocation instead of running a server. In an Emacs/rustic-mode (or any
+lsp-mode/eglot) client, that reads as the LSP server continuously
+crashing/restarting rather than a missing-install problem — confirmed
+2026-09-29 on exactly this symptom. Fixed in `dev-pod/Dockerfile` (baked
+into the image now, verified on a freshly-recreated pod, not just
+live-patched).
+
 ### Resource contention with the pelagos build Job
 
 `experiments/29-pelagos-build/build-job.yaml` pins a pelagos build Job
