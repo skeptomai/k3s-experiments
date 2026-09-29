@@ -166,6 +166,25 @@ echo "$REGISTRIES_CONFIG" | sudo tee /etc/pelagos/registries.toml >/dev/null
 echo "Registries config written:"
 sudo cat /etc/pelagos/registries.toml
 
+echo "--- Narrowing sshd AcceptEnv (LANG LC_* -> LANG) ---"
+# Ubuntu's default sshd_config ships "AcceptEnv LANG LC_*", which forwards
+# whatever LC_* vars a client happens to have set -- including an empty one.
+# Confirmed 2026-09-29: a client-side interactive shell (zsh + Powerlevel10k)
+# can end up with LC_CTYPE exported as an empty string (not merely unset;
+# verified directly via /proc/<pid>/environ on a live session), and ssh's
+# SendEnv LC_* forwards it faithfully. glibc/bash then fail with
+# `setlocale: LC_CTYPE: cannot change locale ('')` on every login, even
+# though LANG alone is already sufficient here (all six nodes have
+# en_US.utf8 installed and LANG=en_US.UTF-8 in /etc/default/locale) -- a
+# clean test sending only LANG resolves the full locale correctly with no
+# warning. Narrowing AcceptEnv to just LANG makes every node immune to any
+# client (this one or a future one) forwarding a bad LC_* value, rather than
+# relying on every client's shell config being clean. sed is idempotent --
+# safe to re-run.
+sudo sed -i 's/^AcceptEnv LANG LC_\* /AcceptEnv LANG /' /etc/ssh/sshd_config
+grep -i '^AcceptEnv' /etc/ssh/sshd_config
+sudo systemctl reload ssh
+
 echo "--- Stopping $K3S_SERVICE before CRI restart (prevents container process orphaning) ---"
 sudo systemctl stop "$K3S_SERVICE" || true
 sleep 3
