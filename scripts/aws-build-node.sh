@@ -4,10 +4,25 @@
 # k3s/Pelagos/Tailscale identity) persists; only compute cost stops accruing.
 # See docs/aws-graviton-build-node.md.
 #
-# stop/start also manage a pair of *targeted* Alertmanager silences so
-# KubeNodeNotReady/KubeDaemonSetNotFullyReady don't fire for a node that's
-# intentionally stopped -- see silence_status_* below for exactly what's
-# matched and the known scoping limitation.
+# stop/start also manage a *targeted* Alertmanager silence (KubeNodeNotReady
+# only, scoped to node=aws-graviton-build) so that specific alert doesn't
+# fire for a node that's intentionally stopped.
+#
+# 2026-09-29: previously also silenced KubeDaemonSetNotFullyReady for
+# cilium/cilium-envoy/node-exporter/spire-agent (that alert has no per-node
+# label, so this was cluster-wide, not AWS-node-specific -- documented as
+# "acceptable" below at the time since the node was expected to be stopped
+# only for short, on-demand windows). That assumption broke: the silence
+# from 2026-08-25 was still active 41 days later, and silently masked a
+# real, unrelated Pelagos CRI bug on ipc7 (host-network pod sandboxes
+# failing to start) for that entire window with zero alerting -- see
+# k3s-experiments/docs/ for that incident. Removed the DaemonSet silence
+# entirely rather than try to scope it more precisely (Prometheus has no
+# clean way to express "this daemonset alert, but only when the missing
+# pod is specifically on aws-graviton-build" from kube_daemonset_status_*
+# alone). Preference going forward: over-alert, not under-alert. A stopped
+# aws-graviton-build will now cause real (if expected/known) DaemonSet
+# alerts each time -- that's intentional.
 #
 # Usage: ./aws-build-node.sh <start|stop|status>
 set -uo pipefail
@@ -49,18 +64,6 @@ instance_id() {
 }
 
 # ── Alertmanager silence helpers ────────────────────────────────────────────
-# Two separate silences, not one with two matchers -- a single silence's
-# matchers are ANDed, and these are logically an OR (either alert should be
-# suppressed). Both share createdBy so start can find and remove them as a
-# pair without tracking IDs across the stop/start boundary.
-#
-# Scoping limitation: KubeDaemonSetNotFullyReady has no per-node label, only
-# daemonset+namespace, so this silences cilium/cilium-envoy/node-exporter/
-# spire-agent DaemonSet issues *cluster-wide* while the AWS node is stopped
-# -- not just the AWS-node-caused instance of that alert. Acceptable given
-# this is a short, on-demand window (not overnight), but a genuine DaemonSet
-# problem on ipc4-9 during that window would also go quiet. Worth knowing.
-
 am_post_silence() {
     local matchers_json="$1" comment="$2"
     local now payload result
@@ -74,18 +77,18 @@ am_post_silence() {
 }
 
 silence_on() {
-    local node_id ds_id
+    local node_id
     node_id=$(am_post_silence \
         '[{"name":"alertname","value":"KubeNodeNotReady","isRegex":false},{"name":"node","value":"'"$INSTANCE_NAME"'","isRegex":false}]' \
         "$INSTANCE_NAME intentionally stopped") \
         || { echo "  (KubeNodeNotReady silence failed -- continuing anyway)" >&2; }
-    ds_id=$(am_post_silence \
-        '[{"name":"alertname","value":"KubeDaemonSetNotFullyReady","isRegex":false},{"name":"daemonset","value":"^(cilium|cilium-envoy|node-exporter|spire-agent)$","isRegex":true}]' \
-        "$INSTANCE_NAME intentionally stopped (DaemonSets scheduled on it)") \
-        || { echo "  (KubeDaemonSetNotFullyReady silence failed -- continuing anyway)" >&2; }
-    if [[ -n "${node_id:-}" || -n "${ds_id:-}" ]]; then
-        echo "  Alerts silenced until stopped=false (removed automatically on next 'start')."
+    if [[ -n "${node_id:-}" ]]; then
+        echo "  KubeNodeNotReady silenced until stopped=false (removed automatically on next 'start')."
     fi
+    echo "  NOT silencing KubeDaemonSetNotFullyReady -- that alert has no per-node label, so"
+    echo "  silencing it here would hide real DaemonSet problems on any other node too. Expect"
+    echo "  cilium/cilium-envoy/node-exporter/spire-agent to show as not-fully-ready while this"
+    echo "  node is stopped -- that's expected noise, not a new problem."
 }
 
 silence_off() {
