@@ -95,10 +95,16 @@ spec:
       resources:
         requests: {cpu: 100m, memory: 1Gi}
         limits: {cpu: 500m, memory: 1Gi}
-      # Tailnet exposure moved 2026-09-27 to a standalone Service
-      # (manifests/authentik/service-tailnet.yaml) selecting these same pods --
-      # this chart's own service.annotations can't carry loadBalancerClass,
-      # which the ProxyGroup migration needs. See that file for why.
+      service:
+        annotations:
+          # Tailnet exposure, same proven Service-mode pattern as
+          # manifests/gruesome, manifests/open-webui, manifests/jupyter.
+          #
+          # 2026-09-28: a brief detour through a standalone Service +
+          # ProxyGroup/Tailscale-Services migration was reverted -- see
+          # manifests/homelab-rag/service.yaml for why.
+          tailscale.com/expose: "true"
+          tailscale.com/hostname: "authentik"
     worker:
       resources:
         requests: {cpu: 100m, memory: 512Mi}

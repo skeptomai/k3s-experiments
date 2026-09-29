@@ -4,14 +4,20 @@ metadata:
   name: homelab-rag
   namespace: homelab-rag
   annotations:
-    # Tailnet exposure via the shared ingress ProxyGroup (see
-    # manifests/tailscale-operator/proxygroup.yaml for why this moved off
-    # the old bare tailscale.com/expose annotation on 2026-09-27).
-    tailscale.com/proxy-group: "ingress-proxies"
+    # Tailnet exposure, same proven Service-mode pattern as
+    # manifests/web-search, manifests/gruesome, manifests/jupyter,
+    # manifests/open-webui, manifests/postgres-pgvector.
+    #
+    # 2026-09-28: reverted from a ProxyGroup/Tailscale-Services migration
+    # (see git history) -- that path needed an ACL grants change that broke
+    # core tailnet connectivity, and turned out to be unnecessary: this
+    # plain pattern was never actually broken (confirmed live against
+    # postgres-pgvector, which stayed on it the whole time and kept working
+    # throughout). Don't re-attempt ProxyGroup without a much stronger
+    # reason and a tested rollback plan.
+    tailscale.com/expose: "true"
     tailscale.com/hostname: "homelab-rag"
 spec:
-  type: LoadBalancer
-  loadBalancerClass: tailscale
   selector:
     app: homelab-rag
   ports:

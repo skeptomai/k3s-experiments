@@ -4,16 +4,17 @@ metadata:
   name: web-search
   namespace: web-search
   annotations:
-    # Tailnet exposure via the shared ingress ProxyGroup (see
-    # manifests/tailscale-operator/proxygroup.yaml).
+    # Tailnet exposure, same proven Service-mode pattern as
+    # manifests/gruesome, manifests/open-webui, manifests/jupyter.
     # Purpose: gptel's web_search tool calls this from omen, which is
     # deliberately kept stateless (no local Python/ddgs install there) --
     # see scripts/web-search-image/README.md.
-    tailscale.com/proxy-group: "ingress-proxies"
+    #
+    # 2026-09-28: reverted from a ProxyGroup/Tailscale-Services migration --
+    # see manifests/homelab-rag/service.yaml for why.
+    tailscale.com/expose: "true"
     tailscale.com/hostname: "web-search"
 spec:
-  type: LoadBalancer
-  loadBalancerClass: tailscale
   selector:
     app: web-search
   ports:

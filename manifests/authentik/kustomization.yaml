@@ -8,4 +8,3 @@ resources:
   - blueprint-forgejo.yaml
   - helmrelease.yaml
   - ingress-funnel.yaml
-  - service-tailnet.yaml
