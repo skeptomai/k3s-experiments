@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: personal-dev-pod-home
+  namespace: personal-dev-pod
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # nfs (not local-path): this needs to survive rescheduling to any node
+  # in the ipc7-9 pool, possibly unattended for a month while the owner
+  # travels (docs/kamaji-on-k3s.md:103). manifests/postgres-pgvector
+  # deliberately avoids nfs because NFS's file-locking semantics are a
+  # poor fit for Postgres's data directory/WAL -- that concern doesn't
+  # apply here, this is just a home directory of git checkouts, cargo
+  # caches and plain files, so nfs is the right and safe choice.
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 100Gi

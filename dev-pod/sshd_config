@@ -1,0 +1,25 @@
+# Personal dev pod sshd config: pubkey-only, no root login, no passwords.
+# Host keys live under a persistent PVC subPath (see entrypoint.sh /
+# manifests/personal-dev-pod/deployment.yaml) so they survive pod
+# reschedule instead of being regenerated (and warning on every SSH)
+# each time the pod is recreated.
+
+Port 22
+Protocol 2
+
+HostKey /etc/ssh/host_keys/ssh_host_ed25519_key
+HostKey /etc/ssh/host_keys/ssh_host_rsa_key
+
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+UsePAM yes
+
+AuthorizedKeysFile .ssh/authorized_keys
+
+X11Forwarding no
+PrintMotd no
+AcceptEnv LANG LC_*
+
+Subsystem sftp /usr/lib/openssh/sftp-server

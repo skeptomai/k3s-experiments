@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: personal-dev-pod
+  namespace: personal-dev-pod
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: personal-dev-pod
+  template:
+    metadata:
+      labels:
+        app: personal-dev-pod
+    spec:
+      # ipc7-9 ("fastest" tier, scripts/label-nodes.sh), not pinned to one
+      # hostname -- lets the scheduler place/reschedule onto whichever
+      # worker has room, so this survives any single node going down for
+      # maintenance while the owner is traveling and unreachable.
+      nodeSelector:
+        node-class: fastest
+      automountServiceAccountToken: false
+      containers:
+        - name: personal-dev-pod
+          image: 192.168.89.2:5004/personal-dev-pod:latest
+          ports:
+            - containerPort: 22
+          volumeMounts:
+            - name: home
+              mountPath: /home/cb
+            - name: home
+              mountPath: /etc/ssh/host_keys
+              # Persist host keys on the same PVC (separate from the
+              # actual home content) so they survive reschedule too --
+              # see dev-pod/entrypoint.sh.
+              subPath: .ssh-host-keys
+            - name: ssh-pubkey
+              mountPath: /etc/ssh-pubkey
+              readOnly: true
+          resources:
+            # Modest on purpose: experiments/29-pelagos-build/build-job.yaml
+            # pins a pelagos build Job to ipc7 requesting up to 12 CPU/16Gi
+            # at burst. No measured per-node headroom baseline exists in
+            # this repo (checked -- none found), so this is a reasonable
+            # starting estimate, not a measured one: keep idle SSH access
+            # cheap and let an occasional overlap just slow a build rather
+            # than starve anything. Revisit if it's ever tight.
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          readinessProbe:
+            tcpSocket:
+              port: 22
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 22
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: personal-dev-pod-home
+        - name: ssh-pubkey
+          secret:
+            # Created manually, out-of-band, not in git (same pattern as
+            # experiments/29-pelagos-build's pelagos-build-ssh-key):
+            #   kubectl create secret generic personal-dev-pod-ssh-key \
+            #     -n personal-dev-pod \
+            #     --from-file=authorized_keys=$HOME/.ssh/Omen.pub
+            secretName: personal-dev-pod-ssh-key
+            defaultMode: 0644

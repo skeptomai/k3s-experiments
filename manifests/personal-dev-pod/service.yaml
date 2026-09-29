@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: personal-dev-pod
+  namespace: personal-dev-pod
+  annotations:
+    # Service-mode tailnet exposure -> devbox.taildd208.ts.net, same
+    # proven pattern as manifests/postgres-pgvector/service.yaml -- the
+    # Tailscale operator proxies whatever port is declared below, not
+    # just HTTP, so plain SSH passthrough works identically. Auth is
+    # SSH pubkey-only (see deployment.yaml / dev-pod/sshd_config), no
+    # password auth, so this is safe to leave open on the tailnet.
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "devbox"
+spec:
+  selector:
+    app: personal-dev-pod
+  ports:
+    - port: 22
+      targetPort: 22
