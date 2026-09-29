@@ -35,6 +35,20 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 cb \
     && echo 'cb ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cb \
     && chmod 0440 /etc/sudoers.d/cb
 
+# SSH login sessions go through PAM, not the container's ENTRYPOINT/ENV --
+# Docker/OCI `ENV` (PATH/CARGO_HOME/RUSTUP_HOME, set by the rust:1-bookworm
+# base) is only inherited by processes the container runtime execs
+# directly, not by sshd-spawned login shells. Without this, `ssh
+# cb@devbox... cargo build` fails with "cargo: command not found" even
+# though the toolchain is right there. pam_env reads /etc/environment for
+# every SSH session (interactive or a single remote command), so mirror
+# the base image's toolchain env vars there explicitly.
+RUN { \
+      echo 'PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'; \
+      echo 'CARGO_HOME=/usr/local/cargo'; \
+      echo 'RUSTUP_HOME=/usr/local/rustup'; \
+    } >> /etc/environment
+
 # sshd: pubkey-only, no password/root login. See sshd_config for the
 # HostKey paths -- those point at a persistent subPath on the same PVC
 # (via entrypoint.sh) so host keys survive reschedule too, avoiding
