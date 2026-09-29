@@ -22,6 +22,7 @@ RUN set -eux; \
         vim \
         less \
         procps \
+        rsync \
     ; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /run/sshd
