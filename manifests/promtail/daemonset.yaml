@@ -30,7 +30,12 @@ spec:
           # Dockerfile (same v3.6.8 source, matching revision 138c391f)
           # with CGO + PROMTAIL_JOURNAL_ENABLED=true and pushed to the
           # cluster's local registry -- see docs/loki-log-aggregation-plan.md.
-          image: 192.168.89.2:5004/promtail-journal:v3.6.8
+          # v3.6.8-1, not v3.6.8: the first build under the v3.6.8 tag used
+          # `make PROMTAIL_JOURNAL_ENABLED=true`, which turned out to be a
+          # silent no-op (see commit history) -- a fixed rebuild pushed
+          # under a new tag to guarantee nodes don't serve the stale,
+          # already-pulled IfNotPresent image cached under the old tag.
+          image: 192.168.89.2:5004/promtail-journal:v3.6.8-1
           args:
             - -config.file=/etc/promtail/promtail.yaml
             - -config.expand-env=true
