@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  # Pre-existing namespace (created ad hoc alongside the untracked
+  # node-exporter/kube-state-metrics DaemonSet/Deployment — see
+  # docs/loki-log-aggregation-plan.md). Declaring it here brings it under
+  # Flux management going forward without disturbing what's already
+  # running in it.
+  name: monitoring
