@@ -20,7 +20,17 @@ spec:
         - operator: Exists
       containers:
         - name: promtail
-          image: grafana/promtail:latest
+          # NOT the stock grafana/promtail image: as pulled ("latest" ->
+          # v3.6.8), it logs "journal target was configured but support
+          # for reading the systemd journal is not compiled into this
+          # build of promtail" -- confirmed live, not assumed. The stock
+          # Docker Hub image ships CGO_ENABLED=0 (no libsystemd), even
+          # though Loki's own clients/cmd/promtail/Dockerfile supports a
+          # PROMTAIL_JOURNAL_ENABLED=true build. Rebuilt that exact
+          # Dockerfile (same v3.6.8 source, matching revision 138c391f)
+          # with CGO + PROMTAIL_JOURNAL_ENABLED=true and pushed to the
+          # cluster's local registry -- see docs/loki-log-aggregation-plan.md.
+          image: 192.168.89.2:5004/promtail-journal:v3.6.8
           args:
             - -config.file=/etc/promtail/promtail.yaml
             - -config.expand-env=true
