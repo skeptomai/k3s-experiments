@@ -4,25 +4,33 @@
 # k3s/Pelagos/Tailscale identity) persists; only compute cost stops accruing.
 # See docs/aws-graviton-build-node.md.
 #
-# stop/start also manage a *targeted* Alertmanager silence (KubeNodeNotReady
-# only, scoped to node=aws-graviton-build) so that specific alert doesn't
-# fire for a node that's intentionally stopped.
+# 2026-09-30: stop/start now delete/recreate the k8s Node object instead of
+# leaving it behind as NotReady. History here: originally `stop` left the
+# Node object in place and silenced KubeNodeNotReady (scoped to
+# node=aws-graviton-build) plus KubeDaemonSetNotFullyReady for
+# cilium/cilium-envoy/node-exporter/spire-agent. That DaemonSet silence had
+# no per-node label to scope it, so it was cluster-wide, not
+# AWS-node-specific -- and on 2026-09-29 that was found to have silently
+# masked a real, unrelated Pelagos CRI bug on ipc7 for the 41 days the node
+# sat stopped. The fix that day removed the DaemonSet silence outright and
+# accepted the resulting noise (over-alert, not under-alert) since
+# Prometheus has no clean way to express "this daemonset alert, but only
+# when the missing pod is specifically on aws-graviton-build" from
+# kube_daemonset_status_* alone -- that metric has no per-node label.
 #
-# 2026-09-29: previously also silenced KubeDaemonSetNotFullyReady for
-# cilium/cilium-envoy/node-exporter/spire-agent (that alert has no per-node
-# label, so this was cluster-wide, not AWS-node-specific -- documented as
-# "acceptable" below at the time since the node was expected to be stopped
-# only for short, on-demand windows). That assumption broke: the silence
-# from 2026-08-25 was still active 41 days later, and silently masked a
-# real, unrelated Pelagos CRI bug on ipc7 (host-network pod sandboxes
-# failing to start) for that entire window with zero alerting -- see
-# k3s-experiments/docs/ for that incident. Removed the DaemonSet silence
-# entirely rather than try to scope it more precisely (Prometheus has no
-# clean way to express "this daemonset alert, but only when the missing
-# pod is specifically on aws-graviton-build" from kube_daemonset_status_*
-# alone). Preference going forward: over-alert, not under-alert. A stopped
-# aws-graviton-build will now cause real (if expected/known) DaemonSet
-# alerts each time -- that's intentional.
+# But the noise wasn't actually necessary: kube_daemonset_status_desired_
+# number_scheduled counts any Node object matching the DaemonSet's
+# selector, NotReady or not (confirmed: cilium/cilium-envoy only require
+# os=linux, node-exporter/spire-agent have no selector at all -- none
+# restrict by hostname). So a stopped-but-still-registered Node is exactly
+# what inflates "desired" past "ready" and fires both alerts. Deleting the
+# Node object when stopped (no PVs are bound here, confirmed safe) drops
+# it out of "desired" too, so neither alert fires -- correctly, because the
+# state is now accurate, not because anything is suppressed. The k3s agent
+# recreates its own Node object automatically on boot (it reuses the
+# identity already persisted on the EBS volume), so `start` needs no
+# manual re-registration, just a wait for Ready. No Alertmanager silence
+# of any kind is needed any more; this replaces that mechanism entirely.
 #
 # Usage: ./aws-build-node.sh <start|stop|status>
 set -uo pipefail
@@ -39,23 +47,10 @@ ALERTMANAGER="http://192.168.89.2:9093"
 # machine has AWS credentials -- not necessarily one with a route to the
 # LAN (e.g. no Tailscale subnet-route is advertised anymore, by design,
 # per k3s-experiments#20). Route through ipc4 via SSH so this works
-# regardless of where it's invoked from.
+# regardless of where it's invoked from. Only used now for clearing out any
+# pre-2026-09-30 silences left over from the old mechanism (see header).
 LAN_JUMP="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 cb@ipc4.taildd208.ts.net"
 SILENCE_CREATED_BY="aws-build-node.sh"
-# NOT a real expiry -- the thing that should decide "is this node expected
-# to be up" is the stop/start action itself, not a clock. A TTL here is a
-# guess about how long you'll leave it stopped, and any guess is wrong
-# often enough: first tried 24h, it lapsed mid-stop and
-# KubeNodeNotReady/KubeDaemonSetNotFullyReady fired for a full day before
-# anyone noticed (2026-08-25); raising it to a week just moves the same
-# failure mode further out, it doesn't remove it. Alertmanager's API
-# requires *some* endsAt, so this is a far-future placeholder, not a
-# lifetime -- `start` always deletes the silence outright, and `status`
-# below cross-checks silence state against actual instance state so drift
-# (e.g. the instance stopped/started outside this script, or torn down by
-# `terraform destroy` without running `start` first) is visible instead of
-# silent.
-SILENCE_ENDS_AT="2099-12-31T00:00:00Z"
 
 instance_id() {
     aws ec2 describe-instances --profile "$PROFILE" --region "$REGION" \
@@ -63,38 +58,34 @@ instance_id() {
         --query 'Reservations[0].Instances[0].InstanceId' --output text
 }
 
-# ── Alertmanager silence helpers ────────────────────────────────────────────
-am_post_silence() {
-    local matchers_json="$1" comment="$2"
-    local now payload result
-    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    payload="{\"matchers\": $matchers_json, \"startsAt\": \"$now\", \"endsAt\": \"$SILENCE_ENDS_AT\", \"createdBy\": \"$SILENCE_CREATED_BY\", \"comment\": \"$comment\"}"
-    if ! result=$($LAN_JUMP "curl -sf --max-time 10 -X POST '$ALERTMANAGER/api/v2/silences' -H 'Content-Type: application/json' -d '$payload'"); then
-        echo "WARNING: could not reach Alertmanager (via ipc4) to create silence ($comment)" >&2
+# ── k8s Node lifecycle ──────────────────────────────────────────────────────
+# Plain kubectl, not SSH-wrapped: unlike Alertmanager, ipc4:6443 is
+# tailnet-reachable directly (same as every other script in this repo that
+# runs from omen), so no LAN jump is needed here.
+node_delete() {
+    if ! kubectl delete node "$INSTANCE_NAME" --ignore-not-found --timeout=15s >/dev/null 2>&1; then
+        echo "  WARNING: could not delete Node object $INSTANCE_NAME (kubectl unreachable, or delete failed) -- KubeNodeNotReady/KubeDaemonSetNotFullyReady may fire until this is cleaned up (rerun '$0 stop', or 'kubectl delete node $INSTANCE_NAME' manually)" >&2
         return 1
     fi
-    echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin)['silenceID'])"
+    echo "  Deleted Node object $INSTANCE_NAME (k3s agent recreates it automatically on next 'start')."
 }
 
-silence_on() {
-    local node_id
-    node_id=$(am_post_silence \
-        '[{"name":"alertname","value":"KubeNodeNotReady","isRegex":false},{"name":"node","value":"'"$INSTANCE_NAME"'","isRegex":false}]' \
-        "$INSTANCE_NAME intentionally stopped") \
-        || { echo "  (KubeNodeNotReady silence failed -- continuing anyway)" >&2; }
-    if [[ -n "${node_id:-}" ]]; then
-        echo "  KubeNodeNotReady silenced until stopped=false (removed automatically on next 'start')."
+node_wait_ready() {
+    echo "  Waiting for Node object $INSTANCE_NAME to re-register and go Ready..."
+    if kubectl wait "node/$INSTANCE_NAME" --for=condition=Ready --timeout=120s >/dev/null 2>&1; then
+        echo "  Node Ready."
+    else
+        echo "  WARNING: Node $INSTANCE_NAME did not reach Ready within 120s -- check 'kubectl get node $INSTANCE_NAME' and k3s-agent on the instance" >&2
     fi
-    echo "  NOT silencing KubeDaemonSetNotFullyReady -- that alert has no per-node label, so"
-    echo "  silencing it here would hide real DaemonSet problems on any other node too. Expect"
-    echo "  cilium/cilium-envoy/node-exporter/spire-agent to show as not-fully-ready while this"
-    echo "  node is stopped -- that's expected noise, not a new problem."
 }
 
-silence_off() {
+# ── legacy silence cleanup ──────────────────────────────────────────────────
+# One-time-ish migration helper: clears any still-active silence created by
+# the pre-2026-09-30 mechanism (far-future endsAt, so these don't self-expire
+# on their own). Safe to call unconditionally -- a no-op once none are left.
+clear_legacy_silences() {
     local body ids
-    if ! body=$($LAN_JUMP "curl -sf --max-time 10 '$ALERTMANAGER/api/v2/silences'"); then
-        echo "  WARNING: could not reach Alertmanager (via ipc4) to remove silences -- they will NOT self-expire (endsAt is far-future by design); re-run 'stop' or 'start' once connectivity is back, or check 'status' for drift" >&2
+    if ! body=$($LAN_JUMP "curl -sf --max-time 10 '$ALERTMANAGER/api/v2/silences'" 2>/dev/null); then
         return 0
     fi
     ids=$(echo "$body" | python3 -c "
@@ -102,22 +93,19 @@ import sys, json
 for s in json.load(sys.stdin):
     if s.get('createdBy') == '$SILENCE_CREATED_BY' and s['status']['state'] == 'active':
         print(s['id'])
-")
+" 2>/dev/null)
     if [[ -z "$ids" ]]; then
         return 0
     fi
     while read -r id; do
         [[ -z "$id" ]] && continue
-        # </dev/null on the ssh call is required here, not cosmetic: without
-        # it, ssh's own stdin competes with this while-loop's `read` for the
-        # here-string below, silently swallowing the second (and any later)
-        # id after the first iteration -- classic `ssh` -inside-`while read`
-        # bug. Confirmed the hard way: only 1 of 2 silences got removed
-        # before this was added.
+        # </dev/null required -- ssh's own stdin otherwise competes with this
+        # while-loop's `read` for the here-string, silently swallowing every
+        # id after the first iteration. Confirmed the hard way previously.
         if $LAN_JUMP "curl -sf --max-time 10 -X DELETE '$ALERTMANAGER/api/v2/silence/$id'" </dev/null >/dev/null; then
-            echo "  Removed silence $id"
+            echo "  Cleared legacy silence $id"
         else
-            echo "  WARNING: failed to remove silence $id -- it will NOT self-expire (endsAt is far-future); it'll show up as drift in 'status' until manually cleared" >&2
+            echo "  WARNING: failed to clear legacy silence $id" >&2
         fi
     done <<< "$ids"
 }
@@ -136,14 +124,15 @@ case "${1:-status}" in
         aws ec2 start-instances --profile "$PROFILE" --region "$REGION" --instance-ids "$ID" >/dev/null
         aws ec2 wait instance-running --profile "$PROFILE" --region "$REGION" --instance-ids "$ID"
         echo "Running. Tailscale/SSH may take another 10-20s to come up after boot."
-        silence_off
+        node_wait_ready
+        clear_legacy_silences
         ;;
     stop)
         echo "=== Stopping $INSTANCE_NAME ($ID) ==="
         aws ec2 stop-instances --profile "$PROFILE" --region "$REGION" --instance-ids "$ID" >/dev/null
         aws ec2 wait instance-stopped --profile "$PROFILE" --region "$REGION" --instance-ids "$ID"
         echo "Stopped. Compute billing paused; EBS storage still accrues (~\$8/mo for 100GB gp3)."
-        silence_on
+        node_delete
         ;;
     status)
         STATE=$(aws ec2 describe-instances --profile "$PROFILE" --region "$REGION" --instance-ids "$ID" \
@@ -151,35 +140,27 @@ case "${1:-status}" in
         aws ec2 describe-instances --profile "$PROFILE" --region "$REGION" --instance-ids "$ID" \
             --query 'Reservations[0].Instances[0].[InstanceId,State.Name,InstanceType]' --output table
 
-        # Drift check: does silence state actually match instance state?
-        # This is the real safety net (not a TTL) -- catches the instance
-        # being stopped/started outside this script, or a silence left
-        # behind by a failed 'start' call.
-        SILENCE_COUNT=$($LAN_JUMP "curl -sf --max-time 10 '$ALERTMANAGER/api/v2/silences'" 2>/dev/null \
-            | python3 -c "
-import sys, json
-try:
-    print(sum(1 for s in json.load(sys.stdin) if s.get('createdBy') == '$SILENCE_CREATED_BY' and s['status']['state'] == 'active'))
-except Exception:
-    print(-1)
-" 2>/dev/null)
-        if [[ "$SILENCE_COUNT" == "-1" || -z "$SILENCE_COUNT" ]]; then
-            echo "  (could not check silence state -- Alertmanager unreachable via ipc4)"
-        elif [[ "$STATE" == "stopped" && "$SILENCE_COUNT" -eq 0 ]]; then
-            echo "  DRIFT: instance is stopped but no silence is active -- alerts WILL fire. Run '$0 stop' to re-silence."
-        elif [[ "$STATE" == "running" && "$SILENCE_COUNT" -gt 0 ]]; then
-            echo "  DRIFT: instance is running but $SILENCE_COUNT silence(s) still active -- run '$0 start' to clear them."
+        # Drift check: does Node registration actually match instance state?
+        # This is the real safety net -- catches the instance being
+        # stopped/started outside this script, or a delete that failed
+        # partway through.
+        NODE_EXISTS=$(kubectl get node "$INSTANCE_NAME" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        if [[ -z "$NODE_EXISTS" ]]; then
+            echo "  (could not check Node registration -- kubectl unreachable)"
+        elif [[ "$STATE" == "stopped" && "$NODE_EXISTS" != "0" ]]; then
+            echo "  DRIFT: instance is stopped but Node object still exists -- KubeNodeNotReady/KubeDaemonSetNotFullyReady may be firing. Run '$0 stop' again to clean up."
+        elif [[ "$STATE" == "running" && "$NODE_EXISTS" == "0" ]]; then
+            echo "  DRIFT: instance is running but no Node object exists -- k3s-agent may not have rejoined yet, or something's wrong. Check 'journalctl -u k3s-agent' on the instance, or rerun '$0 start'."
         else
-            echo "  Silence state consistent with instance state ($SILENCE_COUNT active silence(s))."
+            echo "  Node registration state consistent with instance state."
         fi
+        clear_legacy_silences
         ;;
     unsilence)
-        # Clears silences WITHOUT touching instance state -- for cleaning up
-        # stale/duplicate silences, or as the last step of decommissioning
-        # this node (terraform destroy) so a silence for an instance that
-        # no longer exists doesn't sit active until 2099.
-        echo "=== Clearing silences for $INSTANCE_NAME (instance state untouched) ==="
-        silence_off
+        # Pure migration/cleanup: clears any leftover silence from the old
+        # mechanism WITHOUT touching instance or Node state.
+        echo "=== Clearing legacy silences for $INSTANCE_NAME ==="
+        clear_legacy_silences
         ;;
     *)
         echo "Usage: $0 <start|stop|status|unsilence>" >&2

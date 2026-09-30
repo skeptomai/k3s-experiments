@@ -77,6 +77,28 @@ else
 fi
 
 echo
+# DaemonSet ready-vs-desired above only proves pod *count* -- it can't tell
+# "Cilium is actually broken" apart from "a pod is missing because its node
+# is down" (both look like e.g. 6/7 Ready). `cilium status --brief` checks
+# the agent's own view of itself instead: failing controllers, degraded
+# modules, BPF/datapath state -- exits clean ("OK") only if genuinely
+# healthy. Picks a Running pod explicitly so this doesn't hang execing into
+# one stuck on a NotReady node.
+echo "Cilium agent status:"
+cilium_pod=$(kubectl -n cilium get pods -l k8s-app=cilium --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [ -z "$cilium_pod" ]; then
+  echo "  WARNING: no Running cilium-agent pod found to query"
+else
+  cilium_brief=$(kubectl -n cilium exec "$cilium_pod" -c cilium-agent -- cilium status --brief 2>&1)
+  if [ "$cilium_brief" = "OK" ]; then
+    echo "  OK (checked via $cilium_pod)"
+  else
+    echo "  ISSUE (via $cilium_pod):"
+    echo "$cilium_brief" | sed 's/^/    /'
+  fi
+fi
+
+echo
 not_ready_ks=$(kubectl get kustomization -A --no-headers 2>/dev/null | awk '$4 != "True" {print "  " $1 "/" $2 ": " $4}')
 if [ -n "$not_ready_ks" ]; then
   echo "Flux Kustomizations NOT Ready:"

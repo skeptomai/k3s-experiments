@@ -183,19 +183,40 @@ If the instance is ever replaced (not just stopped/started):
 
 ## Usage
 
-**Start/stop**: `scripts/aws-build-node.sh start` / `stop` / `status`. Since
-the node stops instead of terminating, a stopped instance is still a real k8s
-Node object sitting NotReady with its DaemonSet pods unready
-(`cilium`/`cilium-envoy`/`node-exporter`/`spire-agent` all schedule there) —
-`stop` creates two targeted Alertmanager silences (`KubeNodeNotReady` +
-`KubeDaemonSetNotFullyReady` scoped to those four DaemonSets) so this doesn't
-page for an intentional state; `start` removes them immediately. Each silence
-has a 24h safety cap regardless, in case `start` never runs (instance
-replaced some other way). **Known scoping gap**: `KubeDaemonSetNotFullyReady`
-has no per-node label, so the silence is DaemonSet-name-scoped but not
-node-scoped — a genuine DaemonSet problem on ipc4-9 during that same window
-would also go quiet. Acceptable for a short, on-demand window; would need
-revisiting if this node's uptime pattern ever becomes longer-lived.
+**Start/stop**: `scripts/aws-build-node.sh start` / `stop` / `status`.
+
+Since the node stops instead of terminating, the *instance* persists across a
+stop, but `stop` **deletes the k8s Node object** rather than leaving it
+behind NotReady; `start` waits for the k3s agent to re-register it and reach
+Ready (it reuses the identity already persisted on the EBS root volume, no
+manual rejoin needed). This is a state fix, not a suppression: with the Node
+object gone, `kube_daemonset_status_desired_number_scheduled` for
+`cilium`/`cilium-envoy`/`node-exporter`/`spire-agent` (none of which restrict
+scheduling by hostname — confirmed only `os=linux` or no selector at all)
+correctly drops to match the 6 remaining nodes, so neither
+`KubeNodeNotReady` nor `KubeDaemonSetNotFullyReady` fires in the first place.
+No Alertmanager silence is created any more.
+
+**History**: this replaced two earlier mechanisms, in order:
+1. Originally, `stop` left the Node object as NotReady and created two
+   targeted Alertmanager silences (`KubeNodeNotReady` +
+   `KubeDaemonSetNotFullyReady`, the latter DaemonSet-name-scoped but not
+   node-scoped since that alert has no per-node label).
+2. 2026-09-29: the `KubeDaemonSetNotFullyReady` silence was found to have
+   been cluster-wide for 41 days (it had no per-node label to narrow it),
+   silently masking an unrelated real Pelagos CRI bug on ipc7 the whole
+   time. Removed that silence outright, accepted the resulting noise
+   (over-alert, not under-alert) since scoping it more precisely looked
+   impossible from `kube_daemonset_status_*` alone.
+3. 2026-09-30: realized the noise wasn't actually necessary — the metric's
+   "desired" count includes any Node object matching the DaemonSet's
+   selector regardless of Ready state, so a stopped-but-still-registered
+   Node was the actual cause of both alerts. Deleting the Node object on
+   `stop` (confirmed safe: no PVs bound there) fixes the root cause
+   instead, and removes the need for any silence at all. `scripts/
+   cluster-health.sh` also gained a direct `cilium status --brief` check
+   around this same time, so DaemonSet ready-count alone is no longer the
+   only signal for whether Cilium itself is actually healthy.
 
 **Submit a build Job**: target the node via `nodeSelector` on
 `kubernetes.io/arch: arm64` plus a toleration for `cloud=aws:NoSchedule` —
