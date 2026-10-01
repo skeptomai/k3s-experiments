@@ -44,6 +44,23 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # Promtail's kubernetes_sd target manager unconditionally builds
+            # its own "spec.nodeName=<hostname>" pod field selector
+            # (fulfillKubePodSelector in
+            # clients/pkg/promtail/targets/file/filetargetmanager.go) and
+            # ANDs it onto any selectors we configure -- there's no way to
+            # opt out. Its hostname() helper reads $HOSTNAME first, which
+            # without hostNetwork defaults to this pod's own name (e.g.
+            # "promtail-abc12"), not the k8s node name -- so the resulting
+            # selector ("spec.nodeName=ipc4,spec.nodeName=promtail-abc12")
+            # never matches, and kubernetes-pods discovery silently finds
+            # zero targets. Overriding $HOSTNAME to the real node name here
+            # (confirmed by reading that source directly, not guessed)
+            # fixes it without needing hostNetwork: true.
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           ports:
             - containerPort: 9080
               name: http-metrics

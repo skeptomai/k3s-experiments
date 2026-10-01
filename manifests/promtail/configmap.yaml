@@ -28,15 +28,19 @@ data:
           - cri: {}
         kubernetes_sd_configs:
           - role: pod
-            # API-side field selector restricts discovery to pods scheduled
-            # on this DaemonSet pod's own node -- each instance only has
-            # hostPath access to /var/log/pods for its own node anyway.
-            # ${NODE_NAME} is expanded from the container's env at startup
-            # via -config.expand-env=true.
-            selectors:
-              - role: pod
-                field: "spec.nodeName=${NODE_NAME}"
         relabel_configs:
+          # Belt-and-suspenders: Promtail's own kubernetes_sd target manager
+          # already restricts the API-side list/watch to this node via a
+          # "spec.nodeName=<$HOSTNAME>" field selector it builds internally
+          # (fulfillKubePodSelector) -- which only works because the
+          # DaemonSet overrides $HOSTNAME to the real node name (see
+          # daemonset.yaml; without that override $HOSTNAME defaults to the
+          # pod's own name, not the node's, and discovery silently returns
+          # zero pods). This relabel is a redundant explicit filter on the
+          # same label in case that ever changes.
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            regex: "${NODE_NAME}"
+            action: keep
           - source_labels: [__meta_kubernetes_pod_controller_name]
             regex: ([0-9a-z-.]+?)(-[0-9a-f]{8,10})?
             action: replace
