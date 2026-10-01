@@ -17,6 +17,52 @@ container-restart-rate rules) were implemented in `home-monitoring`
 before/after example: the data (`kube_pod_container_status_restarts_total`)
 was always there, nothing was watching it, now something is.
 
+**Update 2026-10-01**: the specific `lastState` gap documented below (line
+53 — empty on `cilium-knvpg`/`cilium-envoy-kz7tr` despite thousands of
+restarts) was filed as pelagos#557, root-caused, and fixed in
+[PR #558](https://github.com/pelagos-containers/pelagos/pull/558) (merged
+`51867b0`, released as v0.65.100). Root cause was **not** pelagos-cri
+failing to populate `lastState` in general — a plain crash-looping
+container correctly reports `lastState` across a `pelagos-cri` restart.
+The actual bug: `pelagos-cri`'s existing `#457` recovery path (force-kills
+any *running* hostNetwork container on its own startup, via `pelagos stop
+--time 0`, to release the container's host-network port binding, then
+marks it `Exited` so kubelet reschedules a replacement) left `exit_code` at
+its pre-exit default of `0` instead of recording the real SIGKILL. A
+force-killed container was therefore indistinguishable from a clean exit
+in `ContainerStatus`, which is exactly what left `lastState` unable to
+carry any useful reason — this is almost certainly what happened to
+`cilium-knvpg`/`cilium-envoy-kz7tr` historically, every time `pelagos-cri`
+itself restarted while they were running. Fixed by setting `exit_code` to
+`137` (128+SIGKILL, matching the existing OOM-kill convention) on that
+path. Verified live and in place on ipc7 (not on the two originally-named
+pods, which had already rolled past this by the time of the fix): before
+the fix, a hostNetwork test pod's `lastState.terminated` showed
+`exitCode:0` with no `reason` after a `pelagos-cri` restart; after
+deploying the fix, the identical scenario showed `exitCode:137`.
+
+**Addendum to the addendum, same day**: a separate agent, mid-investigation
+of *this* doc, flagged what looked like a resurfacing of #553 — `ipc7`
+alone showing new Cilium-agent/speaker restarts (4842→4845,
+1931→1934) and running a different pelagos build hash
+(`0.65.99+13abb68`) than the rest of the fleet (`0.65.99+3755891`). That
+was correctly-read raw data but an incorrect inference: `13abb68` is the
+commit of the `fix/cri-last-state-557` branch above, deployed *only* to
+ipc7 (the cluster's single build+test guinea pig, via
+`home-monitoring/pelagos-build/cluster-build.sh`) while diagnosing and
+verifying #557 — not a fleet rollout, and not `#553` reappearing. Every
+`pelagos-cri` restart during that work (4 total, confirmed via
+`journalctl -u pelagos-cri` on ipc7: 2026-09-30T23:47:27Z, 23:49:05Z,
+23:52:46Z, 23:53:04Z) re-triggered the same pre-existing, correctly-working
+`#457` hostNetwork-port-release logic described above, which is what
+bumped those two DaemonSets' restart counts on that one node. `#553`
+remains fixed; nothing regressed. The one real loose end this left behind
+was operational, not a bug: ipc7 was sitting on a one-off dev build
+instead of the fleet's official release. Resolution (approved by the repo
+owner): once v0.65.100 finishes release CI, roll it out to **all six
+nodes including ipc7** in one pass, converging everyone on the same
+official binary, rather than reverting ipc7 to the older release first.
+
 ## Summary
 
 While reviewing the cluster's IPVS/Cilium/MetalLB history for an unrelated writeup, live `kubectl` inspection turned up a real, currently-unexplained anomaly: **`ipc7` shows dramatically elevated lifetime restart counts across two unrelated DaemonSets** (Cilium's own pods, and MetalLB's speaker) compared to every other node. Root cause is **not** found — this doc is the investigation record and a handoff, not a postmortem with a resolution.
