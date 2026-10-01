@@ -152,6 +152,28 @@ crashing/restarting rather than a missing-install problem — confirmed
 into the image now, verified on a freshly-recreated pod, not just
 live-patched).
 
+### CrashLoopBackOff specifically on ipc7: sshd refuses `/run/sshd` ownership
+
+If this pod (or any image whose entrypoint assumes `/run` is a fresh,
+empty, root-owned tmpfs at container start) lands on `ipc7` and sshd
+fails with `/run/sshd must be owned by root and not group or
+world-writable`, that's not a config problem in this repo — it's a
+Pelagos CRI bug isolated to that one node (confirmed 2026-10-01, not
+reproducible on ipc8/ipc9 running the identical Pelagos version): `/run`
+doesn't get a fresh tmpfs mounted on `ipc7`, so the container's own
+image-layer content for `/run/sshd` shows through unmasked, frozen at
+image-build time and group-owned by the **host's** `pelagos` service
+group — a namespace leak. `dev-pod/entrypoint.sh` now re-asserts
+`root:root 0755` on `/run/sshd` at every start regardless of what the
+runtime provides, which works around the symptom. Reported upstream:
+[pelagos-containers/pelagos#559](https://github.com/pelagos-containers/pelagos/issues/559).
+This is the second distinct CRI-lifecycle bug isolated specifically to
+`ipc7` in the span of a few days (see
+`k3s-experiments/docs/ipc7-elevated-restarts-investigation.md` for the
+first) — worth treating `ipc7` as a node with possibly-stale runtime
+state worth a `pelagos-cri` restart or reinstall if a third anomaly
+shows up there, not just another one-off code bug.
+
 ### Resource contention with the pelagos build Job
 
 `experiments/29-pelagos-build/build-job.yaml` pins a pelagos build Job

@@ -16,6 +16,24 @@
 #      up every start, not just once.
 set -euo pipefail
 
+# Defense in depth, not just belt-and-suspenders: the Dockerfile's
+# build-time `mkdir -p /run/sshd` assumes the container runtime always
+# gives a fresh, empty /run tmpfs at start, so that directory (owned
+# root:root from the build) is what sshd sees. That assumption broke on
+# ipc7 specifically (confirmed 2026-10-01, not reproducible on ipc8/ipc9
+# on the same Pelagos version) -- its CRI failed to mount a fresh tmpfs
+# over /run, so the container's own image-layer /run/sshd showed through
+# unmasked, frozen at image-build time and group-owned by the HOST's
+# `pelagos` service group (983) -- a namespace leak, not just a missing
+# directory. sshd's StrictModes then refuses to start ("must be owned by
+# root and not group or world-writable"), permanent CrashLoopBackOff. This
+# re-asserts correct ownership every start regardless of what the runtime
+# handed us, independent of whatever's actually wrong in Pelagos CRI on
+# that node -- reported upstream as pelagos-containers/pelagos#559.
+mkdir -p /run/sshd
+chown root:root /run/sshd
+chmod 0755 /run/sshd
+
 HOME_DIR=/home/cb
 HOSTKEY_DIR=/etc/ssh/host_keys
 PUBKEY_SRC=/etc/ssh-pubkey/authorized_keys
