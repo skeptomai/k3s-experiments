@@ -152,27 +152,19 @@ crashing/restarting rather than a missing-install problem — confirmed
 into the image now, verified on a freshly-recreated pod, not just
 live-patched).
 
-### CrashLoopBackOff specifically on ipc7: sshd refuses `/run/sshd` ownership
+### Resolved: sshd `/run/sshd` ownership CrashLoopBackOff (historical)
 
-If this pod (or any image whose entrypoint assumes `/run` is a fresh,
-empty, root-owned tmpfs at container start) lands on `ipc7` and sshd
-fails with `/run/sshd must be owned by root and not group or
-world-writable`, that's not a config problem in this repo — it's a
-Pelagos CRI bug isolated to that one node (confirmed 2026-10-01, not
-reproducible on ipc8/ipc9 running the identical Pelagos version): `/run`
-doesn't get a fresh tmpfs mounted on `ipc7`, so the container's own
-image-layer content for `/run/sshd` shows through unmasked, frozen at
-image-build time and group-owned by the **host's** `pelagos` service
-group — a namespace leak. `dev-pod/entrypoint.sh` now re-asserts
-`root:root 0755` on `/run/sshd` at every start regardless of what the
-runtime provides, which works around the symptom. Reported upstream:
-[pelagos-containers/pelagos#559](https://github.com/pelagos-containers/pelagos/issues/559).
-This is the second distinct CRI-lifecycle bug isolated specifically to
-`ipc7` in the span of a few days (see
-`k3s-experiments/docs/ipc7-elevated-restarts-investigation.md` for the
-first) — worth treating `ipc7` as a node with possibly-stale runtime
-state worth a `pelagos-cri` restart or reinstall if a third anomaly
-shows up there, not just another one-off code bug.
+Hit 2026-10-01 — first looked `ipc7`-specific (sshd refused to start,
+`/run/sshd must be owned by root and not group or world-writable`), but a
+deeper investigation on 2026-10-02 found that read was wrong: Pelagos
+never mounted a real tmpfs over `/run` for CRI containers *on any node*,
+compounded by a GID leak in image-layer extraction that made the symptom
+look node-correlated when it was really cache-history-correlated. Fixed
+upstream in [pelagos-containers/pelagos#559](https://github.com/pelagos-containers/pelagos/issues/559)
+(PR#560, released v0.65.101), rolled out fleet-wide, and independently
+verified on `ipc9` post-fix. The entrypoint's `/run/sshd` re-chown
+workaround was removed once the real fix was confirmed live — see
+`k3s-experiments`'s memory/commit history if you need the full forensics.
 
 ### Resource contention with the pelagos build Job
 
