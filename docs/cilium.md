@@ -31,6 +31,16 @@ operator.replicas    = 2
 `kubeProxyReplacement=false` means Cilium handles **NetworkPolicy enforcement** via
 BPF but leaves ClusterIP/NodePort DNAT to k3s's embedded kube-proxy.
 
+**Why `false` rather than Cilium's own native Service routing (`kubeProxyReplacement=true`):**
+this cluster started on kube-proxy before Cilium was introduced — Flannel, which Cilium
+replaced, never did Service routing; that was always kube-proxy's job. The CNI swap alone
+needed three separate Pelagos bugs fixed before it ran cleanly (#484, #483, #492, below).
+Taking on `kubeProxyReplacement=true` at the same time would have meant debugging two major
+subsystem changes simultaneously — CNI and Service routing — with no way to isolate which
+layer a given failure belonged to. Leaving kube-proxy as the known, already-working piece and
+only swapping the CNI was the lower-risk incremental path. Not revisited since; this is not a
+compatibility finding against `kubeProxyReplacement=true`, just the path that was taken.
+
 **kube-proxy must use nftables mode** (`proxy-mode=nftables` in `kube-proxy-arg`).
 IPVS mode conflicts with Cilium's BPF service hooks: IPVS virtual servers are shadowed
 by Cilium's BPF TC programs, making NodePorts unreachable from outside the cluster even
