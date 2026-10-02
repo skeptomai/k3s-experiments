@@ -63,6 +63,45 @@ owner): once v0.65.100 finishes release CI, roll it out to **all six
 nodes including ipc7** in one pass, converging everyone on the same
 official binary, rather than reverting ipc7 to the older release first.
 
+**Update 2026-10-02, afternoon**: the same false-alarm shape recurred a third
+time (second time being mistaken for a health issue), this time from a
+different investigating session (the `k8s-scaling` one, prompted by a
+physical-hardware concern about `ipc7`). At 14:33 UTC, Alertmanager's
+`KubePodRestartingTooOften` fired again for `cilium-knvpg` /
+`cilium-envoy-kz7tr` on `ipc7`. Full check performed before concluding
+anything: current/historical `node_hwmon_temp_celsius` on `ipc7` around the
+event (flat, 33-39°C NVMe / 35-59°C CPU, no spike, no sensor anomaly beyond
+the universal `-266.9°C` `thermal_zone0` artifact present on all six nodes);
+`node_boot_time_seconds` unchanged from the shared ~12:00 UTC nightly
+power-cycle (the node itself never rebooted); journal searched for
+OOM/panic/segfault/MCE/disk-I/O/NIC-reset/ECC/Xid patterns in the restart
+window (nothing); `node_network_receive_errs_total` /
+`transmit_errs_total` / `node_disk_io_now` all zero fleet-wide. The journal
+showed `pelagos_cri` receiving a clean `SIGTERM` at 14:30:06Z and again at
+14:31:16Z, then a full k3s-agent (kubelet+kube-proxy) cold start at
+14:33:24-27Z — a deliberate service restart, not a crash.
+
+Root cause, same shape as the #557 addendum above: `ipc7` was running
+`pelagos://0.65.100+3646e7d` while the rest of the fleet sat on
+`pelagos://0.65.100+39720b5`. `3646e7d` is **not a tagged release**
+(`git describe` → `v0.65.100-2-g3646e7d`, i.e. two commits past the
+`v0.65.100` tag) — it's commit `fix: mount fresh /run tmpfs in CRI
+containers; stop layer-extraction GID leak` on branch
+`fix/run-tmpfs-gid-leak-559`, deployed to `ipc7` alone as the cluster's
+single build+test guinea pig, exactly as `13abb68`/#557 was. The restart
+counts ticked up by a small, one-time amount (+7/+8) consistent with the
+one deploy event, not a crash loop, and Cilium came back fully healthy
+immediately after (`cilium-dbg status`: 52/52 controllers healthy, cluster
+health 6/6 reachable, 0 degraded modules).
+
+**Standing lesson, now confirmed twice**: before treating any ipc7-specific
+restart/alert as a sign of a problem, check
+`kubectl get nodes -o custom-columns=NAME:.metadata.name,RUNTIME:.status.nodeInfo.containerRuntimeVersion`
+for a build-hash mismatch against the rest of the fleet first. `ipc7` being
+the designated dev-build guinea pig node means it will periodically run a
+different (unreleased) binary than everyone else, and that alone reliably
+explains an isolated restart with no other symptoms.
+
 ## Summary
 
 While reviewing the cluster's IPVS/Cilium/MetalLB history for an unrelated writeup, live `kubectl` inspection turned up a real, currently-unexplained anomaly: **`ipc7` shows dramatically elevated lifetime restart counts across two unrelated DaemonSets** (Cilium's own pods, and MetalLB's speaker) compared to every other node. Root cause is **not** found — this doc is the investigation record and a handoff, not a postmortem with a resolution.
