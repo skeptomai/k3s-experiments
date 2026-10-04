@@ -1,10 +1,12 @@
 {
-  "title": "k3s Node Temperatures",
+  "title": "ipc Node Temps & UPS Power",
   "uid": "k3s-node-temps",
   "tags": [
     "k3s",
     "hardware",
-    "temperature"
+    "temperature",
+    "ups",
+    "power"
   ],
   "timezone": "browser",
   "schemaVersion": 36,
