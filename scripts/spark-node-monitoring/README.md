@@ -130,6 +130,26 @@ sudo nmcli connection reload
   IPs if these need updating.
 - **Ethernet not yet connected** — `enP7s7` is up but no cable. The EEE fix
   above is pre-installed and takes effect automatically once it's wired.
+- **NUT client (`upsmon`), for graceful shutdown** — added 2026-10-04. Spark
+  shares the *same physical outlet* as nazgul's CyberPower UPS (not its own
+  separate unit), but had zero power-event awareness: `nut` wasn't even
+  installed, so a power event that triggers nazgul's own emergency shutdown
+  would have left Spark with no warning at all, unlike the ipc cluster
+  (ipc5-9 all run `upsmon` as slaves of ipc4's UPS — this mirrors that same
+  pattern, just pointed at nazgul's server instead). `sudo apt-get install
+  nut-client`, then set `MODE=netclient` in `/etc/nut/nut.conf` and append
+  to `/etc/nut/upsmon.conf`:
+  ```
+  MONITOR cyberpower@192.168.89.2 1 upsmon upsmon123 slave
+  SHUTDOWNCMD "/sbin/shutdown -h +0"
+  ```
+  `sudo systemctl enable --now nut-client nut-monitor`. Verified working via
+  `upsc cyberpower@192.168.89.2` returning real live battery data from
+  Spark, and `journalctl -u nut-monitor` showing `UPS: cyberpower@192.168.89.2
+  (secondary)` — genuinely connected, not just "service running." (A
+  benign, pre-existing packaging quirk: `nut-monitor.service`'s
+  `ExecStartPre` fails trying to open a nonexistent
+  `nut-common-tmpfiles.conf` — harmless, doesn't block the actual service.)
 
 ## See also
 
