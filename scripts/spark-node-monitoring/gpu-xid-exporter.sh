@@ -19,11 +19,22 @@ TMP="${OUT}.$$"
 {
   echo '# HELP spark_gpu_xid_errors_total Count of NVIDIA Xid kernel errors since boot, by Xid code'
   echo '# TYPE spark_gpu_xid_errors_total counter'
+  # `|| true` on each pipeline below is deliberate, not a swallowed error:
+  # grep exits 1 when nothing matches, which under `pipefail` is the
+  # *correct, happy-path* outcome here (zero Xid errors this boot) --
+  # without this, `set -e` aborted the whole script before it ever wrote
+  # the file, leaving node_exporter serving a stale reading from whatever
+  # boot last had a real error. Confirmed live 2026-10-04: this exact bug
+  # left the exporter failing silently for 6+ days (every 30s, since the
+  # very start of the current boot), freezing the metric at a count
+  # leftover from the *previous* boot -- exactly the kind of "the
+  # alerting itself is broken" gap this whole exporter exists to avoid.
   journalctl -k -b 0 --no-pager -o cat 2>/dev/null \
     | grep -oE 'NVRM: Xid \(PCI:[^)]+\): [0-9]+' \
     | grep -oE '[0-9]+$' \
     | sort -n | uniq -c \
-    | awk '{printf "spark_gpu_xid_errors_total{xid=\"%s\"} %s\n", $2, $1}'
+    | awk '{printf "spark_gpu_xid_errors_total{xid=\"%s\"} %s\n", $2, $1}' \
+    || true
 
   # A monotonic since-boot count alone can't say whether a fault is
   # ongoing or a one-off from days ago -- also expose *when* each Xid was
@@ -39,6 +50,7 @@ TMP="${OUT}.$$"
         epoch=$(date -d "$ts" +%s 2>/dev/null) || continue
         printf '%s %s\n' "$xid" "$epoch"
       done \
-    | awk '{last[$1]=$2} END {for (x in last) printf "spark_gpu_xid_last_seen_timestamp_seconds{xid=\"%s\"} %s\n", x, last[x]}'
+    | awk '{last[$1]=$2} END {for (x in last) printf "spark_gpu_xid_last_seen_timestamp_seconds{xid=\"%s\"} %s\n", x, last[x]}' \
+    || true
 } > "$TMP"
 mv "$TMP" "$OUT"
