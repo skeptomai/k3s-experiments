@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # descheduler-alert.sh
 #
-# Nightly summary of what the descheduler actually did. It runs at 05:10
-# America/Los_Angeles, right after morning-on.sh's uncordon burst -- see
+# Nightly summary of what the descheduler actually did. It runs at 05:20
+# Europe/London (crontab's CRON_TZ=Europe/London, changed 2026-10-10 from
+# America/Los_Angeles), right after morning-on.sh's uncordon burst -- see
 # manifests/descheduler/helmrelease.yaml and
 # docs/ipc4-pod-pileup-postmortem.md for why it exists. Pulls the most
 # recent Job's pod logs, counts eviction-related lines, and sends a Pushover
@@ -27,7 +28,7 @@ JOB=$(kubectl get jobs -n descheduler -l app.kubernetes.io/name=descheduler \
 
 if [[ -z "$JOB" ]]; then
     "$PUSHOVER" "descheduler: no job found" \
-        "Expected a descheduler CronJob run around 05:10 but found no Job in the descheduler namespace. Check: kubectl get cronjob -n descheduler"
+        "Expected a descheduler CronJob run around 05:20 but found no Job in the descheduler namespace. Check: kubectl get cronjob -n descheduler"
     exit 0
 fi
 

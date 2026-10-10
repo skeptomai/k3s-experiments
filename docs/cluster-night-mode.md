@@ -1,6 +1,12 @@
 # Cluster Night Mode
 
-Automated nightly shutdown (21:00) and startup (05:00) to save power.
+Automated nightly shutdown (21:00) and startup (05:00), timed to **Europe/London**
+hours, to save power.
+
+**2026-10-10: re-anchored from America/Los_Angeles (Seattle) to Europe/London** —
+the owner relocated/travels with UK hours now being the relevant "awake" window.
+This is a pure timezone change, same 8h-off/16h-on shape as before (see "Timezone"
+below for exactly what had to change and why it's parametrized, not hardcoded).
 
 ## How it works
 
@@ -13,17 +19,24 @@ place, disabled, for weeks afterward and caused real confusion (see
 this automation, it is on nazgul, not omen.**
 
 Each cron line runs a one-shot Pelagos container built from
-`scripts/cluster-scheduler/`:
+`scripts/cluster-scheduler/`. The crontab starts with a `CRON_TZ=` line (controls
+when cron *fires* each job) and every `pelagos run` invocation also passes
+`--env TZ=...` (controls what timezone the container's own internal date
+arithmetic -- specifically `silence-alerts.sh`'s "night"/"wake_time" math --
+resolves against). **Both must be changed together** when the power-cycle
+timezone changes; they're independent settings that happen to need the same
+value, not one setting duplicated for no reason:
 
 ```
-0 21 * * * pelagos run --rm --network=bridge \
+CRON_TZ=Europe/London
+0 21 * * * pelagos run --rm --network=bridge --env TZ=Europe/London \
     --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
     --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
     --env-file /etc/cluster-scheduler/pushover.env \
     localhost:5004/cluster-scheduler:latest /scripts/night-off.sh \
     >> /var/log/cluster-scheduler.log 2>&1
 
-0 5 * * * ... /scripts/morning-on.sh >> /var/log/cluster-scheduler.log 2>&1
+0 5 * * * pelagos run --rm --network=bridge --env TZ=Europe/London ... /scripts/morning-on.sh >> /var/log/cluster-scheduler.log 2>&1
 ```
 
 (`crontab -l` on nazgul as root is the live source of truth for the exact
@@ -90,6 +103,8 @@ run to see exactly what failed.
 
 ## Timing
 
+All times **Europe/London** (see "Timezone" below).
+
 | Time  | Event |
 |-------|-------|
 | 21:00 | Silence created (expires 05:30), graceful drain starts |
@@ -98,6 +113,38 @@ run to see exactly what failed.
 | 05:02-05:05 | k3s up, nodes Ready, SPIRE agents recycled |
 | 05:05-05:15 | Pods scheduled and Running |
 | 05:30 | Silence expires — alerts live again |
+
+## Timezone
+
+Two independent settings control this, and both have to change together if the
+power-cycle timezone ever changes again:
+
+1. **`CRON_TZ=Europe/London`** — the first line of nazgul's crontab (and of
+   `/etc/cluster-scheduler/crontab.default`, the cached copy the one-off
+   override skills rebuild from). Controls when cron *fires* `night-off.sh`/
+   `morning-on.sh`/`descheduler-alert.sh` — e.g. `0 21 * * *` now means 21:00
+   London time, not 21:00 wherever nazgul's own system clock happens to be set
+   (that's still `America/Los_Angeles` at the OS level — deliberately untouched,
+   since other things on nazgul may reasonably assume the system clock).
+2. **`--env TZ=Europe/London`** on every `pelagos run` invocation in that same
+   crontab — controls what timezone the *container's* own internal date
+   arithmetic resolves against. Specifically `silence-alerts.sh`'s "night"/
+   "wake_time" math (e.g. "05:30 today"): the container runs with system
+   `TZ=UTC` by default, and that script needs to know what "05:30" means in
+   the same terms the cron-fire-time is anchored to, or the silence window
+   drifts out of alignment with the actual shutdown/startup times.
+
+**This is parametrized, not hardcoded** — changing the timezone again is a
+crontab-only edit (update both the `CRON_TZ=` line and every `--env TZ=...`
+flag), no image rebuild needed. It wasn't always this way: `silence-alerts.sh`
+originally had `export TZ="America/Los_Angeles"` baked into the script itself,
+which meant the timezone was a value living inside a *built container image* —
+changing it required a full rsync+build+push cycle just to change one string.
+Fixed 2026-10-10 (prompted by exactly that friction during the London move):
+the script now reads `export TZ="${TZ:-Europe/London}"`, honoring whatever the
+caller's environment already provides and only falling back to a default if
+not. The *crontab* (not the image) is now the single source of truth for the
+power-cycle timezone.
 
 ## Manual override
 
@@ -123,10 +170,26 @@ ssh root@nazgul.taildd208.ts.net "crontab /etc/cluster-scheduler/crontab.default
 
 `scripts/cluster-night-off.sh` / `scripts/cluster-morning-on.sh` (top-level,
 not in `cluster-scheduler/`) remain as manual convenience wrappers runnable
-from omen — they call the same underlying `silence-alerts.sh` /
-`shutdown-cluster.sh` / `cluster-kasa-outlet.py` pieces directly over SSH
-rather than through the nazgul container. They are **not** what runs
-automatically; nazgul's cron is.
+from omen. They are **not** what runs automatically; nazgul's cron is.
+
+**Correction 2026-10-10, this was previously wrong here:** these wrappers do
+**not** call the nazgul container's `silence-alerts.sh`/`shutdown-cluster.sh`/
+`cluster-kasa-outlet.py` over SSH — `cluster-night-off.sh` calls
+`"$SCRIPT_DIR/silence-alerts.sh"`, which resolves to a **separate, independent
+top-level copy** (`scripts/silence-alerts.sh`, not
+`scripts/cluster-scheduler/silence-alerts.sh`) that runs locally on whatever
+machine invokes it, not in the nazgul container at all. This copy had drifted
+substantially from the cluster-scheduler one (158 lines vs 238 as of
+2026-10-10) before today's fix — both got the same no-arg-toggle removal
+patched in, but the broader drift (missing fixes/features accumulated in one
+copy but not the other) is unresolved and worth a deliberate decision (retire
+one in favor of a thin wrapper around the other, most likely) rather than
+assuming they'll stay in sync on their own. Also worth checking: `cluster-
+kasa-outlet.py off all` in this same manual path hits the Kasa strip's LAN-only
+IP directly — like `cluster-morning-on.sh` already demonstrated 2026-10-10,
+this whole manual-wrapper path probably doesn't work at all when run from
+somewhere off the home LAN (e.g. while traveling), unlike the actual cron
+automation (which always runs from nazgul, on the LAN).
 
 For a one-off schedule change without touching the standing cron (e.g. "shut
 down early tonight" or "start up now instead of waiting for 05:00"), use the
@@ -145,6 +208,7 @@ editing crontab by hand — see "One-off schedule override" below.
 | `scripts/cluster-scheduler/pushover-alert.sh` | Direct out-of-band failure notification, bypasses Alertmanager entirely |
 | `scripts/cluster-scheduler/Remfile` | Builds `localhost:5004/cluster-scheduler:latest` (python-kasa + kubectl + openssh-client + curl) |
 | `scripts/cluster-night-off.sh` / `scripts/cluster-morning-on.sh` | Manual convenience wrappers, runnable from omen — not the automation itself |
+| `scripts/silence-alerts.sh` | **Separate, independent copy** of `cluster-scheduler/silence-alerts.sh` used by the manual wrappers above (not a thin wrapper around it) — drifted apart from the real one, unresolved as of 2026-10-10, see the correction note above |
 | `/etc/cluster-scheduler/` on nazgul | kubeconfig (`ipc-vip` → `192.168.88.58:6443`), pushover.env, `crontab.default` cache, container build context |
 | `/root/.ssh/id_rsa` on nazgul | omen's SSH key, bind-mounted into the container for direct-IP SSH to nodes |
 | `/var/log/cluster-scheduler.log` on nazgul | stdout/stderr of every cron-triggered run — check here first for any scheduler issue |
@@ -205,3 +269,19 @@ cluster-startup-at}/SKILL.md` — only the scripts are checked into git.
   path first) and deleted. This doc was rewritten to match the actual
   running architecture — it had been describing the superseded omen-timer
   design the whole time.
+- **2026-10-10**: re-anchored the power cycle from America/Los_Angeles to
+  Europe/London (owner relocated). While doing this, found and fixed a real
+  footgun: `silence-alerts.sh` had a bare-no-argument default that silently
+  toggled the current silence on/off depending on hidden state — removed
+  (now a usage error) after it bit exactly this way during the same session
+  (an unrelated sanity-check command accidentally untoggled a real,
+  legitimate night silence). Also found the timezone was hardcoded inside
+  the script itself, requiring a full container rebuild to change — reworked
+  to read from the environment (`--env TZ=...` on the crontab's `pelagos run`
+  line) so future timezone changes are crontab-only. Separately discovered
+  (not yet resolved) that the manual-override wrappers
+  (`cluster-night-off.sh`/`cluster-morning-on.sh`) use a completely separate,
+  independently-drifted copy of `silence-alerts.sh` at the top level of
+  `scripts/`, not the nazgul container's copy as this doc previously (and
+  wrongly) claimed — see the Implementation table and the correction note
+  under Manual override.

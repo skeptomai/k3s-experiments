@@ -148,11 +148,11 @@ cmd_toggle() {
 
 # ── dispatch ───────────────────────────────────────────────────────────────────
 
-case "${1:-toggle}" in
+case "${1:-}" in
     on)     cmd_on "${2:-}" ;;
     off)    cmd_off ;;
     night)  cmd_night "${2:-}" ;;
     status) show_status ;;
     toggle) cmd_toggle ;;
-    *)      die "Unknown command '$1'. Use: on [DURATION] | off | night | status | toggle" ;;
+    *)      die "Usage: $0 <on [DURATION] | off | night | status | toggle> -- no argument is a usage error, not a default action (bare invocation used to silently toggle, removed 2026-10-10 after that mutated a real silence unintentionally -- see scripts/cluster-scheduler/silence-alerts.sh for the full note)." ;;
 esac

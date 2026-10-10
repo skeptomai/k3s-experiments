@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
-# silence-alerts.sh [on [DURATION] | off | night | status]
+# silence-alerts.sh <on [DURATION] | off | night | status | toggle>
 #
 # Manages a global Alertmanager silence (mutes all alert notifications).
 # Prometheus keeps scraping and evaluating rules; nothing fires while silenced.
 #
 # Usage:
-#   silence-alerts.sh             # toggle (off if silent, on for 12h if not)
 #   silence-alerts.sh on          # silence for 12h (default)
 #   silence-alerts.sh on 4h       # silence for 4h (units: m, h, d)
 #   silence-alerts.sh off         # remove active silence immediately
 #   silence-alerts.sh night       # silence until 05:00 local time (for cron at 21:00)
 #   silence-alerts.sh status      # show current silence state
+#   silence-alerts.sh toggle      # off if silent, on for 12h if not -- explicit only,
+#                                 # see 2026-10-10 note below for why there's no bare-arg default
+#
+# A bare invocation with NO argument is a usage error (prints usage, exits 1)
+# -- it used to default to `toggle`, which meant the outcome of running this
+# with no argument depended on hidden current state (was something already
+# silenced?) that the caller couldn't see without checking first. Removed
+# 2026-10-10 after exactly that bit once: an unrelated sanity-check command
+# (`source silence-alerts.sh` with no arg, meant to just test an env-var
+# fallback) silently toggled off a real, legitimate night silence because
+# one happened to be active at that moment -- never intended as a mutation,
+# looked harmless, wasn't. `toggle` is still available by explicit name for
+# whoever genuinely wants flip-based convenience; only the *implicit*
+# no-argument default was the problem, not the mode itself.
 #
 # Exit status: 0 on success, 1 if Alertmanager was unreachable or any step
 # failed. Callers (night-off.sh) MUST check this explicitly rather than
@@ -34,11 +47,26 @@ set -uo pipefail
 # so a real failure reliably produces a nonzero process exit status.
 
 # The cluster-scheduler container runs with system TZ=UTC. "night"/"wake_time"
-# are meant in local (Pacific) time, so all date arithmetic here must pin TZ
+# are meant in local time, so all date arithmetic here must pin TZ
 # explicitly — otherwise "05:30 today" resolves against the UTC calendar day,
-# which can be only ~90 minutes away at 21:00 PDT instead of the intended
+# which can be only ~90 minutes away at 21:00 instead of the intended
 # ~8.5 hours, collapsing the night silence almost immediately.
-export TZ="America/Los_Angeles"
+#
+# 2026-10-10: this used to be a hardcoded `export TZ="America/Los_Angeles"`
+# (then briefly hardcoded to "Europe/London" for about ten minutes) --
+# baking a timezone into a value living inside a built container image
+# meant changing it required a full rebuild+push cycle just to change one
+# string. Parametrized instead: honor whatever TZ the container's own
+# environment already has (set via `--env TZ=...` on the `pelagos run`
+# invocation in nazgul's crontab -- see docs/cluster-night-mode.md), only
+# falling back to a default if the caller didn't set one. Changing the
+# power-cycle timezone going forward is a crontab edit (both the `CRON_TZ=`
+# line controlling when cron *fires* night-off.sh/morning-on.sh, AND this
+# `--env TZ=...` controlling what timezone this script's own "05:30"/"05:00"
+# arithmetic runs in -- the two are independent settings that happen to
+# need the same value, not one setting) -- no image rebuild needed unless
+# the script logic itself changes.
+export TZ="${TZ:-Europe/London}"
 
 ALERTMANAGER="http://192.168.89.2:9093"
 CREATED_BY="silence-alerts.sh"
@@ -200,11 +228,11 @@ cmd_toggle() {
 
 # ── dispatch ───────────────────────────────────────────────────────────────────
 
-case "${1:-toggle}" in
+case "${1:-}" in
     on)     cmd_on "${2:-}" ;;
     off)    cmd_off ;;
     night)  cmd_night "${2:-}" ;;
     status) show_status ;;
     toggle) cmd_toggle ;;
-    *)      die "Unknown command '$1'. Use: on [DURATION] | off | night | status | toggle" ;;
+    *)      die "Usage: $0 <on [DURATION] | off | night | status | toggle> -- no argument is a usage error, not a default action (see 2026-10-10 note above)." ;;
 esac
