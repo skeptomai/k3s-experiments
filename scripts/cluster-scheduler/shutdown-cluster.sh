@@ -29,48 +29,81 @@ declare -A NODE_IP=(
 echo "==> Cordoning all nodes..."
 for node in $ALL_NODES; do
     echo "    cordoning $node"
-    kubectl cordon "$node"
+    # Same reasoning as the drains below: cordon failing here (e.g. a
+    # transient API-server hiccup) must not block reaching the actual
+    # SSH-based `shutdown -h now` calls at the bottom of this script --
+    # those don't depend on the k8s API at all, so even a fully broken
+    # kubectl phase shouldn't be the reason physical power-off never
+    # happens.
+    kubectl cordon "$node" || echo "    WARNING: cordon of $node failed -- continuing anyway"
 done
 
-# virt-operator recreates virt-api-pdb / virt-controller-pdb on its own
-# reconcile loop -- deleting once per BATCH isn't enough: a prior node's own
-# drain in the same batch can take up to its own --timeout (120s), which is
-# plenty of time for virt-operator to recreate the PDB before the *next*
-# node in that same batch gets drained. Hit exactly this on 2026-08-07:
-# ipc5 (first in the control-plane-secondary batch) drained fine, its own
-# drain took long enough that the PDB was back by the time ipc6 (second in
-# that batch) started draining, ipc6's virt-controller/virt-api pods got
-# stuck on the recreated PDB, hit the drain timeout, and -- because of
-# `set -e` -- the whole script aborted right there without ever reaching
-# the actual shutdown steps for ANY node, leaving ipc7/8/9 cordoned and
-# drained (their evicted pods stuck Pending, since every node was already
-# cordoned) with nothing shut down, undetected until the next morning-on
-# cron happened to uncordon everything ~8h later. Delete immediately before
-# EVERY individual node's drain, not once per batch.
-drop_kubevirt_pdbs() {
-    kubectl delete pdb -n kubevirt --all --ignore-not-found 2>/dev/null || true
+# History of this section (kept because the failure mode is subtle and
+# worth understanding before touching this again):
+#
+# Originally `kubectl drain` here respected PodDisruptionBudgets (the
+# default), which meant virt-operator's own reconcile loop recreating
+# virt-api-pdb/virt-controller-pdb mid-drain could make an eviction request
+# race against the PDB's minAvailable and get rejected ("Cannot evict pod
+# as it would violate the pod's disruption budget"), retried until the
+# drain's own --timeout, then failed outright. A 2026-08-07 fix
+# (drop_kubevirt_pdbs, deleting those PDBs immediately before EVERY node's
+# drain rather than once per batch) narrowed the race window but didn't
+# close it -- it recurred on 2026-10-09/10 for ipc4 specifically, and
+# because no drain call here had `|| true`, `set -e` killed the whole
+# script immediately, before ANY node (not just ipc4) got `shutdown -h
+# now` -- the entire cluster stayed powered on all night, undetected until
+# the next morning-on cron uncordoned everything ~8h later.
+#
+# Fixed 2026-10-10, properly this time: `--disable-eviction` makes drain
+# use plain DELETE instead of the PDB-respecting Eviction API, which is the
+# semantically correct choice here anyway -- a PDB protects *other*
+# replicas' availability during a *partial* disruption (a rolling restart,
+# one node draining while the rest of the cluster keeps serving); it's
+# meaningless when literally every node is going dark together in the same
+# operation. There's no "shift load to a surviving replica" when nothing
+# survives. drop_kubevirt_pdbs() is gone -- bypassing eviction checking
+# makes deleting the PDB pointless, it was never the pods we needed gone,
+# it was the *disruption budget enforcement* we needed gone, and
+# --disable-eviction does that directly instead of racing to delete the
+# object enforcing it.
+#
+# Second, independent layer: every drain call below now tolerates its own
+# failure (`|| drain_warn ...`) instead of aborting the script via `set -e`.
+# --disable-eviction should make an actual failure here rare, but "rare"
+# isn't "impossible" (a node going unreachable mid-drain, a kubectl API
+# hiccup), and per 2026-10-10 direction: a single node's drain misbehaving
+# must never be the reason the *entire cluster* stays powered on overnight.
+# Losing a clean eviction for one stubborn pod on one node is an acceptable
+# cost; losing the whole night's power saving to it is not. Warnings are
+# still logged (not silently swallowed) so a degraded drain stays visible
+# in /var/log/cluster-scheduler.log even though it no longer blocks anything.
+DRAIN_WARNINGS=0
+drain_warn() {
+    DRAIN_WARNINGS=$((DRAIN_WARNINGS + 1))
+    echo "    WARNING: drain of $1 did not complete cleanly within its timeout -- continuing anyway, $1 will still be sent shutdown -h now"
 }
 
 echo ""
 echo "==> Draining worker nodes..."
 for node in $WORKERS; do
-    drop_kubevirt_pdbs
     echo "    draining $node"
-    kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=120s
+    kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --disable-eviction --timeout=120s \
+        || drain_warn "$node"
 done
 
 echo ""
 echo "==> Draining secondary control-plane nodes..."
 for node in $CONTROL_PLANE_SECONDARY; do
-    drop_kubevirt_pdbs
     echo "    draining $node"
-    kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
+    kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --force --disable-eviction --timeout=120s \
+        || drain_warn "$node"
 done
 
-drop_kubevirt_pdbs
 echo ""
 echo "==> Draining seed control-plane (ipc4)..."
-kubectl drain "$CONTROL_PLANE_SEED" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
+kubectl drain "$CONTROL_PLANE_SEED" --ignore-daemonsets --delete-emptydir-data --force --disable-eviction --timeout=120s \
+    || drain_warn "$CONTROL_PLANE_SEED"
 
 echo ""
 echo "==> Shutting down worker nodes..."
@@ -94,4 +127,8 @@ echo "==> Shutting down ipc4 (${NODE_IP[$CONTROL_PLANE_SEED]})..."
 $SSH "cb@${NODE_IP[$CONTROL_PLANE_SEED]}" sudo shutdown -h now || true
 
 echo ""
-echo "==> Done. All nodes have been sent the shutdown signal."
+if [[ "$DRAIN_WARNINGS" -gt 0 ]]; then
+    echo "==> Done. All nodes have been sent the shutdown signal ($DRAIN_WARNINGS node(s) had a degraded/incomplete drain -- see WARNING lines above)."
+else
+    echo "==> Done. All nodes have been sent the shutdown signal."
+fi

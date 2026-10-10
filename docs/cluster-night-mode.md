@@ -101,6 +101,32 @@ noise, since that noise is what the Alertmanager silence exists to suppress.
 Check `/var/log/cluster-scheduler.log` on nazgul for that night's/morning's
 run to see exactly what failed.
 
+### `shutdown-cluster.sh` failing should now be rare — and never leaves the cluster up
+
+Before 2026-10-10, a single stuck `kubectl drain` call (typically a race
+against `virt-operator` recreating `virt-api-pdb`/`virt-controller-pdb`
+faster than it could be deleted — see that script's own header comment for
+the full history) would abort the entire script via `set -e`, **before any
+node got `shutdown -h now`** — the whole cluster stayed powered on all
+night, only discovered the next morning. This happened for real on
+2026-10-09/10 for `ipc4` specifically.
+
+Fixed two ways, not just a retry: `kubectl drain` now passes
+`--disable-eviction` (bypasses PodDisruptionBudget checking entirely,
+which is the *semantically correct* choice for a full-cluster shutdown —
+there's no "other replica to shift load to" when nothing survives, so
+honoring PDBs here never actually bought anything but risk), AND every
+cordon/drain call tolerates its own failure and continues rather than
+aborting the script. The explicit design goal (owner's direction,
+2026-10-10): a single node's drain misbehaving must never be the reason
+the whole cluster stays powered on overnight — every node still gets
+`shutdown -h now` regardless of how cleanly (or not) it drained first. A
+degraded drain logs a WARNING (visible in `/var/log/cluster-scheduler.log`
+and in the final "Done" line's count) but is no longer treated as a
+failure requiring Pushover — `shutdown-cluster.sh` failing outright should
+now be reserved for genuinely exceptional cases (kubectl/ssh binaries
+missing, a true script bug), not an expected-and-tolerated PDB race.
+
 ## Timing
 
 All times **Europe/London** (see "Timezone" below).
