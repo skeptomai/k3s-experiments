@@ -5,8 +5,10 @@ hours, to save power.
 
 **2026-10-10: re-anchored from America/Los_Angeles (Seattle) to Europe/London** —
 the owner relocated/travels with UK hours now being the relevant "awake" window.
-This is a pure timezone change, same 8h-off/16h-on shape as before (see "Timezone"
-below for exactly what had to change and why it's parametrized, not hardcoded).
+Same 8h-off/16h-on shape as before. See "Timezone" below for how this is
+actually implemented (a minute-by-minute tick script, not a cron-native
+timezone feature — that approach was tried first and silently didn't work;
+the full story is there since it's genuinely non-obvious).
 
 ## How it works
 
@@ -18,29 +20,26 @@ place, disabled, for weeks afterward and caused real confusion (see
 "History" below) before being deleted 2026-08-19. **If you're looking for
 this automation, it is on nazgul, not omen.**
 
-Each cron line runs a one-shot Pelagos container built from
-`scripts/cluster-scheduler/`. The crontab starts with a `CRON_TZ=` line (controls
-when cron *fires* each job) and every `pelagos run` invocation also passes
-`--env TZ=...` (controls what timezone the container's own internal date
-arithmetic -- specifically `silence-alerts.sh`'s "night"/"wake_time" math --
-resolves against). **Both must be changed together** when the power-cycle
-timezone changes; they're independent settings that happen to need the same
-value, not one setting duplicated for no reason:
+nazgul's crontab has exactly one line, firing every minute:
 
 ```
-CRON_TZ=Europe/London
-0 21 * * * pelagos run --rm --network=bridge --env TZ=Europe/London \
-    --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
-    --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
-    --env-file /etc/cluster-scheduler/pushover.env \
-    localhost:5004/cluster-scheduler:latest /scripts/night-off.sh \
-    >> /var/log/cluster-scheduler.log 2>&1
-
-0 5 * * * pelagos run --rm --network=bridge --env TZ=Europe/London ... /scripts/morning-on.sh >> /var/log/cluster-scheduler.log 2>&1
+* * * * * /etc/cluster-scheduler/scheduler-tick.sh >> /var/log/cluster-scheduler.log 2>&1
 ```
 
-(`crontab -l` on nazgul as root is the live source of truth for the exact
-schedule — the block above is a snapshot.)
+`scheduler-tick.sh` (`scripts/cluster-scheduler/scheduler-tick.sh` in git,
+deployed to that exact host path — it runs directly on nazgul, **not** inside
+the Pelagos container) does the actual time-of-day decision: it checks the
+current wall-clock time via `TZ=Europe/London date`, and only when that falls
+in a 5-minute grace window around 21:00/05:00/05:20 does it launch the real
+one-shot Pelagos container (`localhost:5004/cluster-scheduler:latest`,
+`/scripts/night-off.sh` / `morning-on.sh` / `descheduler-alert.sh`), guarded
+by a same-day marker file (`/etc/cluster-scheduler/.last-night-off` etc.) so
+it fires exactly once per day even though many ticks land inside that window.
+See "Timezone" below for why it's built this way instead of cron firing
+directly at `0 21 * * *`.
+
+(`crontab -l` and `cat /etc/cluster-scheduler/scheduler-tick.sh` on nazgul as
+root are the live source of truth — this doc can drift, those can't.)
 
 **21:00 — `night-off.sh`**
 
@@ -142,35 +141,72 @@ All times **Europe/London** (see "Timezone" below).
 
 ## Timezone
 
-Two independent settings control this, and both have to change together if the
-power-cycle timezone ever changes again:
+**First attempt (didn't work, left here so it isn't retried): `CRON_TZ=`.**
+Many cron implementations (cronie/Fedora/RHEL's default) support a `CRON_TZ=`
+line at the top of a crontab that controls what timezone the time fields are
+interpreted in. Debian's stock `cron` package — what nazgul actually runs —
+**does not support this at all**: its own `crontab(5)` man page says a `TZ=`
+line "will affect only the commands executed in the crontab, not the
+execution of the crontab tasks themselves." A bare `NAME=value` crontab line
+just becomes an environment variable handed to the job; nothing in this cron
+binary treats `CRON_TZ` specially. This was deployed believing it worked
+(verified only that `crontab -l` echoed the line back, not that the actual
+firing time had shifted) and genuinely didn't — `night-off`/`morning-on` kept
+firing on nazgul's real system clock (`America/Los_Angeles`) the whole time,
+discovered 2026-10-11 when a shutdown fired at the Pacific-equivalent wall
+time instead of London time. `cronie` would fix this properly but is
+Debian-experimental-only, not available on bookworm without adding an
+unstable repo to this NAS's base OS — rejected. Changing nazgul's own system
+timezone was also considered and explicitly rejected (shared US-based
+machine; other things on it may reasonably assume the system clock). A third
+option — hardcode the Pacific-clock-time equivalent of 21:00/05:00 London
+directly into the crontab's numeric fields — was rejected too: UK and US DST
+transitions land on different calendar dates, so a fixed offset is wrong for
+about two weeks every spring and autumn until manually corrected.
 
-1. **`CRON_TZ=Europe/London`** — the first line of nazgul's crontab (and of
-   `/etc/cluster-scheduler/crontab.default`, the cached copy the one-off
-   override skills rebuild from). Controls when cron *fires* `night-off.sh`/
-   `morning-on.sh`/`descheduler-alert.sh` — e.g. `0 21 * * *` now means 21:00
-   London time, not 21:00 wherever nazgul's own system clock happens to be set
-   (that's still `America/Los_Angeles` at the OS level — deliberately untouched,
-   since other things on nazgul may reasonably assume the system clock).
-2. **`--env TZ=Europe/London`** on every `pelagos run` invocation in that same
-   crontab — controls what timezone the *container's* own internal date
-   arithmetic resolves against. Specifically `silence-alerts.sh`'s "night"/
-   "wake_time" math (e.g. "05:30 today"): the container runs with system
-   `TZ=UTC` by default, and that script needs to know what "05:30" means in
-   the same terms the cron-fire-time is anchored to, or the silence window
-   drifts out of alignment with the actual shutdown/startup times.
+**What actually runs: a once-a-minute tick, TZ-aware entirely inside the
+script.** nazgul's crontab fires `scripts/cluster-scheduler/scheduler-tick.sh`
+every minute (see "How it works" above) — a plain host-side script, not
+containerized, cheap enough that running it 1440 times a day costs nothing
+meaningful. It computes the current time via `TZ=Europe/London date`, which
+resolves correctly through tzdata regardless of nazgul's own system timezone
+and handles UK DST transitions automatically and permanently — no twice-a-year
+manual correction, ever. Only when that falls inside a 5-minute grace window
+around 21:00, 05:00, or 05:20 does it launch the real (heavy, Pelagos-based)
+automation, guarded by a same-day marker file
+(`/etc/cluster-scheduler/.last-night-off` etc.) so it fires exactly once per
+day despite many ticks landing inside each window. The grace window (not an
+exact-single-minute match) is deliberate: a transient hiccup exactly at `:00`
+shouldn't skip the whole day's action.
 
-**This is parametrized, not hardcoded** — changing the timezone again is a
-crontab-only edit (update both the `CRON_TZ=` line and every `--env TZ=...`
-flag), no image rebuild needed. It wasn't always this way: `silence-alerts.sh`
-originally had `export TZ="America/Los_Angeles"` baked into the script itself,
-which meant the timezone was a value living inside a *built container image* —
-changing it required a full rsync+build+push cycle just to change one string.
-Fixed 2026-10-10 (prompted by exactly that friction during the London move):
-the script now reads `export TZ="${TZ:-Europe/London}"`, honoring whatever the
-caller's environment already provides and only falling back to a default if
-not. The *crontab* (not the image) is now the single source of truth for the
-power-cycle timezone.
+Every `pelagos run` invocation the tick script launches still passes
+`--env TZ=Europe/London` — a separate, independent setting from the above,
+controlling what timezone the *container's own* internal date arithmetic
+resolves against (specifically `silence-alerts.sh`'s "night"/"wake_time" math,
+e.g. "05:30 today" — the container runs with system `TZ=UTC` by default).
+**This is parametrized, not hardcoded**, for the same reason as before:
+`silence-alerts.sh` used to have `export TZ="America/Los_Angeles"` baked into
+the script itself (a value living inside a *built container image* — changing
+it meant a full rsync+build+push cycle just to change one string), now reads
+`export TZ="${TZ:-Europe/London}"` instead, honoring whatever the caller
+provides. Changing the power-cycle timezone again means editing
+`scheduler-tick.sh`'s three window-checks and its `--env TZ=...` flags (one
+file, one host-side deploy via `rsync`, no crontab syntax to fight with and no
+image rebuild unless the surrounding script logic itself changes too).
+
+**Known gap from this exact transition (2026-10-11):** when a scheduling
+mechanism is replaced mid-day, any window for *that specific day* that falls
+*before* the replacement takes effect is lost — the new tick script has no
+way to know a now-removed old mechanism was *about* to (incorrectly) handle
+it. This happened for real: the `CRON_TZ` mechanism's broken 05:00-PDT
+morning-on (= 13:00 BST) was deleted before it could fire, but the new
+script's own correct 05:00-BST window had already passed hours earlier that
+same morning — the cluster sat off with nothing scheduled to turn it back on
+until the next day. Caught live and fixed with one manual `morning-on.sh`
+invocation; nothing to do differently next time short of also checking
+"is the cluster currently in the state today's schedule says it should be in"
+immediately after deploying any scheduling change, not just after a scheduled
+cron firing.
 
 ## Manual override
 
@@ -226,6 +262,7 @@ editing crontab by hand — see "One-off schedule override" below.
 
 | File | Purpose |
 |------|---------|
+| `scripts/cluster-scheduler/scheduler-tick.sh` | What cron actually calls, every minute — runs **directly on nazgul's host**, not in the container; TZ-aware gate deciding whether to launch night-off.sh/morning-on.sh/descheduler-alert.sh right now |
 | `scripts/cluster-scheduler/night-off.sh` | 21:00 sequence: silence + drain/shutdown + power off (runs in the nazgul container) |
 | `scripts/cluster-scheduler/morning-on.sh` | 05:00 sequence: power on + wait Ready + uncordon + SPIRE recycle (runs in the nazgul container) |
 | `scripts/cluster-scheduler/shutdown-cluster.sh` | Graceful drain/cordon/shutdown, invoked by night-off.sh |
@@ -271,6 +308,21 @@ the new override, so a stale prior override can never linger.
 Skill files live outside this repo at `~/.claude/skills/{cluster-shutdown-at,
 cluster-startup-at}/SKILL.md` — only the scripts are checked into git.
 
+**Broken as of 2026-10-11, not yet fixed.** All three scripts
+(`set-shutdown-time.sh`, `set-startup-time.sh`, `get-schedule.sh`) work by
+grepping `crontab.default`/the live crontab for lines matching `night-off.sh`
+/`morning-on.sh` to extract and reconstruct a one-off numbered crontab entry.
+Since the crontab is now a single `* * * * * scheduler-tick.sh` line (see
+"Timezone" above), neither pattern matches anything — `set-shutdown-time.sh`
+specifically will abort immediately via `set -e` when its `grep` finds no
+match. This is a real regression from today's tick-script change, not a
+pre-existing issue. Fixing it properly means teaching these scripts to talk
+to `scheduler-tick.sh`'s model instead (most likely: write a one-off
+override marker file it checks before falling back to its three hardcoded
+windows) rather than editing crontab's time fields, which no longer carry
+any scheduling information at all. Not done — flagged for a deliberate
+follow-up, not guessed at under time pressure.
+
 ## History
 
 - **2026-07-18**: first implementation — systemd timer (`cluster-night-off.timer`
@@ -311,3 +363,24 @@ cluster-startup-at}/SKILL.md` — only the scripts are checked into git.
   `scripts/`, not the nazgul container's copy as this doc previously (and
   wrongly) claimed — see the Implementation table and the correction note
   under Manual override.
+- **2026-10-11**: the 2026-10-10 `CRON_TZ=Europe/London` fix turned out to be
+  a no-op — Debian's stock `cron` package doesn't support `CRON_TZ` at all
+  (confirmed via its own `crontab(5)` man page), so night-off/morning-on kept
+  firing on nazgul's real system clock the whole time, just *labeled* in BST
+  thanks to the separately-correct `--env TZ=...` fix. Discovered when a
+  shutdown fired at the exact Pacific-equivalent wall-clock moment instead of
+  21:00 London. Replaced with `scheduler-tick.sh`: cron now fires every
+  minute (no TZ feature needed at all), and the script itself does a
+  `TZ=Europe/London date` check with a 5-minute grace window and a
+  once-per-day marker file, launching the real automation only when it
+  actually matches. Also hit, live, the "replacing a schedule mid-day loses
+  that day's not-yet-fired window" gap described above — the cluster sat off
+  for several hours with nothing scheduled to turn it back on until caught
+  and fixed manually. Also, separately, fixed `shutdown-cluster.sh`'s actual
+  root-cause bug (the PDB-eviction race that caused the original "shutdown
+  failed" alert this whole timezone investigation started from) —
+  `--disable-eviction` on every drain call, plus every cordon/drain
+  tolerating its own failure so a single node's drain can never again leave
+  the whole cluster powered on overnight. See the dedicated subsection above
+  for the full reasoning (PDBs protect availability during a *partial*
+  disruption; that's meaningless when every node goes dark together).
