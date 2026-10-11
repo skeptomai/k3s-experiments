@@ -287,41 +287,45 @@ ssh root@nazgul.taildd208.ts.net "cd /etc/cluster-scheduler/build && pelagos bui
 
 Two Claude Code skills, backed by `set-shutdown-time.sh` / `set-startup-time.sh`
 in `scripts/cluster-scheduler/`, let you defer/advance tonight's shutdown or
-startup without permanently changing the standing 21:00/05:00 cron:
+startup without permanently changing the standing 21:00/05:00 Europe/London
+schedule:
 
-- **`cluster-shutdown-at HH:MM`** — installs a one-off crontab entry for
-  today only that runs the shutdown at HH:MM instead of 21:00, chained with
-  a restore of the cached canonical crontab
-  (`/etc/cluster-scheduler/crontab.default` on nazgul) right after it fires.
-  Refuses (exit 1) if HH:MM has already passed today.
-- **`cluster-startup-at HH:MM`** — same one-off mechanism for morning-on.sh
-  if HH:MM is still ahead today. If HH:MM has already passed, no
-  scheduling — instead checks Kasa outlet power state for all 6 nodes and
-  starts the cluster immediately if it isn't already up.
-- **`get-schedule.sh`** — reports the effective shutdown/startup times from
-  nazgul's live crontab (standard vs. active override); wired into the
-  `check-cluster-health` skill, shown right after the health table.
+- **`cluster-shutdown-at HH:MM`** — writes `/etc/cluster-scheduler/.override-night-off`
+  on nazgul (`"$TODAY $HH:MM"`), which `scheduler-tick.sh` checks every
+  minute and uses instead of the standard 21:00 window for as long as its
+  date matches today. Refuses (exit 1) if HH:MM has already passed today
+  (Europe/London).
+- **`cluster-startup-at HH:MM`** — same mechanism, `.override-morning-on`,
+  for `morning-on.sh` if HH:MM is still ahead today (Europe/London). If
+  HH:MM has already passed, no override written — instead checks Kasa
+  outlet power state for all 6 nodes and starts the cluster immediately if
+  it isn't already up.
+- **`get-schedule.sh`** — reports the effective shutdown/startup times
+  (standard, or an active today-dated override) by reading those same two
+  files on nazgul; wired into the `check-cluster-health` skill, shown right
+  after the health table.
 
-Each invocation always rebuilds nazgul's crontab from the cached default +
-the new override, so a stale prior override can never linger.
+Each override is self-expiring, not actively reverted: it's dated to
+*today* specifically, so tomorrow it simply no longer matches and
+`scheduler-tick.sh` falls back to the standard window on its own (and
+lazily deletes the stale file the next time it checks) — no restore step,
+no stale-override-lingering failure mode, consistent with this project's
+general preference for state over TTLs (see
+[[feedback_state_based_not_ttl]]).
 
 Skill files live outside this repo at `~/.claude/skills/{cluster-shutdown-at,
 cluster-startup-at}/SKILL.md` — only the scripts are checked into git.
 
-**Broken as of 2026-10-11, not yet fixed.** All three scripts
-(`set-shutdown-time.sh`, `set-startup-time.sh`, `get-schedule.sh`) work by
-grepping `crontab.default`/the live crontab for lines matching `night-off.sh`
-/`morning-on.sh` to extract and reconstruct a one-off numbered crontab entry.
-Since the crontab is now a single `* * * * * scheduler-tick.sh` line (see
-"Timezone" above), neither pattern matches anything — `set-shutdown-time.sh`
-specifically will abort immediately via `set -e` when its `grep` finds no
-match. This is a real regression from today's tick-script change, not a
-pre-existing issue. Fixing it properly means teaching these scripts to talk
-to `scheduler-tick.sh`'s model instead (most likely: write a one-off
-override marker file it checks before falling back to its three hardcoded
-windows) rather than editing crontab's time fields, which no longer carry
-any scheduling information at all. Not done — flagged for a deliberate
-follow-up, not guessed at under time pressure.
+**History:** these three scripts were genuinely broken 2026-10-11 for a few
+hours, in the same session that introduced `scheduler-tick.sh` — they used
+to work by grepping crontab for `night-off.sh`/`morning-on.sh` lines to
+build a one-off numbered crontab entry, and once the crontab became a
+single `* * * * * scheduler-tick.sh` line, that had nothing left to find
+(`set-shutdown-time.sh` would abort immediately via `set -e` on the failed
+grep). Rewritten the same day against the override-file model described
+above, and verified end-to-end (including the already-passed and
+already-up fallback paths, and that a rejected past-time request doesn't
+clobber an existing valid override) before being considered done.
 
 ## History
 

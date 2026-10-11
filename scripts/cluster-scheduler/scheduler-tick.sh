@@ -52,24 +52,60 @@ fire_once_per_day() {
     "$@"
 }
 
-if in_window 2100 2104; then
-    fire_once_per_day .last-night-off "night-off" \
-        pelagos run --rm --network=bridge --env TZ=Europe/London \
-            --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
-            --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
-            --env-file /etc/cluster-scheduler/pushover.env \
-            localhost:5004/cluster-scheduler:latest /scripts/night-off.sh
-elif in_window 500 504; then
-    fire_once_per_day .last-morning-on "morning-on" \
-        pelagos run --rm --network=bridge --env TZ=Europe/London \
-            --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
-            --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
-            --env-file /etc/cluster-scheduler/pushover.env \
-            localhost:5004/cluster-scheduler:latest /scripts/morning-on.sh
+run_night_off() {
+    pelagos run --rm --network=bridge --env TZ=Europe/London \
+        --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
+        --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
+        --env-file /etc/cluster-scheduler/pushover.env \
+        localhost:5004/cluster-scheduler:latest /scripts/night-off.sh
+}
+
+run_morning_on() {
+    pelagos run --rm --network=bridge --env TZ=Europe/London \
+        --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
+        --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
+        --env-file /etc/cluster-scheduler/pushover.env \
+        localhost:5004/cluster-scheduler:latest /scripts/morning-on.sh
+}
+
+run_descheduler_alert() {
+    pelagos run --rm --network=bridge --env TZ=Europe/London \
+        --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
+        --env-file /etc/cluster-scheduler/pushover.env \
+        localhost:5004/cluster-scheduler:latest /scripts/descheduler-alert.sh
+}
+
+# One-off overrides (set-shutdown-time.sh / set-startup-time.sh) write a
+# "$TODAY $HH:MM" line to one of these files instead of touching crontab --
+# crontab carries no scheduling information at all any more, so there's
+# nothing in it to override. Reads the file, and if it's dated today,
+# returns a 5-minute window starting at that HH:MM instead of the default.
+# A stale (not-today) override is lazily deleted the next time it's
+# checked, rather than needing an active revert step -- state, not TTL:
+# "is there an override for *today* specifically" is just a date
+# comparison, so it can't linger past the day it was meant for.
+window_for() {
+    local override_file="$STATE_DIR/$1" default_start="$2" default_end="$3"
+    if [[ -f "$override_file" ]]; then
+        local ov_date ov_hhmm
+        read -r ov_date ov_hhmm < "$override_file"
+        if [[ "$ov_date" == "$TODAY" ]]; then
+            local ov_start=$((10#${ov_hhmm%%:*} * 100 + 10#${ov_hhmm##*:}))
+            echo "$ov_start $((ov_start + 4))"
+            return
+        fi
+        rm -f "$override_file"
+    fi
+    echo "$default_start $default_end"
+}
+
+read -r night_off_start night_off_end <<< "$(window_for .override-night-off 2100 2104)"
+read -r morning_on_start morning_on_end <<< "$(window_for .override-morning-on 500 504)"
+
+if in_window "$night_off_start" "$night_off_end"; then
+    fire_once_per_day .last-night-off "night-off" run_night_off
+elif in_window "$morning_on_start" "$morning_on_end"; then
+    fire_once_per_day .last-morning-on "morning-on" run_morning_on
 elif in_window 520 524; then
-    fire_once_per_day .last-descheduler-alert "descheduler-alert" \
-        pelagos run --rm --network=bridge --env TZ=Europe/London \
-            --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
-            --env-file /etc/cluster-scheduler/pushover.env \
-            localhost:5004/cluster-scheduler:latest /scripts/descheduler-alert.sh
+    fire_once_per_day .last-descheduler-alert "descheduler-alert" run_descheduler_alert
 fi
