@@ -242,16 +242,35 @@ top-level copy** (`scripts/silence-alerts.sh`, not
 `scripts/cluster-scheduler/silence-alerts.sh`) that runs locally on whatever
 machine invokes it, not in the nazgul container at all. This copy had drifted
 substantially from the cluster-scheduler one (158 lines vs 238 as of
-2026-10-10) before today's fix — both got the same no-arg-toggle removal
-patched in, but the broader drift (missing fixes/features accumulated in one
-copy but not the other) is unresolved and worth a deliberate decision (retire
-one in favor of a thin wrapper around the other, most likely) rather than
-assuming they'll stay in sync on their own. Also worth checking: `cluster-
-kasa-outlet.py off all` in this same manual path hits the Kasa strip's LAN-only
-IP directly — like `cluster-morning-on.sh` already demonstrated 2026-10-10,
-this whole manual-wrapper path probably doesn't work at all when run from
-somewhere off the home LAN (e.g. while traveling), unlike the actual cron
-automation (which always runs from nazgul, on the LAN).
+2026-10-10) — both got the same no-arg-toggle removal patched in that day,
+but the broader drift (missing fixes/features accumulated in one copy but
+not the other: the 2026-08-15 `set -e`/command-substitution error-handling
+fix, `curl --max-time` timeouts, explicit `TZ=` pinning) wasn't closed yet.
+
+**Resolved 2026-10-16**, deliberately: kept both copies (the alternative —
+making the manual wrappers SSH into nazgul and call the real one — was
+considered and explicitly rejected, since the whole point of this copy is
+to work standalone, without a network dependency, from whatever machine
+you're actually on). Backported the missing fixes into
+`scripts/silence-alerts.sh` instead: `set -uo pipefail` (not `-e`) with
+the same return-based error handling as the container copy, `curl --max-time
+10` throughout, and `export TZ="${TZ:-Europe/London}"`. Also fixed a
+real portability gap found while doing this: the script's date arithmetic
+uses GNU `date -d` syntax, which doesn't exist on BSD/macOS `date` at
+all (confirmed directly — the project's own working machines include both
+omen, x86_64 Linux, and an Apple Silicon Mac). Now detects GNU-compatible
+`date` or falls back to `gdate` (Homebrew's `coreutils` package on macOS),
+erroring clearly if neither is present rather than failing with a cryptic
+`date: illegal option` partway through. Both copies now carry a header
+comment pointing at the other, so a future fix to one prompts checking
+whether it belongs in both.
+
+Separately, still unresolved: `cluster-kasa-outlet.py off all` in this
+same manual path hits the Kasa strip's LAN-only IP directly — like
+`cluster-morning-on.sh` already demonstrated 2026-10-10, this whole
+manual-wrapper path probably doesn't work at all when run from somewhere
+off the home LAN (e.g. while traveling), unlike the actual cron automation
+(which always runs from nazgul, on the LAN).
 
 For a one-off schedule change without touching the standing cron (e.g. "shut
 down early tonight" or "start up now instead of waiting for 05:00"), use the
@@ -271,7 +290,7 @@ editing crontab by hand — see "One-off schedule override" below.
 | `scripts/cluster-scheduler/pushover-alert.sh` | Direct out-of-band failure notification, bypasses Alertmanager entirely |
 | `scripts/cluster-scheduler/Remfile` | Builds `localhost:5004/cluster-scheduler:latest` (python-kasa + kubectl + openssh-client + curl) |
 | `scripts/cluster-night-off.sh` / `scripts/cluster-morning-on.sh` | Manual convenience wrappers, runnable from omen — not the automation itself |
-| `scripts/silence-alerts.sh` | **Separate, independent copy** of `cluster-scheduler/silence-alerts.sh` used by the manual wrappers above (not a thin wrapper around it) — drifted apart from the real one, unresolved as of 2026-10-10, see the correction note above |
+| `scripts/silence-alerts.sh` | **Separate, independent copy** of `cluster-scheduler/silence-alerts.sh` used by the manual wrappers above (not a thin wrapper around it) — intentional (portable, no SSH/container dependency), brought back to parity 2026-10-16, see the correction note above |
 | `/etc/cluster-scheduler/` on nazgul | kubeconfig (`ipc-vip` → `192.168.88.58:6443`), pushover.env, `crontab.default` cache, container build context |
 | `/root/.ssh/id_rsa` on nazgul | omen's SSH key, bind-mounted into the container for direct-IP SSH to nodes |
 | `/var/log/cluster-scheduler.log` on nazgul | stdout/stderr of every cron-triggered run — check here first for any scheduler issue |

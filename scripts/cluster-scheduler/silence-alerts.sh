@@ -4,6 +4,18 @@
 # Manages a global Alertmanager silence (mutes all alert notifications).
 # Prometheus keeps scraping and evaluating rules; nothing fires while silenced.
 #
+# This copy runs *inside* the nazgul-hosted Pelagos container, as part of
+# the real automated night-off/morning-on cron cycle (scheduler-tick.sh,
+# see docs/cluster-night-mode.md). scripts/silence-alerts.sh (top level,
+# outside this directory) is a SEPARATE, intentionally-standalone copy
+# that scripts/cluster-night-off.sh/cluster-morning-on.sh call directly
+# instead -- no SSH/container/nazgul dependency, portable across the
+# machines it actually gets run from (omen, x86_64 Linux; or any other
+# dev machine including Apple Silicon Macs, which need `gdate` for GNU
+# -compatible `date -d`). Brought back to parity 2026-10-16 after drifting
+# apart for a while. If you're fixing something here, check whether the
+# same fix belongs in that copy too -- it usually does.
+#
 # Usage:
 #   silence-alerts.sh on          # silence for 12h (default)
 #   silence-alerts.sh on 4h       # silence for 4h (units: m, h, d)
