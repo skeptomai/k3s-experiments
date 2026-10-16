@@ -77,12 +77,16 @@ The cluster has two different TPM vendors across the six nodes:
 
 | Node | Manufacturer | Chip | Type | Attestation time |
 |------|-------------|------|------|-----------------|
-| ipc4 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
-| ipc5 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
-| ipc6 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
-| ipc7 | `0x4E544300` NTC | Nuvoton NPCT75x | Firmware (fTPM) | ~23s |
+| ipc4 | `0x4E544300` NTC | Nuvoton NPCT75x | Discrete | ~23s |
+| ipc5 | `0x4E544300` NTC | Nuvoton NPCT75x | Discrete | ~23s |
+| ipc6 | `0x4E544300` NTC | Nuvoton NPCT75x | Discrete | ~23s |
+| ipc7 | `0x4E544300` NTC | Nuvoton NPCT75x | Discrete | ~23s |
 | ipc8 | `0x49465800` IFX | Infineon SLB9672 | Discrete | ~34s |
 | ipc9 | `0x49465800` IFX | Infineon SLB9672 | Discrete | ~76s |
+
+Both NPCT75x and SLB9672 are discrete TPM chips (separate silicon from the CPU) — an
+earlier version of this table mislabeled the Nuvoton nodes as "Firmware (fTPM)", which
+was incorrect; NPCT75x is not a firmware/PTT-style TPM.
 
 The HP Elite Mini 800 G9 (ipc4-6) ships with either Infineon SLB9672 or Nuvoton
 NPCT760HABYX depending on production lot. ipc7-9 are the Intel Core i5-12500 (non-T)
