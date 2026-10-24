@@ -8,7 +8,7 @@
 #   silence-alerts.sh on          # silence for 12h (default)
 #   silence-alerts.sh on 4h       # silence for 4h (units: m, h, d)
 #   silence-alerts.sh off         # remove active silence immediately
-#   silence-alerts.sh night       # silence until 05:30 Europe/London (for the
+#   silence-alerts.sh night       # silence until 05:30 America/Los_Angeles (for the
 #                                 # manual cluster-night-off.sh wrapper)
 #   silence-alerts.sh status      # show current silence state
 #   silence-alerts.sh toggle      # off if silent, on for 12h if not -- explicit
@@ -69,7 +69,7 @@ fi
 # an already-exported TZ) rather than hardcoded, same reasoning as the
 # container copy: changing the cluster's schedule timezone shouldn't
 # require editing this script too, just whatever sets TZ before calling it.
-export TZ="${TZ:-Europe/London}"
+export TZ="${TZ:-America/Los_Angeles}"
 
 ALERTMANAGER="http://192.168.89.2:9093"
 CREATED_BY="silence-alerts.sh"

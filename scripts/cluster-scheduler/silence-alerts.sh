@@ -78,7 +78,7 @@ set -uo pipefail
 # arithmetic runs in -- the two are independent settings that happen to
 # need the same value, not one setting) -- no image rebuild needed unless
 # the script logic itself changes.
-export TZ="${TZ:-Europe/London}"
+export TZ="${TZ:-America/Los_Angeles}"
 
 ALERTMANAGER="http://192.168.89.2:9093"
 CREATED_BY="silence-alerts.sh"

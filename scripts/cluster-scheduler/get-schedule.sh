@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reports the effective shutdown/startup times for today -- standard
-# (21:00/05:00 Europe/London) or a one-off override installed by
+# (21:00/05:00 America/Los_Angeles) or a one-off override installed by
 # set-shutdown-time.sh / set-startup-time.sh.
 #
 # 2026-10-11: rewritten against scheduler-tick.sh's model. nazgul's
@@ -14,7 +14,7 @@ NAZGUL="root@nazgul.taildd208.ts.net"
 
 ssh -o BatchMode=yes -o ConnectTimeout=10 "$NAZGUL" bash -s <<'REMOTE'
 set -euo pipefail
-today=$(TZ=Europe/London date +%Y-%m-%d)
+today=$(TZ=America/Los_Angeles date +%Y-%m-%d)
 
 describe() {
     local label="$1" default_hhmm="$2" override_file="/etc/cluster-scheduler/$3"
@@ -22,11 +22,11 @@ describe() {
         local ov_date ov_hhmm
         read -r ov_date ov_hhmm < "$override_file"
         if [[ "$ov_date" == "$today" ]]; then
-            echo "$label: $ov_hhmm Europe/London (one-off override for today, reverts to standard $default_hhmm tomorrow)"
+            echo "$label: $ov_hhmm America/Los_Angeles (one-off override for today, reverts to standard $default_hhmm tomorrow)"
             return
         fi
     fi
-    echo "$label: $default_hhmm Europe/London (standard)"
+    echo "$label: $default_hhmm America/Los_Angeles (standard)"
 }
 
 describe "Shutdown" "21:00" ".override-night-off"

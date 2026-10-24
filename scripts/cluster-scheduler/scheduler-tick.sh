@@ -19,19 +19,19 @@
 #
 # This sidesteps all three constraints: cron keeps firing on the system
 # clock (irrelevant now, since this script does its own TZ-aware check),
-# and the actual time math happens here via `TZ=Europe/London date`, which
+# and the actual time math happens here via `TZ=America/Los_Angeles date`, which
 # handles DST transitions automatically and correctly via tzdata -- no
 # manual adjustment, ever, in either direction.
 set -euo pipefail
 
 STATE_DIR="/etc/cluster-scheduler"
-TODAY=$(TZ=Europe/London date +%Y-%m-%d)
+TODAY=$(TZ=America/Los_Angeles date +%Y-%m-%d)
 # `10#` forces base-10 interpretation -- without it, bash arithmetic treats
 # a leading-zero string like "0500" as octal, which is still numerically
 # valid-looking (0,5,0,0 are all legal octal digits) but silently computes
 # the WRONG number instead of erroring, which would have been a nasty, hard
 # -to-notice bug the first time this ran at 05:0x.
-NOW_HM=$((10#$(TZ=Europe/London date +%H%M)))
+NOW_HM=$((10#$(TZ=America/Los_Angeles date +%H%M)))
 
 # Each action gets a few minutes' grace window (not an exact-single-minute
 # match) so a transient cron/system hiccup around the target minute doesn't
@@ -48,12 +48,12 @@ fire_once_per_day() {
         return 0  # already fired today, this is just another tick inside the window
     fi
     echo "$TODAY" > "$marker"
-    echo "==> [$(TZ=Europe/London date)] tick: firing $label"
+    echo "==> [$(TZ=America/Los_Angeles date)] tick: firing $label"
     "$@"
 }
 
 run_night_off() {
-    pelagos run --rm --network=bridge --env TZ=Europe/London \
+    pelagos run --rm --network=bridge --env TZ=America/Los_Angeles \
         --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
         --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
         --env-file /etc/cluster-scheduler/pushover.env \
@@ -61,7 +61,7 @@ run_night_off() {
 }
 
 run_morning_on() {
-    pelagos run --rm --network=bridge --env TZ=Europe/London \
+    pelagos run --rm --network=bridge --env TZ=America/Los_Angeles \
         --bind-ro /root/.ssh/id_rsa:/root/.ssh/id_rsa \
         --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
         --env-file /etc/cluster-scheduler/pushover.env \
@@ -69,7 +69,7 @@ run_morning_on() {
 }
 
 run_descheduler_alert() {
-    pelagos run --rm --network=bridge --env TZ=Europe/London \
+    pelagos run --rm --network=bridge --env TZ=America/Los_Angeles \
         --bind-ro /etc/cluster-scheduler/kubeconfig:/etc/cluster-scheduler/kubeconfig \
         --env-file /etc/cluster-scheduler/pushover.env \
         localhost:5004/cluster-scheduler:latest /scripts/descheduler-alert.sh

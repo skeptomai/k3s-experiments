@@ -1,14 +1,17 @@
 # Cluster Night Mode
 
-Automated nightly shutdown (21:00) and startup (05:00), timed to **Europe/London**
+Automated nightly shutdown (21:00) and startup (05:00), timed to **America/Los_Angeles**
 hours, to save power.
 
-**2026-10-10: re-anchored from America/Los_Angeles (Seattle) to Europe/London** —
-the owner relocated/travels with UK hours now being the relevant "awake" window.
-Same 8h-off/16h-on shape as before. See "Timezone" below for how this is
-actually implemented (a minute-by-minute tick script, not a cron-native
-timezone feature — that approach was tried first and silently didn't work;
-the full story is there since it's genuinely non-obvious).
+**2026-10-24: re-anchored from Europe/London back to America/Los_Angeles** — owner
+returned to the US. Was Europe/London 2026-10-10 through 2026-10-24 while
+traveling (see History below for that switch). Same 8h-off/16h-on shape
+throughout — only the TZ value changes, in `scheduler-tick.sh`,
+`set-startup-time.sh`, `set-shutdown-time.sh`, `get-schedule.sh`, and the
+`--env TZ=...` flags passed into the Pelagos container; see "Timezone" below
+for how this is actually implemented (a minute-by-minute tick script, not a
+cron-native timezone feature — that approach was tried first and silently
+didn't work; the full story is there since it's genuinely non-obvious).
 
 ## How it works
 
@@ -29,7 +32,7 @@ nazgul's crontab has exactly one line, firing every minute:
 `scheduler-tick.sh` (`scripts/cluster-scheduler/scheduler-tick.sh` in git,
 deployed to that exact host path — it runs directly on nazgul, **not** inside
 the Pelagos container) does the actual time-of-day decision: it checks the
-current wall-clock time via `TZ=Europe/London date`, and only when that falls
+current wall-clock time via `TZ=America/Los_Angeles date`, and only when that falls
 in a 5-minute grace window around 21:00/05:00/05:20 does it launch the real
 one-shot Pelagos container (`localhost:5004/cluster-scheduler:latest`,
 `/scripts/night-off.sh` / `morning-on.sh` / `descheduler-alert.sh`), guarded
@@ -128,7 +131,7 @@ missing, a true script bug), not an expected-and-tolerated PDB race.
 
 ## Timing
 
-All times **Europe/London** (see "Timezone" below).
+All times **America/Los_Angeles** (see "Timezone" below).
 
 | Time  | Event |
 |-------|-------|
@@ -168,9 +171,9 @@ about two weeks every spring and autumn until manually corrected.
 script.** nazgul's crontab fires `scripts/cluster-scheduler/scheduler-tick.sh`
 every minute (see "How it works" above) — a plain host-side script, not
 containerized, cheap enough that running it 1440 times a day costs nothing
-meaningful. It computes the current time via `TZ=Europe/London date`, which
+meaningful. It computes the current time via `TZ=America/Los_Angeles date`, which
 resolves correctly through tzdata regardless of nazgul's own system timezone
-and handles UK DST transitions automatically and permanently — no twice-a-year
+and handles US DST transitions automatically and permanently — no twice-a-year
 manual correction, ever. Only when that falls inside a 5-minute grace window
 around 21:00, 05:00, or 05:20 does it launch the real (heavy, Pelagos-based)
 automation, guarded by a same-day marker file
@@ -180,7 +183,7 @@ exact-single-minute match) is deliberate: a transient hiccup exactly at `:00`
 shouldn't skip the whole day's action.
 
 Every `pelagos run` invocation the tick script launches still passes
-`--env TZ=Europe/London` — a separate, independent setting from the above,
+`--env TZ=America/Los_Angeles` — a separate, independent setting from the above,
 controlling what timezone the *container's own* internal date arithmetic
 resolves against (specifically `silence-alerts.sh`'s "night"/"wake_time" math,
 e.g. "05:30 today" — the container runs with system `TZ=UTC` by default).
@@ -188,8 +191,10 @@ e.g. "05:30 today" — the container runs with system `TZ=UTC` by default).
 `silence-alerts.sh` used to have `export TZ="America/Los_Angeles"` baked into
 the script itself (a value living inside a *built container image* — changing
 it meant a full rsync+build+push cycle just to change one string), now reads
-`export TZ="${TZ:-Europe/London}"` instead, honoring whatever the caller
-provides. Changing the power-cycle timezone again means editing
+`export TZ="${TZ:-America/Los_Angeles}"` instead, honoring whatever the caller
+provides (the default fallback was briefly `Europe/London` from 2026-10-10
+to 2026-10-24, matching the standing schedule of that period). Changing the
+power-cycle timezone again means editing
 `scheduler-tick.sh`'s three window-checks and its `--env TZ=...` flags (one
 file, one host-side deploy via `rsync`, no crontab syntax to fight with and no
 image rebuild unless the surrounding script logic itself changes too).
@@ -306,16 +311,16 @@ ssh root@nazgul.taildd208.ts.net "cd /etc/cluster-scheduler/build && pelagos bui
 
 Two Claude Code skills, backed by `set-shutdown-time.sh` / `set-startup-time.sh`
 in `scripts/cluster-scheduler/`, let you defer/advance tonight's shutdown or
-startup without permanently changing the standing 21:00/05:00 Europe/London
+startup without permanently changing the standing 21:00/05:00 America/Los_Angeles
 schedule:
 
 - **`cluster-shutdown-at HH:MM`** — writes `/etc/cluster-scheduler/.override-night-off`
   on nazgul (`"$TODAY $HH:MM"`), which `scheduler-tick.sh` checks every
   minute and uses instead of the standard 21:00 window for as long as its
   date matches today. Refuses (exit 1) if HH:MM has already passed today
-  (Europe/London).
+  (America/Los_Angeles).
 - **`cluster-startup-at HH:MM`** — same mechanism, `.override-morning-on`,
-  for `morning-on.sh` if HH:MM is still ahead today (Europe/London). If
+  for `morning-on.sh` if HH:MM is still ahead today (America/Los_Angeles). If
   HH:MM has already passed, no override written — instead checks Kasa
   outlet power state for all 6 nodes and starts the cluster immediately if
   it isn't already up.
@@ -407,3 +412,13 @@ clobber an existing valid override) before being considered done.
   the whole cluster powered on overnight. See the dedicated subsection above
   for the full reasoning (PDBs protect availability during a *partial*
   disruption; that's meaningless when every node goes dark together).
+- **2026-10-24**: re-anchored back from Europe/London to America/Los_Angeles
+  — owner returned to the US. Mechanical change only (same 8h-off/16h-on
+  shape, same tick-script architecture): swapped the `TZ=` value in
+  `scheduler-tick.sh` (all three window checks plus the three `--env
+  TZ=...` flags), `set-startup-time.sh`, `set-shutdown-time.sh`, and
+  `get-schedule.sh`, plus `silence-alerts.sh`'s default-TZ fallback (both
+  the top-level and `cluster-scheduler/` copies). Checked at the time of
+  the switch: cluster was already powered on (all 6 nodes), consistent
+  with 09:44 America/Los_Angeles falling inside the new 05:00-21:00 "on"
+  window, so no manual `morning-on.sh` invocation was needed.

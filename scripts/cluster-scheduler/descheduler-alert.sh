@@ -2,8 +2,11 @@
 # descheduler-alert.sh
 #
 # Nightly summary of what the descheduler actually did. It runs at 05:20
-# Europe/London (crontab's CRON_TZ=Europe/London, changed 2026-10-10 from
-# America/Los_Angeles), right after morning-on.sh's uncordon burst -- see
+# America/Los_Angeles (via scheduler-tick.sh's hardcoded window -- see that
+# script's header for why crontab's own CRON_TZ isn't used. Was Europe/London
+# 2026-10-10 through 2026-10-24, owner traveling; re-anchored back to
+# America/Los_Angeles on 2026-10-24, owner returned to the US), right after
+# morning-on.sh's uncordon burst -- see
 # manifests/descheduler/helmrelease.yaml and
 # docs/ipc4-pod-pileup-postmortem.md for why it exists. Pulls the most
 # recent Job's pod logs, counts eviction-related lines, and sends a Pushover

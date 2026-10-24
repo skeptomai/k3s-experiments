@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Defers tonight's automated cluster shutdown to a different Europe/London
+# Defers tonight's automated cluster shutdown to a different America/Los_Angeles
 # time, without permanently changing the standing 21:00 schedule.
 #
 # 2026-10-11: rewritten against scheduler-tick.sh's model (see
@@ -23,7 +23,7 @@ NAZGUL="root@nazgul.taildd208.ts.net"
 OVERRIDE_FILE="/etc/cluster-scheduler/.override-night-off"
 
 if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <HH:MM>  (24hr, Europe/London)" >&2
+    echo "Usage: $0 <HH:MM>  (24hr, America/Los_Angeles)" >&2
     exit 1
 fi
 
@@ -39,17 +39,17 @@ set -euo pipefail
 override_file="$1"
 target_hhmm="$2"
 
-today=$(TZ=Europe/London date +%Y-%m-%d)
-now_hm=$((10#$(TZ=Europe/London date +%H%M)))
+today=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+now_hm=$((10#$(TZ=America/Los_Angeles date +%H%M)))
 target_hm=$((10#$(echo "$target_hhmm" | tr -d ':')))
 
 if (( target_hm <= now_hm )); then
-    echo "error: $target_hhmm has already passed today (now is $(TZ=Europe/London date +%H:%M) Europe/London) -- nothing to defer" >&2
+    echo "error: $target_hhmm has already passed today (now is $(TZ=America/Los_Angeles date +%H:%M) America/Los_Angeles) -- nothing to defer" >&2
     exit 1
 fi
 
 mkdir -p "$(dirname "$override_file")"
 echo "$today $target_hhmm" > "$override_file"
-echo "==> tonight's shutdown moved to $target_hhmm Europe/London"
+echo "==> tonight's shutdown moved to $target_hhmm America/Los_Angeles"
 echo "==> reverts to the standard 21:00 shutdown automatically tomorrow (override is dated to today only)"
 REMOTE
