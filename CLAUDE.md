@@ -180,6 +180,7 @@ and must be re-applied by hand.
 - **node-class labels** — `scripts/label-nodes.sh` (called by `reinstall-nodes.sh`).
 - **NUT UPS clients (ipc5-9)** — `scripts/install-nut-clients.sh` (called by `reinstall-nodes.sh`). ipc4 NUT server requires `scripts/install-nut-server.sh` after ipc4 manual reinstall.
 - **Temperature monitoring** — `scripts/install-node-monitoring.sh` (called by `reinstall-nodes.sh`); installs lm-sensors, persists `coretemp` in `/etc/modules`.
+- **Cilium bpf mount (`run-cilium-bpf.mount`)** — installed and enabled by `install-pelagos.sh` on every node install/reinstall (also installed by `install-cilium.sh`). Workaround for pelagos#477 (Cilium's own bpffs auto-mount double-mounts under Pelagos); a native systemd `.mount` unit rather than an imperative `mount` command, so it survives reboots and reinstalls without a manual step. See `docs/cilium.md`.
 
 **Out-of-band on the MikroTik (NOT in Git — re-apply by hand; see orgfiles `home-network/dns-dhcp.md`):**
 - **Static leases** for all six nodes (by MAC → IP).

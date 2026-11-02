@@ -1,7 +1,12 @@
 # Cilium CNI
 
 Cilium 1.19.6 replaced Flannel (wireguard-native) as the CNI on 2026-08-01.
-Flux-managed via `clusters/ipc/` (HelmRelease in the `cilium` namespace).
+Installed imperatively via `scripts/install-cilium.sh` (Helm, run by hand from omen) —
+**not** Flux-managed. CNI is a bootstrap dependency (Flux's own pods need working pod
+networking to start) and the install carries live Pelagos BPF-mount workarounds that
+need to run post-reboot anyway, so it's deliberately kept out of the Flux-reconciled
+set. Only `manifests/cilium-netpols/` (the kubelet-probe allow policy) is Flux-managed
+— see `clusters/ipc/cilium-netpols.yaml`.
 
 ## k3s config (all nodes)
 
@@ -56,6 +61,34 @@ Two Pelagos bugs had to be fixed before Cilium ran cleanly:
 | #484 | EROFS on `/var/run` hostPath → cilium-envoy CrashLoopBackOff | v0.65.69 |
 | #483 | `$BIN_PATH` not reaching container → apply-sysctl-overwrites init CrashLoopBackOff | v0.65.70 |
 | #492 | Duplicate `/sys/fs/bpf` mount (shared-propagated) → cilium-agent CrashLoopBackOff | v0.65.73 |
+
+**Still open — Helm values in `install-cilium.sh` work around these:**
+
+| Pelagos issue | Workaround | Status |
+|---------------|------------|--------|
+| #476 | `sysctlfix.enabled=false`; run `cilium-sysctlfix` from the host instead — env vars aren't visible in init container bash under Pelagos | Open. Until fixed, pod-to-pod traffic gets `reserved:init` identity and is blocked. |
+| #477 | `bpf.autoMount.enabled=false` + `bpf.root=/run/cilium/bpf`, backed by the `run-cilium-bpf.mount` systemd unit — Cilium's own bpffs auto-mount double-mounts `/sys/fs/bpf` under Pelagos | Open, but the bpf mount itself is now reboot/reinstall-persistent (fixed 2026-11-02 — see below). Installed by both `install-cilium.sh` and `install-pelagos.sh` (every node install/reinstall). |
+| #478 | `l7Proxy=false` — `/var/run` hostPath is mounted read-only under Pelagos | Open. Only L3/L4 policy enforcement works; no L7 (HTTP-aware) policy. |
+
+### `run-cilium-bpf.mount` — making the #477 workaround reboot-persistent
+
+Before 2026-11-02, `bpf.root=/run/cilium/bpf` was created with an imperative `mount -t bpf
+bpf /run/cilium/bpf` run by `install-cilium.sh` — which does **not** survive a reboot. This
+cluster power-cycles every node nightly (`scripts/cluster-scheduler/night-off.sh` /
+`morning-on.sh`), so Cilium was silently crash-looping on every affected node until someone
+re-ran the mount step by hand. Confirmed on ipc7: 4850+ container restarts accumulated before
+the fix, immediately flat afterward.
+
+The fix is a native systemd `.mount` unit (`/etc/systemd/system/run-cilium-bpf.mount`,
+`Where=/run/cilium/bpf`, `Type=bpf`, `WantedBy=local-fs.target`) instead of the imperative
+command — systemd creates the mount point itself and remounts it on every boot with no manual
+step. It's installed by `install-cilium.sh` (Step 3) and, since this also needs to survive a
+bare node reinstall (not just a reboot), by `install-pelagos.sh` on every node install/upgrade
+too. Verified via an actual cold reboot of ipc7 (not just an already-mounted check): the unit
+activated 3 seconds after boot, with Cilium's restart count flat afterward.
+
+Remove the unit and switch back to `bpf.autoMount.enabled=true` / `bpf.root=/sys/fs/bpf` once
+pelagos#477 itself is fixed.
 
 ## Kubelet health probe quirk — READ THIS BEFORE ADDING NetworkPolicies
 

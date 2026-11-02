@@ -4,9 +4,11 @@
 # ipc5 and ipc6 are reached by jumping through ipc4.
 #
 # Installs the latest pelagos release deb (which includes both pelagos and
-# pelagos-cri), sets up /usr/local/bin symlinks, writes the pelagos-cri
-# systemd unit, and deploys the canonical k3s config from config/k3s-server.yaml
-# or config/k3s-agent.yaml in the repo root. Safe to run multiple times (idempotent).
+# pelagos-cri), sets up /usr/local/bin symlinks, writes the pelagos-cri systemd
+# unit, installs the run-cilium-bpf.mount unit (pelagos#477 CNI workaround --
+# see scripts/install-cilium.sh), and deploys the canonical k3s config from
+# config/k3s-server.yaml or config/k3s-agent.yaml in the repo root. Safe to run
+# multiple times (idempotent).
 #
 # Role-aware: deploys the server config (k3s-server.yaml on the etcd seed ipc4,
 # k3s-server-join.yaml with the token injected on ipc5/ipc6) + the `k3s` unit on
@@ -153,6 +155,24 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+echo "--- Writing run-cilium-bpf.mount unit (pelagos#477 workaround, remove when fixed) ---"
+sudo tee /etc/systemd/system/run-cilium-bpf.mount >/dev/null <<'UNIT'
+[Unit]
+Description=bpffs for Cilium (pelagos#477 workaround -- remove when fixed)
+Before=k3s.service k3s-agent.service pelagos-cri.service
+
+[Mount]
+What=bpf
+Where=/run/cilium/bpf
+Type=bpf
+Options=rw,nosuid,nodev,noexec,relatime,mode=700
+
+[Install]
+WantedBy=local-fs.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now run-cilium-bpf.mount
 
 echo "--- Deploying k3s config ---"
 sudo mkdir -p /etc/rancher/k3s

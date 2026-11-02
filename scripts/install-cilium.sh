@@ -9,7 +9,7 @@
 # What this script does:
 #   1. Deploy updated k3s configs to all 6 nodes
 #   2. Pre-run cilium-sysctlfix on all nodes (workaround for pelagos#476-adjacent env var bug)
-#   3. Mount bpffs at /run/cilium/bpf on all nodes (workaround for pelagos#477)
+#   3. Install the run-cilium-bpf.mount systemd unit on all nodes (workaround for pelagos#477)
 #   4. Add the Cilium Helm repo
 #   5. Install Cilium 1.19.x into namespace 'cilium' with k3s-specific values
 #   6. Rolling-restart k3s servers (ipc4→ipc5→ipc6, 90s gap each) then agents
@@ -22,9 +22,11 @@
 #   bpf.autoMount.enabled=false + bpf.root=/run/cilium/bpf — pelagos#477: double /sys/fs/bpf mount
 #   l7Proxy=false             — pelagos#478: /var/run hostPath mounted read-only
 #
-# CRITICAL: bpf.root=/run/cilium/bpf is NOT persistent across reboots. After any node
-# reboot, Cilium will fail to start until pelagos#477 is fixed. The pre-mount step
-# below re-applies it, but requires this script to be re-run after reboots.
+# bpf.root=/run/cilium/bpf is backed by the run-cilium-bpf.mount systemd unit (installed
+# in Step 3 below, and also by install-pelagos.sh on every node install/reinstall), not an
+# imperative `mount` command — it survives reboots and node reinstalls on its own. Remove
+# the unit and switch back to bpf.autoMount.enabled=true / bpf.root=/sys/fs/bpf once
+# pelagos#477 is fixed.
 #
 # CRITICAL: Pod-to-pod networking requires pelagos#476 (CNI_ARGS missing pod metadata).
 # Until that is fixed, all pods receive reserved:init identity and cannot communicate.
@@ -103,15 +105,33 @@ for node in "${SERVERS[@]}" "${AGENTS[@]}"; do
         log '  cilium-sysctlfix not found yet (first install) — will run again after Cilium is deployed'"
 done
 
-log "Step 3: mounting bpffs at /run/cilium/bpf on all nodes (workaround: pelagos#477)"
+log "Step 3: installing run-cilium-bpf.mount on all nodes (workaround: pelagos#477)"
 # Pelagos creates a double mount for /sys/fs/bpf inside containers. Using a non-sysfs
-# path avoids the collision. NOT persistent: re-run this script after any node reboot
-# until pelagos#477 is fixed and bpf.autoMount.enabled=true / bpf.root=/sys/fs/bpf can be used.
+# path avoids the collision. A native systemd .mount unit (rather than an imperative
+# `mount` command) survives reboots on its own -- systemd creates the Where= directory
+# itself for unit-defined mounts. install-pelagos.sh installs the same unit on every
+# node install/reinstall, so this also covers nodes that haven't run Cilium yet.
 for node in "${SERVERS[@]}" "${AGENTS[@]}"; do
-    log "  mounting /run/cilium/bpf on $node"
-    ssh_node "$node" "sudo mkdir -p /run/cilium/bpf && \
-        mountpoint -q /run/cilium/bpf || \
-        sudo mount -t bpf bpf /run/cilium/bpf --make-shared"
+    log "  installing run-cilium-bpf.mount on $node"
+    ssh_node "$node" "sudo bash -s" <<'ENDSSH'
+set -euo pipefail
+tee /etc/systemd/system/run-cilium-bpf.mount >/dev/null <<'UNIT'
+[Unit]
+Description=bpffs for Cilium (pelagos#477 workaround -- remove when fixed)
+Before=k3s.service k3s-agent.service pelagos-cri.service
+
+[Mount]
+What=bpf
+Where=/run/cilium/bpf
+Type=bpf
+Options=rw,nosuid,nodev,noexec,relatime,mode=700
+
+[Install]
+WantedBy=local-fs.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now run-cilium-bpf.mount
+ENDSSH
 done
 
 log "Step 4: setting up Cilium Helm repo"
@@ -221,7 +241,7 @@ log "Cilium ${CILIUM_VERSION} migration complete"
 log ""
 log "KNOWN LIMITATIONS (pending Pelagos fixes):"
 log "  pelagos#476: pods receive reserved:init identity — pod-to-pod traffic blocked"
-log "  pelagos#477: /run/cilium/bpf BPF mount is NOT persistent — re-run after any reboot"
+log "  pelagos#477: /run/cilium/bpf BPF mount via run-cilium-bpf.mount systemd unit (persistent)"
 log "  pelagos#478: L7 proxy disabled (l7Proxy=false) — only L3/L4 policy enforced"
 log ""
 log "When Pelagos fixes are released:"

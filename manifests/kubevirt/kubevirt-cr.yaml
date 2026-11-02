@@ -10,7 +10,19 @@ spec:
     developerConfiguration:
       featureGates: []
     imagePullPolicy: IfNotPresent
-  customizeComponents: {}
+  # Patches virt-handler's node-labeller hostPath volume from type: "" (no
+  # auto-create) to DirectoryOrCreate, so kubelet creates
+  # /var/lib/kubevirt-node-labeller itself on every node before virt-handler's
+  # first run. Replaces scripts/install-kubevirt-node-prereqs.sh, which had to
+  # be remembered and run by hand on each new/reinstalled node (not wired into
+  # reinstall-nodes.sh). Strategic-merge patch targets the "node-labeller"
+  # volume by its patchMergeKey (name), leaving every other volume untouched.
+  customizeComponents:
+    patches:
+      - resourceType: DaemonSet
+        resourceName: virt-handler
+        type: strategic
+        patch: '{"spec":{"template":{"spec":{"volumes":[{"name":"node-labeller","hostPath":{"path":"/var/lib/kubevirt-node-labeller","type":"DirectoryOrCreate"}}]}}}}'
   imagePullPolicy: IfNotPresent
   workloadUpdateStrategy: {}
   # Required anti-affinity so virt-api/virt-controller replicas never co-locate
