@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: openbao-client
+  namespace: spire-openbao-demo
+spec:
+  serviceAccountName: openbao-client-sa
+  restartPolicy: Never
+  initContainers:
+    - name: fetch-svid
+      image: docker.io/library/ubuntu:22.04
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -e
+          apt-get update -qq && apt-get install -y --no-install-recommends curl ca-certificates jq >/dev/null 2>&1
+          curl -sL https://github.com/spiffe/spire/releases/download/v1.9.6/spire-1.9.6-linux-amd64-musl.tar.gz \
+            | tar -xz --strip-components=2 -C /usr/local/bin spire-1.9.6/bin/spire-agent
+          chmod +x /usr/local/bin/spire-agent
+          mkdir -p /jwt
+          for i in $(seq 1 15); do
+            if spire-agent api fetch jwt \
+                -audience openbao-demo \
+                -socketPath /run/spire/sockets/agent.sock \
+                -output json > /jwt/svid.json 2>/tmp/err; then
+              echo "JWT-SVID fetched for spiffe://ipc.local/openbao-client"
+              break
+            fi
+            echo "Attempt $i: $(cat /tmp/err) — retrying in 2s..."
+            sleep 2
+          done
+          jq -r '.[0].svids[0].svid' /jwt/svid.json > /jwt/token
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+        - name: jwt
+          mountPath: /jwt
+  containers:
+    - name: client
+      image: docker.io/library/ubuntu:22.04
+      command: ["bash", "-c"]
+      args:
+        - |
+          apt-get update -qq && apt-get install -y --no-install-recommends curl jq >/dev/null 2>&1
+
+          echo "=== Step 1: The SVID this workload holds ==="
+          echo "SPIFFE ID (from the Workload API response, not asserted by us):"
+          jq -r '.[0].svids[0].spiffe_id' /jwt/svid.json
+          echo ""
+          echo "Decoded JWT claims (payload segment, base64url-decoded locally -- just"
+          echo "for display, OpenBao does its own real signature-verified decoding):"
+          cut -d. -f2 /jwt/token | jq -R 'gsub("-";"+") | gsub("_";"/") | @base64d | fromjson'
+
+          echo ""
+          echo "=== Step 2: Presenting the SVID to OpenBao as a Bearer-style login ==="
+          echo "POST /v1/auth/jwt/login  {\"role\":\"openbao-demo-role\",\"jwt\":\"<svid>\"}"
+          curl -s -X POST http://openbao-demo-svc:8200/v1/auth/jwt/login \
+            -d "{\"role\":\"openbao-demo-role\",\"jwt\":\"$(cat /jwt/token)\"}" \
+            -o /tmp/login.json
+          echo ""
+          echo "OpenBao's response (identity it extracted + policies it granted):"
+          jq '{auth: {client_token: .auth.client_token, policies: .auth.policies, metadata: .auth.metadata}}' /tmp/login.json
+
+          CLIENT_TOKEN=$(jq -r '.auth.client_token' /tmp/login.json)
+          if [ "$CLIENT_TOKEN" = "null" ] || [ -z "$CLIENT_TOKEN" ]; then
+            echo ""
+            echo "!!! Login failed -- no client_token in response. Raw response:"
+            cat /tmp/login.json
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Step 3: Using that OpenBao token to read the actual secret ==="
+          echo "GET /v1/secret/data/demo/myapp  (Authorization via X-Vault-Token)"
+          curl -s -H "X-Vault-Token: $CLIENT_TOKEN" \
+            http://openbao-demo-svc:8200/v1/secret/data/demo/myapp \
+            | jq '.data.data'
+
+          echo ""
+          echo "=== Done: SPIRE-issued identity -> OpenBao authentication -> secret, no static credentials anywhere in this pod spec ==="
+      volumeMounts:
+        - name: jwt
+          mountPath: /jwt
+          readOnly: true
+  volumes:
+    - name: spire-agent-socket
+      hostPath:
+        path: /run/spire/sockets
+        type: Directory
+    - name: jwt
+      emptyDir: {}

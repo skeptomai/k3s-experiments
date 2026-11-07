@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-configure
+  namespace: spire-openbao-demo
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: configure
+          image: quay.io/openbao/openbao:2.6.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export BAO_ADDR=http://openbao-demo-svc:8200
+              export BAO_TOKEN=demo-root-token
+
+              echo "=== Waiting for OpenBao to be reachable ==="
+              for i in $(seq 1 30); do
+                bao status >/dev/null 2>&1 && break
+                sleep 2
+              done
+              bao status
+
+              echo ""
+              echo "=== Enabling KV v2 and writing a demo secret ==="
+              bao secrets enable -path=secret kv-v2 2>&1 | grep -v "path is already in use" || true
+              bao kv put secret/demo/myapp \
+                username=demo-app-user \
+                password=demo-s3cr3t-value
+
+              echo ""
+              echo "=== Enabling the jwt auth method ==="
+              bao auth enable jwt 2>&1 | grep -v "path is already in use" || true
+
+              echo ""
+              echo "=== Pointing jwt auth at SPIRE's JWT-SVID signing keys ==="
+              # Requires registration-and-jwks-job to have already published
+              # spire-jwks-svc -- see the README's Apply order.
+              bao write auth/jwt/config \
+                jwks_url="http://spire-jwks-svc:8080/keys.json"
+
+              echo ""
+              echo "=== Writing a policy scoped to only this demo secret ==="
+              bao policy write openbao-demo-policy - <<'EOF'
+              path "secret/data/demo/myapp" {
+                capabilities = ["read"]
+              }
+              EOF
+
+              echo ""
+              echo "=== Writing the role: exact SPIFFE ID + audience required ==="
+              bao write auth/jwt/role/openbao-demo-role \
+                role_type="jwt" \
+                bound_audiences="openbao-demo" \
+                user_claim="sub" \
+                bound_subject="spiffe://ipc.local/openbao-client" \
+                token_policies="openbao-demo-policy" \
+                token_ttl="15m"
+
+              echo ""
+              echo "=== OpenBao configured. Ready for the client workload. ==="

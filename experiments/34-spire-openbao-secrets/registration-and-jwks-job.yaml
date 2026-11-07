@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spire-register-openbao-demo
+  namespace: spire
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      serviceAccountName: spire-registrar
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              SERVER="pod/spire-server-0"
+              NS="-n spire"
+              BIN="/opt/spire/bin/spire-server"
+
+              echo "=== Registering openbao-client ==="
+              kubectl exec $NS $SERVER -- $BIN entry create \
+                -spiffeID spiffe://ipc.local/openbao-client \
+                -parentID spiffe://ipc.local/k8s-node \
+                -selector k8s:ns:spire-openbao-demo \
+                -selector k8s:sa:openbao-client-sa \
+              && echo "openbao-client entry created." || echo "Entry may already exist."
+
+              echo ""
+              echo "=== Extracting JWT-SVID signing keys from the SPIRE trust bundle ==="
+              # -format spiffe returns the full SPIFFE trust bundle: both x509-svid keys
+              # (for mTLS, with x5c cert chains) and jwt-svid keys (bare EC/RSA JWK, no
+              # cert). OpenBao's jwt auth method only needs the latter, reshaped into a
+              # standard JWKS document. "use" is remapped jwt-svid -> sig: SPIFFE's value
+              # is non-standard for a plain JWKS consumer.
+              kubectl exec $NS $SERVER -- $BIN bundle show -format spiffe \
+                | jq '{keys: [.keys[] | select(.use == "jwt-svid") | .use = "sig"]}' \
+                > /tmp/jwks.json
+
+              echo "--- JWKS to be published ---"
+              cat /tmp/jwks.json
+              echo ""
+
+              echo "=== Publishing as ConfigMap spire-jwks in spire-openbao-demo ==="
+              kubectl create configmap spire-jwks \
+                -n spire-openbao-demo \
+                --from-file=keys.json=/tmp/jwks.json \
+                --dry-run=client -o yaml | kubectl apply -f -
+
+              echo ""
+              echo "=== Current registration entries ==="
+              kubectl exec $NS $SERVER -- $BIN entry show

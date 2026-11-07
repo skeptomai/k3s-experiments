@@ -1,0 +1,51 @@
+# A throwaway, single-pod, DEV-MODE OpenBao instance for this experiment only.
+# Deliberately NOT the real in-cluster 3-node HA OpenBao (namespace `openbao`) --
+# this demo doesn't touch production secrets infrastructure or need its root token
+# at all. Dev mode is unsealed automatically with a fixed, well-known root token
+# (so the README can show real commands without redacting anything), has no
+# persistent storage (everything in memory, gone on pod restart), and uses plain
+# HTTP (no TLS) to keep the demonstration focused on the SPIRE/OpenBao exchange
+# itself. None of this is appropriate for anything beyond this one experiment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openbao-demo
+  namespace: spire-openbao-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openbao-demo
+  template:
+    metadata:
+      labels:
+        app: openbao-demo
+    spec:
+      containers:
+        - name: openbao
+          image: quay.io/openbao/openbao:2.6.1
+          args:
+            - server
+            - -dev
+            - -dev-listen-address=0.0.0.0:8200
+            - -dev-root-token-id=demo-root-token
+          ports:
+            - containerPort: 8200
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: 8200
+            initialDelaySeconds: 2
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao-demo-svc
+  namespace: spire-openbao-demo
+spec:
+  selector:
+    app: openbao-demo
+  ports:
+    - port: 8200
+      targetPort: 8200

@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spire-openbao-demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-client-sa
+  namespace: spire-openbao-demo
+---
+# Grants the existing, shared `spire-registrar` ServiceAccount (lives in the `spire`
+# namespace, created by experiment 11, reused by experiment 21) permission to write a
+# ConfigMap in THIS namespace. It already has pods/exec on spire-server-0 from its
+# Role in the `spire` namespace — this is the only new grant needed, and it's scoped
+# to this namespace alone so teardown is just `kubectl delete namespace`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spire-registrar-configmap-writer
+  namespace: spire-openbao-demo
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spire-registrar-configmap-writer
+  namespace: spire-openbao-demo
+subjects:
+  - kind: ServiceAccount
+    name: spire-registrar
+    namespace: spire
+roleRef:
+  kind: Role
+  name: spire-registrar-configmap-writer
+  apiGroup: rbac.authorization.k8s.io
