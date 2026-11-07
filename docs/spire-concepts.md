@@ -213,7 +213,9 @@ Common cases:
 - **OpenBao authentication** — OpenBao's JWT auth method expects a Bearer token, not a
   client cert. A workload that needs to fetch secrets from OpenBao calls the Workload API
   to get a JWT SVID with the configured audience, presents it to OpenBao, and receives
-  an OpenBao token in return. (Not currently configured in this cluster — see below.)
+  an OpenBao token in return. (Demonstrated end-to-end in `experiments/34-spire-openbao-secrets`
+  — see below — against a throwaway demo OpenBao instance, not yet wired into the real
+  production OpenBao.)
 - **REST APIs behind an API gateway** — the gateway terminates TLS; the workload's
   X.509 identity never reaches the backend. The workload instead fetches a JWT SVID and
   sends it as an `Authorization: Bearer` header that the gateway or backend can validate.
@@ -1188,18 +1190,28 @@ misconfigured RBAC rule, or a cluster-admin mistake — the agent cannot detect 
 
 ### OpenBao Integration via JWT SVID
 
-A natural next step for this cluster (OpenBao is already deployed): pods can authenticate
+**Demonstrated 2026-11-06 in `experiments/34-spire-openbao-secrets`**: pods can authenticate
 to OpenBao using a SPIRE-issued JWT SVID via OpenBao's JWT auth method. No OpenBao tokens
-or secrets need to be injected into pods. The flow is:
+or secrets need to be injected into pods. The actual flow, verified live:
 
-1. Pod fetches JWT SVID (audience: `vault` — OpenBao's auth method is API-compatible
-   with Vault's and uses the same audience convention)
-2. Pod calls `bao write auth/jwt/login jwt=<svid> role=<role>`
-3. OpenBao validates the JWT against the SPIRE trust bundle (configured as a JWKS endpoint)
-4. OpenBao returns a short-lived token
+1. Pod fetches a JWT-SVID via the Workload API (`spire-agent api fetch jwt -audience
+   <role-specific-audience>`)
+2. Pod does a real `POST /v1/auth/jwt/login` with that JWT and a role name
+3. OpenBao validates the JWT's signature against SPIRE's own JWT-signing keys — extracted
+   from `spire-server bundle show -format spiffe` (filtering to the `jwt-svid`-tagged
+   entries, which are plain JWKs with no cert chain, distinct from the `x509-svid` entries
+   used for mTLS) and republished as a JWKS OpenBao fetches via `jwks_url`
+4. OpenBao maps the JWT's `sub` claim (the SPIFFE ID) to a role, and the role's attached
+   policy, returning a short-lived token scoped accordingly
 
 This replaces OpenBao's Kubernetes auth method with a stronger, SPIFFE-native identity.
-Not currently configured.
+**What's demonstrated vs. what's still open:** the experiment proves the full mechanism —
+including a negative control confirming OpenBao genuinely verifies the signature rather
+than accepting anything presented to it — but against a dedicated throwaway dev-mode
+OpenBao instance, not the real in-cluster 3-node HA OpenBao. Wiring this into the
+production OpenBao (registering a real role/policy there, deciding which real workloads
+should get SPIFFE-based auth instead of the Kubernetes auth method they likely use today)
+is still unstarted.
 
 ---
 
