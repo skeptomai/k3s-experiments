@@ -116,9 +116,10 @@ The two map onto different designs:
   another layer (virtio-fs or block device) and etcd is fsync-latency-sensitive, so measure
   before committing.
 - **KubeVirt: each hosted control plane in its own VM.** The VM holds only the control
-  plane; the hosted cluster's workers are still bare nodes. Gains: live migration on drain
-  (needs shared RWX storage), disk snapshots, a control plane that behaves like a normal
-  machine. Costs: heaviest footprint, and you own the control plane VM's OS image and
+  plane; the hosted cluster's workers are still bare nodes. It adds capabilities Kamaji
+  does not have (live migration on drain, which needs shared RWX storage; disk snapshots;
+  a control plane that behaves like a normal machine), which are not needed for Kamaji
+  parity. Costs: heaviest footprint, and you own the control plane VM's OS image and
   patching. With k3s inside, you pay for the OS, its services, and the control plane.
 - **Neither is the lightest option.** Control planes as plain pods with no VM (the
   Kamaji / vcluster / HyperShift approach) win on density when VM-grade isolation between
@@ -147,12 +148,12 @@ This is where they differ most sharply, and it is structural:
 |---|---|
 | Lighter per instance and in API surface | Kata |
 | Isolated control-plane pods | Kata |
-| Each control plane in its own full VM | KubeVirt |
 | Easiest on a new containerd cluster | Kata |
 | Works on any CRI runtime | KubeVirt |
 
-On containerd: Kata for isolated control-plane pods, KubeVirt only if each control plane
-must be a full VM (live migration, disk snapshots). On a custom-CRI runtime: KubeVirt is
+On containerd: Kata for isolated control-plane pods. KubeVirt's extras (live migration,
+disk snapshots, a full OS per control plane) go beyond what Kamaji offers, so they count
+only if a requirement beyond Kamaji parity appears. On a custom-CRI runtime: KubeVirt is
 the only option until that runtime supports Kata. The deciding question is whether
 VM-grade isolation between hosted control planes is needed or only efficiency.
 
@@ -357,8 +358,9 @@ flowchart LR
 - **Bootstrap:** PKI and config injected through cloud-init or similar, not mounted Secrets.
 - **Upgrades:** OS patching of every control plane VM on top of control plane upgrades,
   plus images to build and maintain.
-- **Gains:** live migration, disk snapshots (useful for an etcd disk), and a control plane
-  that behaves like a normal machine.
+- **Extras beyond Kamaji parity (not required):** live migration, disk snapshots (useful
+  for an etcd disk), and a control plane that behaves like a normal machine. Kamaji has none
+  of these; it gets availability from replicated control plane pods instead.
 
 ### Net
 
@@ -368,15 +370,17 @@ flowchart LR
 | Reconciler complexity | Close to Kamaji's | Larger (VM lifecycle + guest bootstrap) |
 | Per-control-plane maintenance | None beyond the control plane | OS image + patching |
 | Isolation | VM-grade | VM-grade |
-| Live migration, disk snapshots | No | Yes |
+| Live migration, disk snapshots (beyond Kamaji parity, not required) | No | Yes |
 | Fits Kamaji's pod model | Yes | No, a different architecture |
 
-For hosted control planes Kata is the better fit: it keeps the pod model that makes Kamaji
-dense and adds isolation as a pod-spec setting. KubeVirt only makes sense if the control
-plane must be machine-shaped (live migration, datastore disk snapshots, or a requirement
-for a full OS under each control plane), at which point most of what the pod-based approach buys is lost.
-Kata's prerequisite is a containerd or CRI-O management cluster (see the runtime section
-above).
+For a Kamaji replacement Kata is the better fit: it keeps the pod model that makes Kamaji
+dense and adds isolation as a pod-spec setting. Both options give VM-grade isolation, and
+KubeVirt additionally puts an OS to build and patch under every control plane. Its extras
+(live migration, datastore disk snapshots, a full OS per control plane) are not part of
+Kamaji's feature set, so they are not requirements for parity. They would matter only if a
+requirement beyond Kamaji's appeared, and at that point most of what the pod-based approach
+buys is lost. Kata's prerequisite is a containerd or CRI-O management cluster (see the
+runtime section above).
 
 **Where the effort would go:** PKI rotation, upgrade orchestration, and datastore
 isolation between hosted control planes look small and are not. If the motivation is a missing feature,
