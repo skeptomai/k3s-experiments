@@ -1,4 +1,4 @@
-# Experiment 34 — Does a rotated Secret reach a running KubeVirt guest?
+# Experiment 35 — Does a rotated Secret reach a running KubeVirt guest?
 
 Settles one open question from `docs/hosted-control-plane-isolation.md`: when a TLS Secret
 is rotated, does a running KubeVirt guest see the new certificate, and does a service
@@ -36,10 +36,10 @@ source takes to show B.
 ## Run
 
 ```
-bash experiments/34-kubevirt-secret-propagation/run-test.sh
+bash experiments/35-kubevirt-secret-propagation/run-test.sh
 ```
 
-Then `bash experiments/34-kubevirt-secret-propagation/teardown.sh`. Run with
+Then `bash experiments/35-kubevirt-secret-propagation/teardown.sh`. Run with
 `set -o pipefail` if piping the output, or a failure is hidden by the pipe.
 
 ## Result (one run, KubeVirt v1.8.4, no feature gates set)

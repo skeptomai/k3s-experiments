@@ -69,7 +69,7 @@ behind the scores so that any reader can check it. **It takes no side.**
 Most of the analysis is inference, so every claim of consequence carries a label:
 
 - **[S]**: from a cited source or product documentation.
-- **[M]**: measured in a throwaway test (`experiments/34-kubevirt-secret-propagation/`,
+- **[M]**: measured in a throwaway test (`experiments/35-kubevirt-secret-propagation/`,
   a single run).
 - **[I]**: inference from general knowledge. Not measured or tested here.
 - **[?]**: unverified or open; listed in [Appendix D](#app-open).
@@ -862,7 +862,7 @@ replace the most contested ones with measurements:
    and record what Kubernetes shows and how long recovery takes.
 4. **Debugging exercise (D1, D3, D4):** plant an apiserver misconfiguration under each
    design; time how long operators with different backgrounds take to find and fix it.
-5. **Certificate rotation (C3, risks):** done for KubeVirt delivery (experiment 34); repeat
+5. **Certificate rotation (C3, risks):** done for KubeVirt delivery (experiment 35); repeat
    under Kata, and with the actual control plane components, recording whether each needs a
    restart.
 6. **Identity (effort map 4b):** get a SPIRE agent and attestation working inside one Kata

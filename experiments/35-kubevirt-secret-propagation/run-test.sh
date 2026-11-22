@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Experiment 34: does a rotated Secret reach a running KubeVirt guest, and does a
+# Experiment 35: does a rotated Secret reach a running KubeVirt guest, and does a
 # service pick it up? Uses a real CA + two leaf certificates (A, then B).
 # Run from omen. Throwaway namespace kv-secret-test; remove with teardown.sh.
 set -euo pipefail
