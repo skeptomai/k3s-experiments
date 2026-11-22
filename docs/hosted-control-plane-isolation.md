@@ -158,7 +158,7 @@ flowchart TB
 Kamaji runs each hosted control plane as ordinary pods on a management cluster's nodes, so
 control planes share the host kernel (separated by namespaces and cgroups only). A
 `TenantControlPlane` resource describes each one. Bare-node workers connect inward through a
-load balancer.
+load balancer. The diagram shows Kamaji's default configuration, with Konnectivity enabled.
 
 ```mermaid
 flowchart LR
@@ -197,8 +197,10 @@ easy part):
 3. Datastore provisioning for each hosted control plane, with real isolation if shared.
    Kamaji separates the datastore declaratively (a `DataStore` resource): shared etcd by
    default, dedicated etcd optional, and kine allows MySQL or Postgres.
-4. Konnectivity server in the control plane pod, agent on the hosted cluster's workers.
-5. Addons (CoreDNS, Konnectivity agent) installed via the hosted cluster's own apiserver.
+4. Konnectivity, enabled by default and possible to disable: the server runs as a sidecar in
+   the control plane pod and agents run on the hosted cluster's workers.
+5. Addons (CoreDNS, and the Konnectivity agent when it is enabled) installed via the hosted
+   cluster's own apiserver.
 6. Worker bootstrap: join tokens, kubeadm-style. Kamaji does not manage worker lifecycle.
 7. Upgrades and version-skew handling.
 8. The Cluster API (CAPI) contract: control plane endpoint, ready/initialized status,
@@ -349,7 +351,7 @@ guest. There is no second kubelet and there are no second pod objects.
 ```mermaid
 flowchart TB
   subgraph WK["Workers - bare nodes, not VMs"]
-    kl["kubelet + konnectivity agent"]
+    kl["kubelet"]
   end
   LB["LoadBalancer / ingress"]
   kl --> LB
@@ -362,7 +364,6 @@ flowchart TB
         a1["apiserver"]
         a2["controller-manager"]
         a3["scheduler"]
-        a4["konnectivity server"]
       end
       ag1 -.->|starts containers| PA
     end
@@ -373,7 +374,6 @@ flowchart TB
         b1["apiserver"]
         b2["controller-manager"]
         b3["scheduler"]
-        b4["konnectivity server"]
       end
       ag2 -.->|starts containers| PB
     end
@@ -412,7 +412,7 @@ under a guest kubelet (systemd units are the alternative).
 ```mermaid
 flowchart LR
   subgraph WK["Workers - bare nodes, not VMs"]
-    kl["kubelet + konnectivity agent"]
+    kl["kubelet"]
   end
   LB["LoadBalancer / ingress"]
   subgraph MN["Management cluster node - host kernel + container runtime + virt-handler"]
@@ -425,7 +425,6 @@ flowchart LR
           a1["apiserver"]
           a2["controller-manager"]
           a3["scheduler"]
-          a4["konnectivity server"]
         end
       end
       end
@@ -439,7 +438,6 @@ flowchart LR
           b1["apiserver"]
           b2["controller-manager"]
           b3["scheduler"]
-          b4["konnectivity server"]
         end
       end
       end
@@ -710,13 +708,16 @@ effort map ([item 2](#sec-effort)) and the [validation plan](#sec-spike).
 ## Control plane to node connectivity (Konnectivity) {#sec-connectivity}
 
 **Stipulation:** Konnectivity has been removed from the target environment where possible, so
-this paper treats it as optional and absent by default.
+this paper treats it as optional and absent by default. Kamaji enables it by default and
+allows it to be disabled [S], so removing it is a departure from Kamaji's default.
 
 **What it is for.** A hosted API server must reach (a) each worker's kubelet, for logs, exec
-and port-forward, and (b) any webhook or aggregated API (metrics-server is the common one)
-that runs on the workers as a pod. When the control plane network cannot route to those
-addresses, Konnectivity gives the API server a reverse tunnel, because the workers dial out
-instead of being dialled.
+and port-forward [S], and (b) any webhook or aggregated API (metrics-server is the common
+one) that runs on the workers as a pod [I]. Kamaji's documentation lists the first group
+(plus metrics and health collection) and does not mention the second, which comes from
+general Kubernetes knowledge of the API server's network proxy. When the control plane
+network cannot route to those addresses, Konnectivity gives the API server a reverse tunnel,
+because the workers dial out instead of being dialled.
 
 **Without it,** the control plane needs a direct route:
 
@@ -938,7 +939,7 @@ disagreed.
 | Model | `TenantControlPlane` CRD; each hosted control plane's apiserver and controller components run as pods in a management cluster, built on kubeadm | Virtualizes the control plane; a syncer translates objects between the virtual and host clusters |
 | Datastore | Separate and declarative via a `DataStore` CRD. Shared etcd by default, dedicated etcd optional, kine allows MySQL/Postgres | Not confirmed in sources |
 | Worker nodes | Out of scope: you bring nodes, no lifecycle management | Four modes: shared, dedicated, private (v0.27+), standalone (v0.29+) |
-| Control plane to node path | Konnectivity reverse tunnel, sidecar in every hosted control plane pod | Depends on mode |
+| Control plane to node path | Konnectivity reverse tunnel, enabled by default; a sidecar in the control plane pod when enabled | Depends on mode |
 | Cluster API | Control plane provider (`KamajiControlPlane`) | Not found in sources |
 
 One vCluster post claims Kamaji runs a dedicated etcd per hosted control plane; Kamaji's
