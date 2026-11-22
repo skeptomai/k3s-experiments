@@ -40,7 +40,23 @@ attempt").
 
 ## How KubeVirt works
 
-KubeVirt makes a VM a Kubernetes object that runs inside an ordinary pod.
+KubeVirt makes a VM a Kubernetes object, and runs it inside a pod. In plain terms: the
+pod's container image is a normal OCI image whose process is libvirt and QEMU. The
+container runtime (e.g. containerd) starts that process exactly as it starts any
+container, and QEMU then boots the VM. To the runtime, the kubelet, and the scheduler this
+is an ordinary pod, so KubeVirt adds nothing to the runtime: no shim, no RuntimeClass.
+
+It is ordinary only to that machinery. Three things make it an unusual pod:
+
+- **It needs things from the node:** `/dev/kvm` (exposed through a device plugin that
+  `virt-handler` registers and passed through by the runtime), particular host paths, and
+  extra memory for QEMU itself. A runtime that cannot supply these cannot run KubeVirt.
+- **The container is only a wrapper.** The pod being Running means the wrapper is alive,
+  not that the guest inside is healthy.
+- **Kubernetes tooling stops at the wrapper:** `kubectl logs` and `kubectl exec` reach the
+  launcher, not the guest.
+
+The components:
 
 1. **Objects.** `VirtualMachine` / `VirtualMachineInstance` (VMI) CRDs.
 2. **virt-controller** watches VMIs and creates one **virt-launcher pod** per VMI. That
@@ -56,23 +72,22 @@ KubeVirt makes a VM a Kubernetes object that runs inside an ordinary pod.
 
 ```
 node
-└── container runtime (unchanged, sees an ordinary pod)
+└── container runtime (unchanged: starts the launcher image like any other)
     └── virt-launcher pod
         └── libvirt -> QEMU process
             └── [guest: own kernel, own init]
                 └── whatever the VM's owner runs
 ```
 
-- KubeVirt does **not** use RuntimeClass or a CRI shim. The runtime just runs the
-  launcher pod.
-- **Disks** reach QEMU as a PVC, hostDisk, or container disk (an OCI image whose only job
-  is carrying the disk file).
+- **Disks** reach QEMU as a PVC, hostDisk, or container disk (an OCI image the runtime
+  pulls as an extra container in the launcher pod, whose only job is carrying the disk
+  file).
 - **Networking:** the pod gets a normal pod IP; the guest NIC is bridged/NATed onto it, so
   Services and NetworkPolicy apply at the pod boundary.
 - **Resources:** requests/limits apply to the launcher pod; guest RAM comes out of the
   pod's memory budget.
-- **Observability:** `kubectl logs` shows the launcher, not the guest. Use
-  `virtctl console` / `virtctl ssh` / a guest agent.
+- **Observability:** to reach the guest use `virtctl console` / `virtctl ssh` / a guest
+  agent.
 
 ## How Kata works
 
