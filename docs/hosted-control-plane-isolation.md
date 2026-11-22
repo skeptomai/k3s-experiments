@@ -711,20 +711,28 @@ effort map ([item 2](#sec-effort)) and the [validation plan](#sec-spike).
 this paper treats it as optional and absent by default. Kamaji enables it by default and
 allows it to be disabled [S], so removing it is a departure from Kamaji's default.
 
-**What it is for.** A hosted API server must reach (a) each worker's kubelet, for logs, exec
-and port-forward [S], and (b) any webhook or aggregated API (metrics-server is the common
-one) that runs on the workers as a pod [I]. Kamaji's documentation lists the first group
-(plus metrics and health collection) and does not mention the second, which comes from
-general Kubernetes knowledge of the API server's network proxy. When the control plane
-network cannot route to those addresses, Konnectivity gives the API server a reverse tunnel,
-because the workers dial out instead of being dialled.
+**What it is for.** The API server sends its outbound connections to the cluster it manages
+through an egress selector, and Konnectivity is the reference proxy for it. With the
+`cluster` selector configured, these connections go through the proxy [S]:
+
+- kubelet-bound requests (logs, attach, exec, port-forward) and the pods, nodes and services
+  proxy subresources;
+- calls to **service-backed** admission webhooks;
+- calls to aggregated API servers (metrics-server is the common one).
+
+Webhooks configured with a URL instead of a service use the separate `controlplane`
+selector [S]. Kamaji's own documentation lists logs, exec, port-forward, metrics and health
+collection, and does not mention webhooks or aggregated APIs; those come from the upstream
+design (KEP-1281) and the kube-apiserver source (Appendix E). When the control plane network
+cannot route to those addresses, Konnectivity gives the API server a reverse tunnel, because
+the workers dial out instead of being dialled.
 
 **Without it,** the control plane needs a direct route:
 
 | Path | Needs | Kata | KubeVirt |
 |---|---|---|---|
 | API server to kubelet (node IP, port 10250) | A route from the control plane to worker node IPs | An ordinary pod egress path [I] | Guest egress, normally NATed through the launcher pod's address [I] |
-| API server to worker pod IPs (webhooks, aggregated APIs) | A route to the workers' pod network, or those components on host networking | Same | Same |
+| API server to worker pod IPs (service-backed webhooks, aggregated APIs) | A route to the workers' pod network, or those components on host networking | Same | Same |
 | Workers to API server | A reachable address (Service or load balancer) | Same | Same |
 
 **Where it breaks.** The kubelet path is usually easy. The pod-IP path is what Konnectivity
@@ -1016,6 +1024,11 @@ VMs, not pods:
 - [Kamaji: tenant control plane](https://kamaji.clastix.io/concepts/tenant-control-plane/)
 - [Kamaji: datastore](https://kamaji.clastix.io/concepts/datastore/)
 - [Kamaji: Konnectivity](https://kamaji.clastix.io/concepts/konnectivity/)
+- [KEP-1281: Network proxy (Kubernetes enhancements)](https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/1281-network-proxy): which outbound API server traffic uses which egress selector
+- [Kubernetes: Control plane to node communication](https://kubernetes.io/docs/concepts/architecture/control-plane-node-communication/)
+- [Kubernetes: Set up Konnectivity service](https://kubernetes.io/docs/tasks/extend-kubernetes/setup-konnectivity/)
+- [kube-apiserver source: webhook egress dialers](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apiserver/pkg/util/webhook/authentication.go) (service-backed webhooks use `cluster`, URL-backed use `controlplane`; read on master, November 2026)
+- [kube-aggregator source: aggregated API egress dialer](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go)
 - [kmetal: hosted control plane](https://kmetal.clastix.io/docs/concepts/hosted-control-plane/)
 - [vCluster architecture overview](https://www.mintlify.com/loft-sh/vcluster/architecture/overview)
 - [vCluster nodes](https://www.vcluster.com/docs/architecture/nodes)
