@@ -3,9 +3,25 @@ title: "Replacing Kamaji's Hosted Control Planes"
 subtitle: "Kata Containers vs KubeVirt: decision analysis"
 date: "2026-11-22 (draft for review)"
 toc: true
-toc-depth: 2
+toc-depth: 1
 toc-title: "Contents"
 numbersections: true
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{tocloft}
+    \usepackage{etoolbox}
+    \renewcommand{\cftsecfont}{\small}
+    \renewcommand{\cftsecpagefont}{\small}
+    \renewcommand{\cftsubsecfont}{\footnotesize}
+    \renewcommand{\cftsubsecpagefont}{\footnotesize}
+    \setlength{\cftbeforesecskip}{2pt}
+    \setlength{\cftbeforesubsecskip}{0pt}
+    \setlength{\cftbeforetoctitleskip}{0pt}
+    \setlength{\cftaftertoctitleskip}{6pt}
+    \renewcommand{\cfttoctitlefont}{\Large\bfseries}
+    \AtBeginEnvironment{longtable}{\small}
+    ```
 ---
 
 # Purpose and scope {#sec-purpose}
