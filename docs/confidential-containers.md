@@ -38,13 +38,75 @@ attempt").
   logs), and a fault there affects every pod using it on that node. *API level* is objects
   in the Kubernetes API (Deployments, VMs, Secrets), managed with `kubectl` and GitOps.
 
+## The container stack
+
+Both Kata and KubeVirt are described below in terms of this stack, so its layers come first.
+
+```
+kubelet
+  | CRI (gRPC): "run this pod sandbox / container"
+containerd (or CRI-O)        <- high-level runtime
+  | shim v2 API (one shim process per pod)
+containerd-shim-runc-v2      <- the shim
+  | exec, once per container, with an OCI bundle
+runc                         <- low-level OCI runtime
+  -> the container process (namespaces + cgroups around your process)
+```
+
+- **kubelet** speaks CRI and knows nothing about runc.
+- **containerd / CRI-O** is the high-level runtime: it serves CRI, pulls images, manages
+  snapshots and storage, creates the pod sandbox, and tracks container lifecycle. It does
+  not start the container process itself.
+- **The shim** is a small long-lived process per pod, spoken to over the shim v2 API. It
+  launches the low-level runtime, stays alive after that exits to hold stdio and report the
+  exit status, and is why containers survive a containerd restart.
+- **runc** is the low-level OCI runtime: given an OCI bundle (a rootfs plus a config), it
+  sets up namespaces and cgroups, execs the process, and exits. crun, youki, and gVisor's
+  `runsc` fill the same role.
+- containerd picks the shim from the pod's RuntimeClass handler (`io.containerd.runc.v2`
+  for normal pods, `io.containerd.kata.v2` for Kata).
+
+The three cases side by side (a normal pod, a Kata pod, and a KubeVirt VM):
+
+```
+Normal pod        Kata pod                  KubeVirt VM
+----------        --------                  -----------
+kubelet           kubelet                   kubelet
+  CRI               CRI                       CRI
+containerd        containerd                containerd         (unchanged)
+  shim v2           shim v2                   shim v2          (unchanged)
+runc shim         kata shim                 runc shim
+  runc              boots a microVM           runc
+container         microVM                   launcher container
+                    kata-agent                libvirt -> QEMU
+                      your containers           microVM
+                                                  guest OS
+                                                    your processes
+```
+
+- **KubeVirt takes the standard path** down to the launcher container and diverges only
+  after that container exists: the VM is created by a process *inside* a container.
+- **Kata diverges earlier**, at the shim: the VM is created by the runtime itself, before
+  any container exists.
+- Both end up with a microVM below the pod, but created by different things at different
+  layers. That is the structural difference behind "above the CRI" (KubeVirt) and "below
+  the CRI" (Kata).
+- KubeVirt's other components (`virt-handler` on each node, `virt-controller` and
+  `virt-api` in the control plane) are not layers in this stack. They are
+  Kubernetes-side machinery that creates the launcher pod and manages the VM.
+- A custom-CRI runtime such as Pelagos has no containerd or shim v2 in the middle
+  (kubelet, then `pelagos-cri`, then `pelagos`, which does the low-level OCI work), so
+  there is no shim interface for Kata to plug into. This is taken from the Pelagos docs,
+  not from its internals.
+
 ## How KubeVirt works
 
 KubeVirt makes a VM a Kubernetes object, and runs it inside a pod. In plain terms: the
 pod's container image is a normal OCI image whose process is libvirt and QEMU. The
 container runtime (e.g. containerd) starts that process exactly as it starts any
 container, and QEMU then boots the VM. To the runtime, the kubelet, and the scheduler this
-is an ordinary pod, so KubeVirt adds nothing to the runtime: no shim, no RuntimeClass.
+is an ordinary pod, so KubeVirt adds nothing to the runtime: no shim, no RuntimeClass (see
+the stack diagram above).
 
 It is ordinary only to that machinery. Three things make it an unusual pod:
 
@@ -91,8 +153,11 @@ node
 
 ## How Kata works
 
-Kata is a CRI runtime selected per pod with a `RuntimeClass`. It sits **under** the
-container runtime as a shim, a sibling of runc, not a replacement for it.
+Kata is selected per pod with a `RuntimeClass`. It sits **under** the high-level runtime
+(containerd or CRI-O) as a replacement for the runc *shim*: it implements the same shim v2
+interface, but where the runc shim calls runc, the Kata shim boots a microVM (see the stack
+diagram above). It plays the shim and low-level runtime roles together; it is a sibling of
+`containerd-shim-runc-v2`, not of runc itself.
 
 - containerd (or CRI-O) still does image pulls, snapshots, the CRI API, and pod/container
   lifecycle. Only the last step differs: for `runtimeClassName: kata`, it launches
