@@ -33,6 +33,8 @@ behind the scores so that any reader can check it. **It takes no side.**
 - **Out of scope:** why Kamaji is being replaced; other candidates (vcluster appears only as
   reference material in [Appendix B](#app-vcluster)); confidential computing, which is
   background only ([Appendix C](#app-coco)).
+- **Target environment:** workloads use SPIFFE/SPIRE identity, and Konnectivity has been
+  removed where possible (see [5.6](#sec-identity) and [5.7](#sec-connectivity)).
 - **Workers are ordinary bare nodes** in every design. No design in this paper puts tenant
   workers in VMs. Only the control planes are isolated.
 - Terms such as *hosted control plane* and *node level* are defined in
@@ -584,6 +586,130 @@ fault needs node access. KubeVirt: restart a VM, live-migrate away from a bad no
 (needs shared storage), roll a disk back from a snapshot, and open a console on a broken
 guest. KubeVirt's toolbox is richer; Kata's is simpler.
 
+## Secret rotation: which Secrets need live propagation {#sec-secrets}
+
+A Secret needs live propagation (delivery that updates a running control plane, followed by
+the consuming software re-reading it) only if **all three** of these hold [I]:
+
+1. It **changes while the control plane is running**.
+2. It reaches the control plane as a **file**.
+3. Restarting the control plane to pick up the change is **not acceptable**.
+
+If any one fails, the delivery mode does not matter and rotation can be a restart or a
+rollout.
+
+| Secret | Rotates while running? | Needs live propagation? |
+|---|---|---|
+| Serving certificates (apiserver, Konnectivity server) | Periodically, as certificates expire | Candidate, if a restart is undesirable. Whether the apiserver reloads them on a file change is unverified [?] |
+| Client certificates and kubeconfigs (controller-manager, scheduler, admin) | Periodically | Candidate, same condition |
+| Datastore client certificates (etcd, or kine's database) | Periodically | Candidate |
+| Datastore credentials (e.g. a Postgres password behind kine) | If a secrets manager rotates them | Candidate, if the client re-reads them |
+| Cluster, front-proxy and etcd CAs | Rarely (years); rotation is heavy and also touches the workers | No: plan it as a rollout, not a live update |
+| Service-account signing key | Rarely; the old public key must stay valid during the overlap | No: normally a restart |
+| Encryption-at-rest keys | Rarely | Probably restart-based; newer apiservers may reload the config [?] |
+| Bootstrap and join tokens | Short-lived, but stored as objects in the hosted cluster's own API, not as files in the control plane | No: they never mount into the control plane |
+
+What this means for each design:
+
+- **Kata (replicated pods).** A rolling restart across the apiserver replicas rotates every
+  Secret above with no outage, so live propagation matters only if even that restart is
+  unwanted. Kata's design doc describes propagation by polling and copying into the guest
+  [S]; it is untested here.
+- **KubeVirt (a VM per control plane).** A restart means rebooting or rolling a VM, which is
+  heavier, so live propagation matters more. It needs the Secret delivered as a **virtiofs
+  filesystem**: a Secret delivered as a disk (or baked in through cloud-init) never updates
+  [M]. A Secret set once at boot can use any delivery mode. The consuming software must then
+  reload: in the test, a service that read its certificate once kept serving the old one
+  [M].
+- **Latency floor.** Either way, the kubelet's periodic Secret sync bounds how quickly a
+  change arrives (about 78 s in one measurement) [M].
+- **Rotation frequency sets the stakes.** With yearly certificates, restart-based rotation
+  is fine under both designs. With short-lived certificates (hours or days) or emergency
+  revocation, live propagation and its latency become much more valuable.
+
+This is not scored separately in the [scorecard](#sec-scorecard); it bears on C3 and D4
+only if rotation is frequent. The [validation plan](#sec-spike) covers the untested parts.
+
+## Workload identity (SPIFFE/SPIRE) {#sec-identity}
+
+**Stipulation:** the target environment uses SPIFFE/SPIRE, and workloads exchange their
+SPIFFE identity (an SVID) for keys and credentials from a secrets manager.
+
+**What it removes.** An SVID is delivered through the Workload API, a streaming call over a
+Unix socket, not through a Secret volume. Rotation is pushed to the workload, and any key
+exchanged for the SVID is fetched on demand. A credential that travels this way never meets
+the [Secret propagation](#sec-secrets) question: no kubelet sync, no virtiofs-versus-disk
+choice, no latency floor [I]. Where the control plane's credentials (datastore access,
+encryption keys, even certificates) can be fetched this way at start or on rotation, the
+controller never writes them as Secrets, and most of 5.5 does not apply.
+
+**What it moves.** The usual SPIRE arrangement is one node-level agent serving every
+workload on the node through a host-path socket. Both designs put the control plane behind
+a VM boundary the host agent cannot see into, so the assumed design here is an agent
+**inside the boundary**, in the same OS as the control plane processes and running next to
+them. That is one agent per control plane, not per node, and each agent is a separate
+"node" that the SPIRE server must attest [I].
+
+| Concern | Kata | KubeVirt |
+|---|---|---|
+| Where the agent runs | A sidecar container in the same pod, so inside the same microVM as the apiserver | A service in the guest OS (for example a systemd unit) beside the apiserver process |
+| Workload API socket | A Unix socket on a volume shared by the containers inside the guest; nothing crosses the VM boundary | A local path in the guest |
+| Attesting the agent to the SPIRE server | Must be done from inside the microVM, for example with a projected service-account token or a join token [?] | Must be done from inside the guest, for example with a join token or a TPM-based method [?] |
+| Attesting the workload to the agent | The Kubernetes attestor relies on the host's view of the kubelet and may not fit; the Unix attestor (UID, path) is the likelier choice [?] | The Unix attestor (UID, path) in the guest |
+| What gets an identity | Pod identity is natural; the pod boundary is the workload boundary | The guest's processes get identities from the in-guest agent; the VM is an extra level to model [I] |
+| Lifecycle | Agent rides in the pod spec | Agent is part of the guest image and is patched with it |
+
+A different design keeps one host agent and tunnels its socket into the VM over vsock. It is
+not pursued here, since the agent beside the workload matches the intended deployment.
+
+**What it does not change.** kube-apiserver, kube-controller-manager and kube-scheduler are
+not SPIFFE-aware. They read certificate files, so a helper must write the SVID to files
+inside the pod or guest. Those files are local, so they sidestep Secret propagation, but
+whether each component reloads on a file change is still open [?]. Short SVID lifetimes make
+that question more pressing than it is for yearly certificates.
+
+**Bootstrap.** Something must still prove the control plane's identity the first time, and
+the control plane's own root material (cluster CA, service-account signing key) has to come
+from somewhere. If it is fetched from the secrets manager with the SVID, the controller
+holds no key material; if the controller still generates it, those items remain Secrets
+as in 5.5.
+
+**Reading.** SPIFFE lowers the weight of Secret delivery in both designs, and raises the
+weight of getting an agent and an attestation path into the isolation boundary. The
+attestation path is a prerequisite for both. This is not scored separately; it feeds the
+effort map ([item 2](#sec-effort)) and the [validation plan](#sec-spike).
+
+## Control plane to node connectivity (Konnectivity) {#sec-connectivity}
+
+**Stipulation:** Konnectivity has been removed from the target environment where possible, so
+this paper treats it as optional and absent by default.
+
+**What it is for.** A hosted API server must reach (a) each worker's kubelet, for logs, exec
+and port-forward, and (b) any webhook or aggregated API (metrics-server is the common one)
+that runs on the workers as a pod. When the control plane network cannot route to those
+addresses, Konnectivity gives the API server a reverse tunnel, because the workers dial out
+instead of being dialled.
+
+**Without it,** the control plane needs a direct route:
+
+| Path | Needs | Kata | KubeVirt |
+|---|---|---|---|
+| API server to kubelet (node IP, port 10250) | A route from the control plane to worker node IPs | An ordinary pod egress path [I] | Guest egress, normally NATed through the launcher pod's address [I] |
+| API server to worker pod IPs (webhooks, aggregated APIs) | A route to the workers' pod network, or those components on host networking | Same | Same |
+| Workers to API server | A reachable address (Service or load balancer) | Same | Same |
+
+**Where it breaks.** The kubelet path is usually easy. The pod-IP path is what Konnectivity
+exists for: if the workers' pod network is an overlay the control plane cannot route into,
+then every webhook and aggregated API on a worker fails, and the options are host-networked
+components, a routed pod network, or keeping Konnectivity for that case alone [I].
+
+**Difference between the designs.** None of substance. Both put the API server in an
+isolated environment with an ordinary egress path, so the routing requirement is the same.
+Where Konnectivity is kept, its server runs beside the API server (a sidecar under Kata, a
+process in the guest under KubeVirt) and its agents run on the bare workers [I]. In the
+KubeVirt design, NAT to the guest is one more hop to reason about when tracing a failed
+call to a kubelet [I]. This is not scored.
+
 # Scorecard {#sec-scorecard}
 
 Scores are ordinal judgments from 1 to 5 (5 is best for the operator), **proposed for
@@ -673,7 +799,8 @@ What Kamaji does, and whether the work differs between the options (numbering fr
 | 1. Controller writes resources | Deployment/StatefulSet + `runtimeClassName` | VM + disk + cloud-init + Service |
 | 2. PKI and rotation | Mounted Secrets; updates reach the guest through the agent's polling copy [S], untested | Secret as a virtiofs filesystem propagates updates [M]; cloud-init or a Secret disk does not [M] |
 | 3. Datastore | Same either way (external kine/Postgres or etcd); measure fsync under each | Same either way |
-| 4. Konnectivity | Same shape, inside the pod | Same shape, inside the guest |
+| 4. Konnectivity (absent in the target where possible; see [5.7](#sec-connectivity)) | Same either way: a routable path, or the tunnel kept where it cannot be removed | Same, with guest NAT as one more hop |
+| 4b. Workload identity (SPIFFE; see [5.6](#sec-identity)) | Agent as a pod sidecar, attested from inside the microVM | Agent in the guest image, attested from inside the guest |
 | 5. Addons | Same | Same |
 | 6. Worker bootstrap | Same | Same |
 | 7. Upgrades and version skew | Roll the pod image; node-level shim/guest kernel upgrades are separate | Roll the VM image or upgrade in the guest; OS patching on top |
@@ -722,7 +849,10 @@ replace the most contested ones with measurements:
 5. **Certificate rotation (C3, risks):** done for KubeVirt delivery (experiment 34); repeat
    under Kata, and with the actual control plane components, recording whether each needs a
    restart.
-6. **Runtime fact-finding (B3):** establish whether the target management cluster's
+6. **Identity (effort map 4b):** get a SPIRE agent and attestation working inside one Kata
+   pod and one KubeVirt guest; record the moving parts and whether an SVID reaches the
+   control plane components as files that they reload.
+7. **Runtime fact-finding (B3):** establish whether the target management cluster's
    runtime hosts shim v2, since that is the factor most able to change the result.
 
 # Decision guide {#sec-decision}
