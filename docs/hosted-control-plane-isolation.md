@@ -340,36 +340,48 @@ packing many control planes onto shared nodes.
 Same pod shape as Kamaji, but each hosted control plane pod runs inside its own microVM
 with its own guest kernel. All the pod's containers share one VM.
 
+The control plane stays an ordinary pod of the management cluster: the management scheduler
+places it, the host kubelet manages it, and it appears in `kubectl get pods`. The
+`kata-agent` inside the VM is part of the Kata runtime, not a pod. The Kata shim on the host
+starts the VM and tells the agent which containers to run, and the agent starts them in the
+guest. There is no second kubelet and there are no second pod objects.
+
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph WK["Workers - bare nodes, not VMs"]
     kl["kubelet + konnectivity agent"]
   end
   LB["LoadBalancer / ingress"]
-  subgraph MN["Management cluster node - host kernel + containerd + kata shim"]
+  kl --> LB
+  subgraph MN["Management cluster node - host kernel"]
+    sh["host kubelet + containerd + kata shim"]
     subgraph VA["microVM A - own guest kernel"]
-      ag1["kata-agent"]
-      subgraph PA["Hosted control plane A pod"]
+      direction LR
+      ag1["kata-agent<br/>(runtime helper, not a pod)"]
+      subgraph PA["Control plane A: a normal pod"]
         a1["apiserver"]
         a2["controller-manager"]
         a3["scheduler"]
         a4["konnectivity server"]
       end
+      ag1 -.->|starts containers| PA
     end
     subgraph VB["microVM B - own guest kernel"]
-      ag2["kata-agent"]
-      subgraph PB["Hosted control plane B pod"]
+      direction LR
+      ag2["kata-agent<br/>(runtime helper, not a pod)"]
+      subgraph PB["Control plane B: a normal pod"]
         b1["apiserver"]
         b2["controller-manager"]
         b3["scheduler"]
         b4["konnectivity server"]
       end
+      ag2 -.->|starts containers| PB
     end
+    sh -->|boots VM| VA
+    sh -->|boots VM| VB
   end
   DS[("External datastore: kine + Postgres, keeps pods stateless")]
-  kl --> LB
-  LB --> VA
-  LB --> VB
+  LB --> MN
   PA --> DS
   PB --> DS
 ```
