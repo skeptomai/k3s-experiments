@@ -1,0 +1,85 @@
+#cloud-config
+write_files:
+  - path: /usr/local/bin/probe.py
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      # Every 5s, print to the serial console the sha256 fingerprint (first 8 hex)
+      # of the certificate seen via: the ISO disk, the virtiofs mount, and two
+      # local TLS services (one loads the cert once, one reloads per handshake).
+      import hashlib, socket, ssl, threading, time
+      DISK, FS = "/mnt/certdisk", "/mnt/certfs"
+
+      def fp_der(der):
+          return hashlib.sha256(der).hexdigest()[:8]
+
+      def fp_file(d):
+          try:
+              pem = open(d + "/tls.crt").read()
+              end = "-----END CERTIFICATE-----"
+              pem = pem.split(end)[0] + end + "\n"
+              return fp_der(ssl.PEM_cert_to_DER_cert(pem))
+          except Exception:
+              return "none"
+
+      def mk_ctx():
+          c = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+          c.load_cert_chain(FS + "/tls.crt", FS + "/tls.key")
+          return c
+
+      def serve(port, dynamic):
+          try:
+              static_ctx = None if dynamic else mk_ctx()
+              s = socket.socket()
+              s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+              s.bind(("127.0.0.1", port))
+              s.listen(5)
+          except Exception as e:
+              con("SERVICE_START_FAILED port=%d err=%s" % (port, e))
+              return
+          while True:
+              conn, _ = s.accept()
+              try:
+                  c = mk_ctx() if dynamic else static_ctx
+                  t = c.wrap_socket(conn, server_side=True)
+                  t.recv(1024)
+                  t.sendall(b"HTTP/1.0 200 OK\r\n\r\nok\n")
+                  t.close()
+              except Exception:
+                  try:
+                      conn.close()
+                  except Exception:
+                      pass
+
+      def served_fp(port):
+          try:
+              c = ssl.create_default_context()
+              c.check_hostname = False
+              c.verify_mode = ssl.CERT_NONE
+              with socket.create_connection(("127.0.0.1", port), timeout=3) as sk:
+                  with c.wrap_socket(sk) as ss:
+                      return fp_der(ss.getpeercert(binary_form=True))
+          except Exception:
+              return "none"
+
+      def con(msg):
+          try:
+              with open("/dev/ttyS0", "w") as f:
+                  f.write(msg + "\n")
+          except Exception:
+              print(msg, flush=True)
+
+      threading.Thread(target=serve, args=(8443, False), daemon=True).start()
+      threading.Thread(target=serve, args=(8444, True), daemon=True).start()
+      time.sleep(2)
+      while True:
+          con("PROBE ts=%d disk=%s fs=%s svc_static=%s svc_dyn=%s" % (
+              int(time.time()), fp_file(DISK), fp_file(FS),
+              served_fp(8443), served_fp(8444)))
+          time.sleep(5)
+runcmd:
+  - mkdir -p /mnt/certdisk /mnt/certfs
+  - "dev=$(ls /dev/disk/by-id/*CERTDISK* 2>/dev/null | head -1); if [ -n \"$dev\" ]; then mount -o ro \"$dev\" /mnt/certdisk || echo CERTDISK_MOUNT_FAILED > /dev/ttyS0; else echo CERTDISK_NOT_FOUND > /dev/ttyS0; fi"
+  - "mount -t virtiofs certfs /mnt/certfs || echo VIRTIOFS_MOUNT_FAILED > /dev/ttyS0"
+  - "echo BOOT_DONE > /dev/ttyS0"
+  - "nohup python3 /usr/local/bin/probe.py > /var/log/probe.log 2>&1 &"

@@ -1,0 +1,50 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+metadata:
+  name: secret-probe
+  namespace: kv-secret-test
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ipc8
+  domain:
+    cpu:
+      cores: 2
+    memory:
+      guest: 1Gi
+    devices:
+      disks:
+        - name: rootdisk
+          disk:
+            bus: virtio
+        - name: cloudinitdisk
+          disk:
+            bus: virtio
+        # The Secret delivered as an ISO disk (docs: update propagation not supported)
+        - name: certdisk
+          serial: CERTDISK
+          disk:
+            bus: virtio
+      # The same Secret delivered as a virtiofs filesystem (docs: changes propagate)
+      filesystems:
+        - name: certfs
+          virtiofs: {}
+      interfaces:
+        - name: default
+          masquerade: {}
+  networks:
+    - name: default
+      pod: {}
+  volumes:
+    - name: rootdisk
+      containerDisk:
+        image: 192.168.89.2:5004/ubuntu/ubuntu-cloud-disk:24.04
+    - name: certdisk
+      secret:
+        secretName: tls-test
+    - name: certfs
+      secret:
+        secretName: tls-test
+    - name: cloudinitdisk
+      cloudInitNoCloud:
+        secretRef:
+          name: probe-userdata
