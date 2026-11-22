@@ -24,15 +24,7 @@ replacement will use one of them:
 
 This paper scores the two against four criteria (weight, complexity, reliability and
 resilience in operations, and incident debugging and mitigation) and lays out the data
-behind the scores so that each group can check it. **It takes no side.**
-
-## Stakeholders
-
-| Group | Position |
-|---|---|
-| Lower-level infrastructure | Proposes Kata |
-| Kubernetes development | Proposes KubeVirt |
-| Operations | Sits between the two; carries running and debugging whichever is chosen |
+behind the scores so that any reader can check it. **It takes no side.**
 
 ## Scope and stipulations
 
@@ -252,7 +244,7 @@ flowchart TB
 - **Observability:** to reach the guest use `virtctl console` / `virtctl ssh` / a guest
   agent.
 
-**The case for KubeVirt** (what its advocates would say):
+**The case for KubeVirt** (its strongest points):
 
 - It is portable across runtimes: it needs only a launcher pod with `/dev/kvm` [S].
 - The VM is a first-class object, so operators get VM verbs: console, ssh, snapshot, live
@@ -290,7 +282,7 @@ is a sibling of `containerd-shim-runc-v2`, not of runc itself.
   scheduler accounts for the VM's own memory.
 - The VM boundary sits at the **pod**, so all of a pod's containers share one microVM.
 
-**The case for Kata** (what its advocates would say):
+**The case for Kata** (its strongest points):
 
 - It is the lighter of the two per instance: a minimal guest with no general-purpose OS
   [I].
@@ -304,8 +296,8 @@ is a sibling of `containerd-shim-runc-v2`, not of runc itself.
 
 - Needs a runtime that hosts shim v2 (containerd or CRI-O) and a per-node install of the
   shim, guest kernel and image [S].
-- Faults are node-level: a bad shim, guest kernel or VMM can affect every Kata pod on that
-  node [I].
+- The VM machinery is node-level: a bad shim, guest kernel image or VMM version affects
+  every pod that shares it on that node [I].
 - No live migration; storage reaches the guest through an extra layer (virtio-fs or a block
   device), which matters for etcd's fsync-latency sensitivity [I].
 - "Invisible VM" is only quasi: `uname -r` shows the guest kernel, host namespaces,
@@ -369,6 +361,10 @@ flowchart LR
   database the same concern moves to the database [I].
 - **Networking:** ordinary Services and LoadBalancers. Kata bridges the pod network into the
   VM, which may cost some network performance [?].
+
+```{=latex}
+\newpage
+```
 
 ## KubeVirt design {#sec-design-kubevirt}
 
@@ -479,6 +475,7 @@ is a published estimate for Kata 3.x); nothing was measured.
 | Device model | Can be trimmed to a minimum (especially Cloud Hypervisor / Firecracker) | Typically QEMU with a fuller PC-style device model and UEFI firmware |
 | Boot time | Under a second to a few seconds | Seconds to tens of seconds (full OS boot) |
 | API surface | None (a RuntimeClass) | `virt-operator`, 4 components, ~19 CRDs |
+| Where the VM machinery lives | On the node, outside the API: shim, guest kernel and image, VMM, RuntimeClass config | At the API level: operator, launcher image, VM image and objects |
 | What you maintain | Guest kernel and shim versions, per node | The KubeVirt install, **plus the OS inside every VM** |
 
 The gap is a default, not a law. A stripped-down Linux guest in KubeVirt shrinks its
@@ -514,20 +511,36 @@ criterion most sensitive to deployment facts this paper does not have (see the
 
 ## C. Reliability and resilience {#sec-reliability}
 
-**C1, failure blast radius.** Kata's shim, guest kernel and VMM are node-level software
-shared by every Kata pod on a node, so a fault there can hit unrelated control planes on
-that node [I]. KubeVirt's VM faults are mostly per-VM, though its controllers are
-cluster-wide (a controller fault affects VM scheduling while running VMs keep running) [I].
+**Where the VM machinery lives.** This is the structural difference behind much of this
+family. Kata's machinery (the shim, the guest kernel and image, the VMM, and the
+RuntimeClass handler config) lives **on the node**, outside the Kubernetes API, and is
+installed per node. A `kata-deploy` DaemonSet is a common way to do that, which makes the
+rollout API-driven even though the artifacts are node-level. KubeVirt's machinery lives
+**at the API level**: the operator, the launcher image that carries QEMU and libvirt, and
+the guest image and VM objects, all changed with ordinary Kubernetes rollout mechanisms [S].
+
+**C1, failure blast radius.** Each microVM runs its own kernel instance, so running state
+is never shared between pods. What is shared is the artifacts: every pod using a Kata
+handler on a node boots the same guest kernel image and runs the same shim and VMM
+versions. A bad version or config therefore affects all of them, mostly as pods start or
+restart (a running microVM keeps what it booted with), and a latent bug can fail them
+together on a common trigger [I]. The QEMU and libvirt binaries are shared in the same way
+under KubeVirt, since they ship in the launcher image, so that part is a push. The
+difference is the guest image: Kata's is uniform by design, while a KubeVirt guest image can
+easily vary per VM (staged rollouts, a canary image), though if every control plane VM uses
+one standard image the exposure is the same. KubeVirt's controllers are cluster-wide (a
+controller fault affects VM scheduling while running VMs keep running) [I].
 
 **C2, HA and self-healing.** Kata control planes are replicated stateless pods: a drained
 or failed node reschedules them and replicas cover the gap [I]. KubeVirt control planes
 get availability from multiple VMs per control plane, or from VM restart or live
 migration; each VM carries a full OS, so the same redundancy costs more [I].
 
-**C3, upgrade and rollback safety.** Kata: the control plane rolls like any Deployment
-(simple), while shim and guest-kernel upgrades are node-level changes with wider reach.
-KubeVirt: a VM image roll or in-guest upgrade, with disk snapshots available for rollback.
-Roughly even [I].
+**C3, upgrade and rollback safety.** Kata: the control plane rolls like any Deployment;
+machinery changes roll node by node (e.g. a `kata-deploy` DaemonSet), with canaries by node
+or by an additional RuntimeClass handler. KubeVirt: guest images can be canaried per VM,
+disk snapshots allow rollback, and platform upgrades go through the operator. Roughly even
+[I].
 
 ## D. Incident debugging and mitigation {#sec-ops}
 
@@ -550,9 +563,12 @@ control plane, each with its own tooling, logs, and failure modes.
 | Drain a node | Pod reschedules, replicas cover it | VM restarts, or live-migrates if configured |
 | Scale | Change replicas | A pool of VMs, each a separate OS |
 
-**Where failures show up.** Kata breaks at the node level: a bad shim, guest kernel, or VMM
-can hit every Kata pod on a node, and diagnosis needs node access and Kata's own logs and
-console, not `kubectl` alone. In the normal case the operator never thinks about the VM.
+**Where failures show up.** Kata's VM machinery is node-level (see C1 above): a bad shim,
+guest kernel image, or VMM version affects the pods that share it on that node, and
+diagnosis needs node access and Kata's own logs and console, not `kubectl` alone. In the
+normal case the operator never thinks about the VM. KubeVirt's machinery is API-level, so
+platform faults leave traces in launcher and `virt-handler` pod logs, VMI conditions and
+events, and the guest console, all reachable with standard tooling (D3).
 KubeVirt makes the VM an everyday concern: the launcher pod can be Running while the guest
 is hung or still booting, so without guest-aware probes Kubernetes shows healthy; guest OS
 patching becomes routine across every control plane VM; and a bad apiserver flag means
@@ -565,8 +581,8 @@ guest. KubeVirt's toolbox is richer; Kata's is simpler.
 
 # Scorecard {#sec-scorecard}
 
-Scores are ordinal judgments from 1 to 5 (5 is best for the operator), **proposed for the
-three groups to challenge**. They are not measurements. Each carries its evidence label.
+Scores are ordinal judgments from 1 to 5 (5 is best for the operator), **proposed for
+reviewers to challenge**. They are not measurements. Each carries its evidence label.
 
 | | Sub-criterion | Kata | KubeVirt | Basis |
 |--|------------|:--:|:----:|--------------------------|
@@ -575,50 +591,50 @@ three groups to challenge**. They are not measurements. Each carries its evidenc
 | B1 | What our controller must build | 4 | 2 | [I] plain-pod resources + one field vs VM resources + guest bootstrap |
 | B2 | Guest OS lifecycle | 4 | 2 | [I] kernel managed per node vs OS patched in every VM |
 | B3 | Coupling to the runtime | 2 | 4 | [S] needs shim v2 host vs needs devices and paths only |
-| C1 | Failure blast radius | 2 | 3 | [I] node-level shared shim vs mostly per-VM |
+| C1 | Failure blast radius | 3 | 4 | [I] uniform guest artifacts, node-scoped and felt mostly at (re)start, vs guest image can vary per VM; VMM shared in both |
 | C2 | HA and self-healing | 4 | 3 | [I] replicated stateless pods vs multi-VM or migration |
-| C3 | Upgrade and rollback safety | 3 | 3 | [I] even: simple rollout vs snapshots |
+| C3 | Upgrade and rollback safety | 3 | 3 | [I] even: node-by-node machinery rollout and simple pod rollout vs per-VM canaries and snapshots |
 | D1 | Visibility in standard tooling | 5 | 2 | [S] kubectl works vs launcher-only |
 | D2 | Silent-failure risk | 4 | 2 | [I] per-component probes vs wrapper alive, guest dead |
-| D3 | Diagnosing platform faults | 2 | 3 | [I] node access + shim logs vs VMI conditions + console + familiar OS |
+| D3 | Diagnosing platform faults | 2 | 4 | [I] machinery outside the API (node access, shim logs) vs launcher and handler logs, VMI conditions and console via the API |
 | D4 | Mitigation toolbox | 3 | 4 | [I] reschedule/rollback vs restart/migrate/snapshot/console |
 | | **A. Weight** (sum of A1-A2) | 8 | 4 | |
 | | **B. Complexity** (sum of B1-B3) | 10 | 8 | |
-| | **C. Reliability** (sum of C1-C3) | 9 | 9 | |
-| | **D. Debugging** (sum of D1-D4) | 14 | 11 | |
-| | **Total (equal weights)** | **41** | **32** | |
+| | **C. Reliability** (sum of C1-C3) | 10 | 10 | |
+| | **D. Debugging** (sum of D1-D4) | 14 | 12 | |
+| | **Total (equal weights)** | **42** | **34** | |
 
 **How to read it.** Under equal weights Kata scores higher, mainly because the Weight and
 Complexity families structurally favour a lighter design. KubeVirt's strengths show up in
-runtime portability (B3), diagnosing platform faults (D3) and mitigation tools (D4), and
-Reliability is a tie. A lead on points is not the decision: most scores are inferences,
+runtime portability (B3), failure blast radius (C1), diagnosing platform faults (D3) and
+mitigation tools (D4), and Reliability is a tie. A lead on points is not the decision: most scores are inferences,
 and the [validation plan](#sec-spike) is how to replace them with measurements.
 
 ## Sensitivity to weights {#sec-sensitivity}
 
-The ranking depends on what the three groups agree matters. Examples, recomputed from the
+The ranking depends on what reviewers agree matters. Examples, recomputed from the
 table above:
 
 | Weighting | Kata | KubeVirt | Leads |
 |---|:-:|:-:|---|
-| Equal weights | 41 | 32 | Kata |
-| Runtime coupling (B3) counts 3x | 45 | 40 | Kata |
-| Runtime coupling (B3) counts 5x | 49 | 48 | Kata, barely |
-| Runtime coupling (B3) counts 6x | 51 | 52 | KubeVirt |
-| Ignore Weight (A) | 33 | 28 | Kata |
-| Reliability and debugging only (C + D) | 23 | 20 | Kata |
-| Mitigation toolbox (D4) counts 5x | 53 | 48 | Kata |
+| Equal weights | 42 | 34 | Kata |
+| Runtime coupling (B3) counts 3x | 46 | 42 | Kata |
+| Runtime coupling (B3) counts 5x | 50 | 50 | Tie |
+| Runtime coupling (B3) counts 6x | 52 | 54 | KubeVirt |
+| Ignore Weight (A) | 34 | 30 | Kata |
+| Reliability and debugging only (C + D) | 24 | 22 | Kata |
+| Mitigation toolbox (D4) counts 5x | 54 | 50 | Kata |
 
 The most consequential finding is that **KubeVirt overtakes Kata only if runtime coupling
-(B3) counts about 5.5 times a typical sub-criterion**. That is plausible when the
+(B3) counts more than 5 times a typical sub-criterion** (they tie at exactly 5). That is plausible when the
 management cluster's runtime cannot host shim v2, and implausible when it is containerd or
 CRI-O. No other scenario tested flips the result.
 
 ## What the scorecard does not cover {#sec-notcovered}
 
-These could matter and are not scored. The three groups should decide whether to add them:
+These could matter and are not scored. Reviewers should decide whether to add them:
 
-- **Team familiarity and skills.** The groups differ in which technology they know best,
+- **Team familiarity and skills.** People differ in which technology they know best,
   and operating what you know is easier. This is an organizational fact, not a technical
   one.
 - **Ecosystem and maturity.** KubeVirt is a general-purpose VM platform with a wide
@@ -678,14 +694,14 @@ choice (PKI rotation, upgrade orchestration, datastore isolation) looks small an
   rotation, a hard problem to start with [?].
 - **Silent failure (KubeVirt).** A Running launcher pod with a dead guest is invisible to
   Kubernetes without guest-aware probes [I].
-- **Node-level blast radius (Kata).** One bad node-level change can affect all Kata pods on
-  a node [I].
+- **Node-level blast radius (Kata).** One bad node-level change can affect all Kata pods
+  that share the changed artifacts on a node [I].
 - **Network overhead (Kata).** Bridging pod networking into the VM may cost performance
   [?].
 
 ## Validation plan {#sec-spike}
 
-Most scores are inferences. A short joint spike, run by people from all three groups, would
+Most scores are inferences. A short joint spike, run jointly by people with different backgrounds, would
 replace the most contested ones with measurements:
 
 1. **Overhead (A1):** run N hosted control plane pods under each design; record memory, CPU
@@ -694,7 +710,7 @@ replace the most contested ones with measurements:
 3. **Failure injection (C1, C2, D2):** kill the shim or VMM, hang the guest, drain a node,
    and record what Kubernetes shows and how long recovery takes.
 4. **Debugging exercise (D1, D3, D4):** plant an apiserver misconfiguration under each
-   design; time how long operators from each group take to find and fix it.
+   design; time how long operators with different backgrounds take to find and fix it.
 5. **Certificate rotation (C3, risks):** rotate a certificate under each design and record
    whether it needs a restart.
 6. **Runtime fact-finding (B3):** establish whether the target management cluster's
@@ -715,7 +731,7 @@ What the evidence supports are decision rules:
   if the platform is already operated for other VM workloads.
 - **Either is defensible** otherwise. The validation plan should break the tie.
 
-**Next steps:** have the three groups agree the weights and any added criteria; confirm the
+**Next steps:** have reviewers agree the weights and any added criteria; confirm the
 target runtime (item 6); run the validation plan; then re-score with measurements.
 
 # Appendix A: Terminology {-#app-terms}
