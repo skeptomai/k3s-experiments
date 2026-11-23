@@ -51,6 +51,9 @@ behind the scores so that any reader can check it. **It takes no side.**
   background only ([Appendix C](#app-coco)).
 - **Target environment:** workloads use SPIFFE/SPIRE identity, and Konnectivity has been
   removed where possible (see [5.6](#sec-identity) and [5.7](#sec-connectivity)).
+- **Management cluster runtime:** containerd with runc, which hosts shim v2. Both Kata and
+  KubeVirt are already in use elsewhere in the organisation. This is stated by the
+  requester, not measured here [S].
 - **Workers are ordinary bare nodes** in every design. No design in this paper puts tenant
   workers in VMs. Only the control planes are isolated.
 - Terms such as *hosted control plane* and *node level* are defined in
@@ -543,6 +546,12 @@ built, patched and kept consistent by whoever owns the images.
 | Kata | First-class: shim, usually installed via `kata-deploy`; mainstream, well-trodden | Needs the runtime to host shim v2 or launch Kata itself, a feature the runtime's authors must build |
 | KubeVirt | Works, independent of the runtime | Works, subject to the runtime supplying devices, paths and cgroups |
 
+The target management cluster runs containerd, so it sits in the left column and the
+runtime-coupling concern does not arise in practice. The scores below are unchanged: that
+Kata is a shim v2 host rather than a layer above the CRI is a structural difference that
+remains. Because both Kata and KubeVirt are already in use elsewhere, neither design's
+platform footprint (A2) is treated as already paid for.
+
 Which column applies depends on the target deployment's runtime. This is the single
 criterion most sensitive to deployment facts this paper does not have (see the
 [sensitivity analysis](#sec-sensitivity)).
@@ -709,7 +718,9 @@ not pursued here, since the agent beside the workload matches the intended deplo
 not SPIFFE-aware. They read certificate files, so a helper must write the SVID to files
 inside the pod or guest. Those files are local, so they sidestep Secret propagation, but
 whether each component reloads on a file change is still open [?]. Short SVID lifetimes make
-that question more pressing than it is for yearly certificates.
+that question more pressing than it is for yearly certificates. The answer is the same for
+both designs, so it affects neither design's score; it only decides whether a rotation needs
+a restart, which is cheaper for a pod than for a VM.
 
 **Bootstrap.** Something must still prove the control plane's identity the first time, and
 the control plane's own root material (cluster CA, service-account signing key) has to come
@@ -813,7 +824,8 @@ table above:
 The most consequential finding is that **KubeVirt overtakes Kata only if runtime coupling
 (B3) counts more than 5 times a typical sub-criterion** (they tie at exactly 5). That is plausible when the
 management cluster's runtime cannot host shim v2, and implausible when it is containerd or
-CRI-O. No other scenario tested flips the result.
+CRI-O. The target runs containerd, so the case that would flip the result does not apply
+to it. No other scenario tested flips the result.
 
 ## What the scorecard does not cover {#sec-notcovered}
 
@@ -907,8 +919,9 @@ replace the most contested ones with measurements:
 6. **Identity (effort map 4b):** get a SPIRE agent and attestation working inside one Kata
    pod and one KubeVirt guest; record the moving parts and whether an SVID reaches the
    control plane components as files that they reload.
-7. **Runtime fact-finding (B3):** establish whether the target management cluster's
-   runtime hosts shim v2, since that is the factor most able to change the result.
+7. **Runtime fact-finding (B3):** resolved. The target management cluster runs containerd,
+   which hosts shim v2 (stated by the requester [S]), so this was the factor most able to
+   change the result and it does not. Nothing further to do unless the runtime changes.
 
 # Decision guide {#sec-decision}
 
@@ -916,6 +929,10 @@ The scorecard leans Kata under equal weights, and the margin shrinks to nothing 
 runtime coupling dominates. That is not a recommendation: most scores are inferred, and the
 unscored factors (team familiarity, ecosystem, isolation strength) cut in both directions.
 What the evidence supports are decision rules:
+
+For the target, the shim v2 condition below is met, and both technologies are already
+operated elsewhere, so neither the runtime nor the "already operated" argument separates
+the two.
 
 - **Choose Kata** if the target runtime hosts shim v2 (or can be made to), operators value
   staying in the `kubectl` workflow, and per-instance weight and guest-OS patching are
@@ -1018,10 +1035,12 @@ VMs, not pods:
 - Does virtiofs-delivered config block KubeVirt live migration in current versions? Sources
   differ.
 - Do the real control plane components (kube-apiserver and others) reload certificates on
-  file change, or need a restart?
+  file change, or need a restart? (An engineering fact to verify. It is the same in both
+  designs, so it does not change the scorecard.)
 - Does KubeVirt support readiness and liveness probes on a VMI in the way assumed here?
 - What is the upstream status of the KubeVirt multi-API-server race (v1.8.4)?
-- Does the target management cluster's runtime host shim v2?
+- ~~Does the target management cluster's runtime host shim v2?~~ Answered: yes, containerd
+  with runc (requester-stated [S]). See [5.2](#sec-complexity) and the validation plan.
 - Does the target management cluster run more than one API server?
 - What is Kata's network overhead for hosted control plane traffic?
 - Has KubeVirt TDX support landed upstream since November 2025? Has CoCo moved past CNCF
