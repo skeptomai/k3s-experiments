@@ -65,6 +65,7 @@ behind the scores so that any reader can check it. **It takes no side.**
   [Scorecard](#sec-scorecard), [Viability](#sec-viability) and
   [Decision guide](#sec-decision).
 - **Readers new to one of the technologies:** [Background](#sec-background).
+- **Readers who know both technologies:** skip to [the two designs](#sec-designs).
 - **Readers checking the scores:** [Analysis](#sec-analysis).
 
 ## Evidence labels
@@ -99,30 +100,16 @@ The criteria do not capture everything a team might care about. See
 
 # Background {#sec-background}
 
-## The container stack {#sec-stack}
+This section gives only what the comparison needs. Reference detail is in the appendices
+([the container stack](#app-stack) and [Kamaji's functions](#app-kamaji)). Readers who know
+both technologies can skip to [the two designs](#sec-designs).
 
-Both technologies are described in terms of this stack, so its layers come first.
+## The container stack, in brief {#sec-stack}
 
-```mermaid
-flowchart LR
-  K["kubelet"] -->|CRI| C["containerd or CRI-O<br/>high-level runtime"]
-  C -->|"shim v2"| S["containerd-shim-runc-v2<br/>the shim, one per pod"]
-  S -->|"exec per container"| R["runc<br/>low-level OCI runtime"]
-  R --> P["the container process<br/>namespaces + cgroups"]
-```
-
-- **kubelet** speaks CRI and knows nothing about runc.
-- **containerd / CRI-O** is the high-level runtime: it serves CRI, pulls images, manages
-  snapshots and storage, creates the pod sandbox, and tracks container lifecycle. It does
-  not start the container process itself.
-- **The shim** is a small long-lived process per pod, spoken to over the shim v2 API. It
-  launches the low-level runtime, stays alive after that exits to hold stdio and report the
-  exit status, and is why containers survive a containerd restart.
-- **runc** is the low-level OCI runtime: given an OCI bundle (a rootfs plus a config), it
-  sets up namespaces and cgroups, execs the process, and exits. crun, youki, and gVisor's
-  `runsc` fill the same role.
-- containerd picks the shim from the pod's RuntimeClass handler (`io.containerd.runc.v2`
-  for normal pods, `io.containerd.kata.v2` for Kata).
+Both technologies are described in terms of one stack. The kubelet speaks CRI to a
+high-level runtime (containerd or CRI-O). That runtime starts a small per-pod *shim* over the
+shim v2 API, and the shim runs the low-level OCI runtime (runc), which creates the
+container. [Appendix A](#app-stack) describes each layer.
 
 The three cases in one diagram (a normal pod in green, a Kata pod in amber, a KubeVirt VM in
 blue). They share kubelet and containerd, and each diverges at a fork: Kata at the shim,
@@ -162,53 +149,8 @@ flowchart TB
 Kamaji runs each hosted control plane as ordinary pods on a management cluster's nodes, so
 control planes share the host kernel (separated by namespaces and cgroups only). A
 `TenantControlPlane` resource describes each one. Bare-node workers connect inward through a
-load balancer. The diagram shows Kamaji's default configuration, with Konnectivity enabled.
-
-```mermaid
-flowchart LR
-  subgraph WK["Workers - bare nodes, not VMs"]
-    kl["kubelet + konnectivity agent"]
-  end
-  LB["LoadBalancer / ingress"]
-  subgraph MN["Management cluster node - ONE shared host kernel"]
-    subgraph PA["Hosted control plane A pod"]
-      a1["kube-apiserver"]
-      a2["controller-manager"]
-      a3["scheduler"]
-      a4["konnectivity server"]
-    end
-    subgraph PB["Hosted control plane B pod"]
-      b1["kube-apiserver"]
-      b2["controller-manager"]
-      b3["scheduler"]
-      b4["konnectivity server"]
-    end
-  end
-  DS[("DataStore: shared etcd or kine + Postgres")]
-  kl --> LB
-  LB --> PA
-  LB --> PB
-  PA --> DS
-  PB --> DS
-```
-
-**What Kamaji does** [S] (sources in [Appendix E](#app-sources); the pod placement is the
-easy part):
-
-1. A controller that watches a hosted-control-plane resource and writes the pods and
-   supporting resources for it (the easy, visible part).
-2. PKI: per-cluster CA, certificates, kubeconfigs, and their rotation (hard to get right).
-3. Datastore provisioning for each hosted control plane, with real isolation if shared.
-   Kamaji separates the datastore declaratively (a `DataStore` resource): shared etcd by
-   default, dedicated etcd optional, and kine allows MySQL or Postgres.
-4. Konnectivity, enabled by default and possible to disable: the server runs as a sidecar in
-   the control plane pod and agents run on the hosted cluster's workers.
-5. Addons (CoreDNS, and the Konnectivity agent when it is enabled) installed via the hosted
-   cluster's own apiserver.
-6. Worker bootstrap: join tokens, kubeadm-style. Kamaji does not manage worker lifecycle.
-7. Upgrades and version-skew handling.
-8. The Cluster API (CAPI) contract: control plane endpoint, ready/initialized status,
-   kubeconfig secret. Kamaji ships a CAPI control plane provider.
+load balancer. The architecture diagram and the eight functions Kamaji performs, which the
+[effort map](#sec-effort) follows, are in [Appendix B](#app-kamaji).
 
 **The threat model that motivates isolation:** hosted control planes sharing a kernel. An
 escape from one control plane's apiserver pod would expose other control planes'
@@ -858,7 +800,7 @@ These could matter and are not scored. Reviewers should decide whether to add th
 ## Where the effort goes {#sec-effort}
 
 What Kamaji does, and whether the work differs between the options (numbering from
-[the Kamaji section](#sec-kamaji)):
+[Kamaji's functions in Appendix B](#app-kamaji)):
 
 | Kamaji function | Kata design | KubeVirt design |
 |---|---|---|
@@ -968,9 +910,84 @@ target runtime (item 6); run the validation plan; then re-score with measurement
   handler config). It is installed per node, diagnosed on the node host (journald, shim
   logs), and a fault there affects every pod using it on that node. *API level* is objects
   in the Kubernetes API (Deployments, VMs, Secrets), managed with `kubectl` and GitOps.
-- **CRI, shim, OCI runtime:** see [the container stack](#sec-stack).
+- **CRI, shim, OCI runtime:** see [the container stack](#app-stack), below.
+
+## The container stack {-#app-stack}
+
+```mermaid
+flowchart LR
+  K["kubelet"] -->|CRI| C["containerd or CRI-O<br/>high-level runtime"]
+  C -->|"shim v2"| S["containerd-shim-runc-v2<br/>the shim, one per pod"]
+  S -->|"exec per container"| R["runc<br/>low-level OCI runtime"]
+  R --> P["the container process<br/>namespaces + cgroups"]
+```
+
+- **kubelet** speaks CRI and knows nothing about runc.
+- **containerd / CRI-O** is the high-level runtime: it serves CRI, pulls images, manages
+  snapshots and storage, creates the pod sandbox, and tracks container lifecycle. It does
+  not start the container process itself.
+- **The shim** is a small long-lived process per pod, spoken to over the shim v2 API. It
+  launches the low-level runtime, stays alive after that exits to hold stdio and report the
+  exit status, and is why containers survive a containerd restart.
+- **runc** is the low-level OCI runtime: given an OCI bundle (a rootfs plus a config), it
+  sets up namespaces and cgroups, execs the process, and exits. crun, youki, and gVisor's
+  `runsc` fill the same role.
+- containerd picks the shim from the pod's RuntimeClass handler (`io.containerd.runc.v2`
+  for normal pods, `io.containerd.kata.v2` for Kata).
 
 # Appendix B: Kamaji and vcluster, for reference {-#app-vcluster}
+
+## Kamaji architecture and functions {-#app-kamaji}
+
+The diagram shows Kamaji's default configuration, with Konnectivity enabled.
+
+```mermaid
+flowchart LR
+  subgraph WK["Workers - bare nodes, not VMs"]
+    kl["kubelet + konnectivity agent"]
+  end
+  LB["LoadBalancer / ingress"]
+  subgraph MN["Management cluster node - ONE shared host kernel"]
+    subgraph PA["Hosted control plane A pod"]
+      a1["kube-apiserver"]
+      a2["controller-manager"]
+      a3["scheduler"]
+      a4["konnectivity server"]
+    end
+    subgraph PB["Hosted control plane B pod"]
+      b1["kube-apiserver"]
+      b2["controller-manager"]
+      b3["scheduler"]
+      b4["konnectivity server"]
+    end
+  end
+  DS[("DataStore: shared etcd or kine + Postgres")]
+  kl --> LB
+  LB --> PA
+  LB --> PB
+  PA --> DS
+  PB --> DS
+```
+
+**What Kamaji does** [S] (sources in [Appendix E](#app-sources); the pod placement is the
+easy part). The numbering is used by the [effort map](#sec-effort):
+
+1. A controller that watches a hosted-control-plane resource and writes the pods and
+   supporting resources for it (the easy, visible part).
+2. PKI: per-cluster CA, certificates, kubeconfigs, and their rotation (hard to get right).
+3. Datastore provisioning for each hosted control plane, with real isolation if shared.
+   Kamaji separates the datastore declaratively (a `DataStore` resource): shared etcd by
+   default, dedicated etcd optional, and kine allows MySQL or Postgres.
+4. Konnectivity, enabled by default and possible to disable: the server runs as a sidecar in
+   the control plane pod and agents run on the hosted cluster's workers.
+5. Addons (CoreDNS, and the Konnectivity agent when it is enabled) installed via the hosted
+   cluster's own apiserver.
+6. Worker bootstrap: join tokens, kubeadm-style. Kamaji does not manage worker lifecycle.
+7. Upgrades and version-skew handling.
+8. The Cluster API (CAPI) contract: control plane endpoint, ready/initialized status,
+   kubeconfig secret. Kamaji ships a CAPI control plane provider.
+
+## Comparison with vcluster {-#app-vcluster-compare}
 
 vcluster is not a candidate in this paper; this comparison explains what Kamaji is by
 contrast. Web research; the best head-to-head comparisons were on vCluster's own blog, so
