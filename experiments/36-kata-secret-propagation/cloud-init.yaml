@@ -1,0 +1,204 @@
+#cloud-config
+ssh_authorized_keys:
+  - __SSH_PUBKEY__
+write_files:
+  - path: /usr/local/bin/probe.py
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      # Runs inside the test pod (Kata or runc). Every 5s prints the sha256
+      # fingerprint (first 8 hex) of the certificate seen via the Secret volume
+      # and via two local TLS services (load-once and reload-per-handshake).
+      import hashlib, socket, ssl, threading, time
+      D = "/certs"
+      fp_der = lambda der: hashlib.sha256(der).hexdigest()[:8]
+      def fp_file():
+          try:
+              pem = open(D + "/tls.crt").read()
+              end = "-----END CERTIFICATE-----"
+              return fp_der(ssl.PEM_cert_to_DER_cert(pem.split(end)[0] + end + "\n"))
+          except Exception:
+              return "none"
+      def mk():
+          c = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+          c.load_cert_chain(D + "/tls.crt", D + "/tls.key")
+          return c
+      def serve(port, dyn):
+          st = None if dyn else mk()
+          s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          s.bind(("127.0.0.1", port)); s.listen(5)
+          while True:
+              conn, _ = s.accept()
+              try:
+                  t = (mk() if dyn else st).wrap_socket(conn, server_side=True)
+                  t.recv(1024); t.sendall(b"HTTP/1.0 200 OK\r\n\r\nok\n"); t.close()
+              except Exception:
+                  conn.close()
+      def served(port):
+          try:
+              c = ssl.create_default_context(); c.check_hostname = False; c.verify_mode = ssl.CERT_NONE
+              with socket.create_connection(("127.0.0.1", port), timeout=3) as sk:
+                  with c.wrap_socket(sk) as ss:
+                      return fp_der(ss.getpeercert(binary_form=True))
+          except Exception:
+              return "none"
+      threading.Thread(target=serve, args=(8443, False), daemon=True).start()
+      threading.Thread(target=serve, args=(8444, True), daemon=True).start()
+      time.sleep(2)
+      while True:
+          print("PROBE fs=%s svc_static=%s svc_dyn=%s" % (fp_file(), served(8443), served(8444)), flush=True)
+          time.sleep(5)
+  - path: /usr/local/bin/kata-test.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Runs in the guest: builds single-node k3s + Kata, then rotates a Secret
+      # and times propagation into a Kata pod and a runc control pod.
+      set -uo pipefail
+      con() { echo "KT: $*" > /dev/ttyS0; echo "KT: $*"; }
+      die() { con "FATAL $*"; exit 1; }
+      export DEBIAN_FRONTEND=noninteractive HOME=/root
+      export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+      con "step=disk"
+      dev=$(ls /dev/disk/by-id/*DATA* 2>/dev/null | head -1); [ -n "$dev" ] || die "no data disk"
+      mkfs.ext4 -q "$dev" && mkdir -p /data && mount "$dev" /data || die "data disk"
+      mkdir -p /data/kata /data/rancher /opt /var/lib/rancher
+      ln -sfn /data/kata /opt/kata; mount --bind /data/rancher /var/lib/rancher
+
+      con "step=kvm $(ls /dev/kvm 2>&1) nested_cpu_vmx=$(grep -c -m1 vmx /proc/cpuinfo)"
+      [ -e /dev/kvm ] || die "no /dev/kvm in guest (nested virt unavailable)"
+
+      con "step=apt"
+      apt-get update -qq && apt-get install -y -qq zstd curl openssl >/dev/null || die apt
+
+      con "step=kata-download-extract"
+      curl -fsSL https://github.com/kata-containers/kata-containers/releases/download/4.4.0/kata-static-4.4.0-amd64.tar.zst \
+        2>/tmp/curl.err | zstd -d 2>/tmp/zstd.err | tar -x -C /data --strip-components=2 2>/tmp/tar.err
+      st=("${PIPESTATUS[@]}")
+      [ "${st[*]}" = "0 0 0" ] || die "kata download status=${st[*]} curl=$(tail -c 200 /tmp/curl.err) zstd=$(tail -c 200 /tmp/zstd.err) tar=$(tail -c 200 /tmp/tar.err) df=$(df -h /data | tail -1)"
+      [ -x /data/kata/runtime-rs/bin/containerd-shim-kata-v2 ] || die "kata shim missing after extract"
+      ln -sf /opt/kata/runtime-rs/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
+      con "kata shim (runtime-rs, 4.4.0): $(containerd-shim-kata-v2 --version 2>&1 | head -2 | tr '\n' ' ')"
+
+      con "step=k3s-containerd-template"
+      mkdir -p /var/lib/rancher/k3s/agent/etc/containerd
+      cat > /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl <<'TOML'
+      {{ template "base" . }}
+
+      [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata]
+        runtime_type = 'io.containerd.kata.v2'
+        privileged_without_host_devices = true
+        pod_annotations = ['io.katacontainers.*']
+        [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.kata.options]
+          ConfigPath = '/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-qemu-runtime-rs.toml'
+      TOML
+      sed -i 's/^      //' /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+
+      # Inner CIDRs must not overlap the outer cluster (10.42/10.43): KubeVirt hands the
+      # guest the outer CoreDNS 10.43.0.10, which default inner service rules would hijack.
+      con "step=k3s-install"
+      curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --disable traefik --disable metrics-server --disable servicelb --cluster-cidr=10.142.0.0/16 --service-cidr=10.143.0.0/16 --write-kubeconfig-mode 644" sh - >/dev/null 2>&1 || die "k3s install"
+      for i in $(seq 1 60); do kubectl get nodes 2>/dev/null | grep -q ' Ready' && break; sleep 5; done
+      kubectl get nodes 2>/dev/null | grep -q ' Ready' || die "k3s node not ready"
+      con "k3s ready: $(kubectl version 2>&1 | grep -i server | head -1)"
+
+      kubectl apply -f - >/dev/null <<'YAML'
+      apiVersion: node.k8s.io/v1
+      kind: RuntimeClass
+      metadata: {name: kata}
+      handler: kata
+      YAML
+
+      con "step=dns resolv=$(grep -v '^#' /etc/resolv.conf | tr '\n' ' ') getent=$(getent hosts registry-1.docker.io 2>&1 | head -1)"
+      con "dns upstream: $(resolvectl status 2>&1 | grep -E 'DNS Servers|Current DNS' | tr -s ' ' | tr '\n' ';')"
+      for img in docker.io/rancher/mirrored-pause:3.10.2 docker.io/library/python:3.12-slim; do
+        okp=0
+        for i in $(seq 1 12); do
+          if k3s crictl pull "$img" >/tmp/pull.out 2>&1; then okp=1; break; fi
+          con "pull $img attempt $i failed: $(tail -c 160 /tmp/pull.out | tr '\n' ' ')"; sleep 10
+        done
+        [ $okp = 1 ] && con "pulled $img" || die "cannot pull $img"
+      done
+
+      con "step=certs"
+      W=/root/certs; mkdir -p $W; cd $W
+      openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 2 -subj "/CN=kata-test-ca" 2>/dev/null
+      for n in A B; do
+        openssl req -newkey rsa:2048 -nodes -keyout $n.key -out $n.csr -subj "/CN=hcp-test-$n" 2>/dev/null
+        printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' > $n.ext
+        openssl x509 -req -in $n.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out $n.crt -days 1 -extfile $n.ext 2>/dev/null
+      done
+      fp() { openssl x509 -in "$1" -noout -fingerprint -sha256 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f' | cut -c1-8; }
+      FA=$(fp A.crt); FB=$(fp B.crt)
+      put() { kubectl create secret generic tls-test --from-file=tls.crt=$W/$1.crt --from-file=tls.key=$W/$1.key --from-file=ca.crt=$W/ca.crt --dry-run=client -o yaml | kubectl apply -f - >/dev/null; }
+      put A
+      kubectl create configmap probe --from-file=probe.py=/usr/local/bin/probe.py >/dev/null
+
+      mkpod() {  # name runtimeClass(or empty)
+        local rc=""; [ -n "$2" ] && rc="runtimeClassName: $2"
+        kubectl apply -f - >/dev/null <<YAML
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: $1}
+      spec:
+        $rc
+        containers:
+          - name: probe
+            image: docker.io/library/python:3.12-slim
+            command: [python3, /probe/probe.py]
+            volumeMounts:
+              - {name: certs, mountPath: /certs, readOnly: true}
+              - {name: probe, mountPath: /probe}
+        volumes:
+          - {name: certs, secret: {secretName: tls-test}}
+          - {name: probe, configMap: {name: probe}}
+      YAML
+      }
+      con "step=pods leafA=$FA leafB=$FB"
+      mkpod kata-probe kata; mkpod runc-probe ""
+      last() { kubectl logs "$1" 2>/dev/null | grep -a PROBE | tail -1; }
+      field() { sed -n "s/.* $1=\([^ ]*\).*/\1/p" <<<"$2"; }
+
+      ok=0
+      for i in $(seq 1 120); do
+        K=$(last kata-probe); R=$(last runc-probe)
+        if [ "$(field fs "$K")" = "$FA" ] && [ "$(field svc_dyn "$K")" = "$FA" ] \
+           && [ "$(field fs "$R")" = "$FA" ] && [ "$(field svc_dyn "$R")" = "$FA" ]; then ok=1; break; fi
+        sleep 5
+      done
+      if [ $ok != 1 ]; then
+        con "BASELINE NOT REACHED kata=[$K] runc=[$R]"
+        con "kata pod: $(kubectl get pod kata-probe -o wide 2>&1 | tail -1)"
+        con "kata events: $(kubectl get events --field-selector involvedObject.name=kata-probe 2>&1 | tail -3 | tr '\n' '|')"
+        con "RESULT_DONE"; exit 2
+      fi
+      con "baseline OK kata=[$K] runc=[$R]"
+      kv=$(kubectl exec kata-probe -- uname -r 2>&1); hv=$(uname -r)
+      con "kernel inside kata pod=$kv, guest host kernel=$hv (different means a real microVM)"
+      con "kata pod mount type: $(kubectl exec kata-probe -- sh -c "grep ' /certs ' /proc/mounts" 2>&1)"
+
+      T0=$(date +%s); con "ROTATING Secret to leaf B (T0)"; put B
+      declare -A seen
+      while [ $(( $(date +%s) - T0 )) -lt 420 ]; do
+        K=$(last kata-probe); R=$(last runc-probe)
+        for k in kfs ksvc_static ksvc_dyn rfs rsvc_static rsvc_dyn; do
+          case $k in k*) L="$K"; f=${k#k};; r*) L="$R"; f=${k#r};; esac
+          [ -z "${seen[$k]:-}" ] && [ "$(field $f "$L")" = "$FB" ] && { seen[$k]=$(( $(date +%s) - T0 )); con "$k switched after ${seen[$k]}s"; }
+        done
+        [ -n "${seen[kfs]:-}" ] && [ -n "${seen[rfs]:-}" ] && [ -n "${seen[ksvc_dyn]:-}" ] && [ -n "${seen[rsvc_dyn]:-}" ] && break
+        sleep 3
+      done
+      con "DIAG secret now: $(kubectl get secret tls-test -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -fingerprint -sha256 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f' | cut -c1-8) expected B=$FB"
+      con "DIAG B.crt sha=$(sha256sum < $W/B.crt | cut -c1-8) A.crt sha=$(sha256sum < $W/A.crt | cut -c1-8)"
+      for p in kata-probe runc-probe; do
+        con "DIAG $p files: $(kubectl exec $p -- sh -c 'ls -la /certs/ | tr -s " " | tr "\n" "|"; sha256sum /certs/tls.crt | cut -c1-8' 2>&1 | tr '\n' ' ')"
+        con "DIAG $p tail: $(kubectl logs $p --tail=2 2>&1 | tr '\n' '|')"
+      done
+      con "DIAG kubelet: $(ps -o args= -C k3s 2>/dev/null | head -1 | cut -c1-150) events=$(kubectl get events 2>&1 | grep -i -c secret)"
+      con "RESULT (seconds from Secret update to new cert; kata=k*, runc=r*)"
+      for k in kfs ksvc_static ksvc_dyn rfs rsvc_static rsvc_dyn; do con "RESULT $k ${seen[$k]:-not-seen-in-420s}"; done
+      con "final kata=[$(last kata-probe)] runc=[$(last runc-probe)]"
+      con "RESULT_DONE"
+runcmd:
+  - "nohup /usr/local/bin/kata-test.sh > /var/log/kata-test.log 2>&1 &"

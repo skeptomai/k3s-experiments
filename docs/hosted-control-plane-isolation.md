@@ -69,13 +69,14 @@ behind the scores so that any reader can check it. **It takes no side.**
 Most of the analysis is inference, so every claim of consequence carries a label:
 
 - **[S]**: from a cited source or product documentation.
-- **[M]**: measured in a throwaway test (`experiments/35-kubevirt-secret-propagation/`,
-  a single run).
+- **[M]**: measured in a throwaway test (`experiments/35-kubevirt-secret-propagation/` and
+  `experiments/36-kata-secret-propagation/`, a single run each) or observed working in an experiment on this cluster
+  (`experiments/34-spire-openbao-secrets/`).
 - **[I]**: inference from general knowledge. Not measured or tested here.
 - **[?]**: unverified or open; listed in [Appendix D](#app-open).
 
-Overhead figures are estimates. Apart from the Secret-propagation test marked [M], nothing
-in this paper was measured, and the [validation plan](#sec-spike) is how that would change.
+Overhead figures are estimates. Apart from the two Secret-propagation tests and the SPIRE-to-OpenBao
+experiment marked [M], nothing in this paper was measured, and the [validation plan](#sec-spike) is how that would change.
 
 # Decision criteria {#sec-criteria}
 
@@ -592,7 +593,7 @@ control plane, each with its own tooling, logs, and failure modes.
 | Metrics | Per-pod and per-container from the usual stack | Launcher and VM level from the host; per-component usage lives inside the guest |
 | Resource sizing | Per-container requests and limits, plus RuntimeClass overhead | One size for the whole VM; per-component limits only via guest cgroups |
 | Upgrade a control plane | Bump the image tag, rolling update | Roll the VM: rebuild or replace the OS image, or upgrade in place inside the guest |
-| Rotate certificates | Secret volumes; the Kata agent polls the host mount and copies changes into the guest (inotify events only for mounts up to 8 files and 1 MB; poll interval unstated) [S], not yet tested | Deliver the Secret as a virtiofs filesystem: changes reach the running guest (about 78 s measured, kubelet-bound) [M]. As a disk it never updates [M] |
+| Rotate certificates | Secret volumes; the Kata agent polls the host mount and copies changes into the guest (inotify events only for mounts up to 8 files and 1 MB; poll interval unstated) [S]. Measured: a rotated Secret reached the pod in 57 s, no slower than a runc control pod (76 s) [M] | Deliver the Secret as a virtiofs filesystem: changes reach the running guest (about 78 s measured, kubelet-bound) [M]. As a disk it never updates [M] |
 | Drain a node | Pod reschedules, replicas cover it | VM restarts, or live-migrates if configured |
 | Scale | Change replicas | A pool of VMs, each a separate OS |
 
@@ -640,7 +641,10 @@ What this means for each design:
 - **Kata (replicated pods).** A rolling restart across the apiserver replicas rotates every
   Secret above with no outage, so live propagation matters only if even that restart is
   unwanted. Kata's design doc describes propagation by polling and copying into the guest
-  [S]; it is untested here.
+  [S]. In experiment 36 (Kata 4.4.0 runtime-rs with QEMU, the Secret mounted over virtiofs)
+  a rotated certificate reached a running pod after 57 s, against 76 s for a runc pod on the
+  same kubelet, so Kata added no measurable delay beyond the kubelet's own sync [M]. As with
+  KubeVirt, a service that read its certificate once kept serving the old one [M].
 - **KubeVirt (a VM per control plane).** A restart means rebooting or rolling a VM, which is
   heavier, so live propagation matters more. It needs the Secret delivered as a **virtiofs
   filesystem**: a Secret delivered as a disk (or baked in through cloud-init) never updates
@@ -665,7 +669,16 @@ SPIFFE identity (an SVID) for keys and credentials from a secrets manager.
 Unix socket, not through a Secret volume. Rotation is pushed to the workload, and any key
 exchanged for the SVID is fetched on demand. A credential that travels this way never meets
 the [Secret propagation](#sec-secrets) question: no kubelet sync, no virtiofs-versus-disk
-choice, no latency floor [I]. Where the control plane's credentials (datastore access,
+choice, no latency floor [I].
+
+**What has been shown.** Experiment 34 ran this chain end to end in an ordinary pod on this
+cluster (node-level agent, host-path socket, Kubernetes attestor): the pod fetched a
+JWT-SVID over the Workload API, logged in to OpenBao with it, and read a secret. The SVID
+sat in an `emptyDir` and the pod spec held no static credential, so no Secret volume was
+involved at any step [M]. OpenBao's role is configured to accept only that exact SPIFFE ID
+and audience. The experiment did not cover rotation or timing, so
+the "pushed to the workload" and "no latency floor" claims stay [I], and it did not run
+inside a VM boundary, so everything in the table below stays as labelled. Where the control plane's credentials (datastore access,
 encryption keys, even certificates) can be fetched this way at start or on rotation, the
 controller never writes them as Secrets, and most of 5.5 does not apply.
 
@@ -834,7 +847,7 @@ What Kamaji does, and whether the work differs between the options (numbering fr
 | Kamaji function | Kata design | KubeVirt design |
 |---|---|---|
 | 1. Controller writes resources | Deployment/StatefulSet + `runtimeClassName` | VM + disk + cloud-init + Service |
-| 2. PKI and rotation | Mounted Secrets; updates reach the guest through the agent's polling copy [S], untested | Secret as a virtiofs filesystem propagates updates [M]; cloud-init or a Secret disk does not [M] |
+| 2. PKI and rotation | Mounted Secrets; updates reach the guest through the agent's polling copy [S]; reached a running pod in 57 s, same as a runc pod within noise [M] | Secret as a virtiofs filesystem propagates updates [M]; cloud-init or a Secret disk does not [M] |
 | 3. Datastore | Same either way (external kine/Postgres or etcd); measure fsync under each | Same either way |
 | 4. Konnectivity (absent in the target where possible; see [5.7](#sec-connectivity)) | Same either way: a routable path, or the tunnel kept where it cannot be removed | Same, with guest NAT as one more hop |
 | 4b. Workload identity (SPIFFE; see [5.6](#sec-identity)) | Agent as a pod sidecar, attested from inside the microVM | Agent in the guest image, attested from inside the guest |
@@ -861,8 +874,9 @@ choice (PKI rotation, upgrade orchestration, datastore isolation) looks small an
   [?].
 - **Secret rotation.** KubeVirt: a rotated Secret reaches a running guest only in virtiofs
   filesystem mode, and a service that reads its certificate once (as one test service did)
-  still needs a restart [M]. Kata: documented to propagate, untested [S]. Either way the
-  delay is bounded below by the kubelet's Secret sync (about 78 s measured) [M]. Whether the
+  still needs a restart [M]. Kata: propagates, no slower than a runc pod on the same kubelet (57 s versus 76 s, one run,
+  runtime-rs, nested virtualization) [M]. Either way the delay is bounded below by the
+  kubelet's Secret sync (57 to 78 s measured) [M]. Whether the
   real control plane components reload certificates on change is a separate question [?].
 - **Silent failure (KubeVirt).** A Running launcher pod with a dead guest is invisible to
   Kubernetes without guest-aware probes [I].
@@ -883,9 +897,9 @@ replace the most contested ones with measurements:
    and record what Kubernetes shows and how long recovery takes.
 4. **Debugging exercise (D1, D3, D4):** plant an apiserver misconfiguration under each
    design; time how long operators with different backgrounds take to find and fix it.
-5. **Certificate rotation (C3, risks):** done for KubeVirt delivery (experiment 35); repeat
-   under Kata, and with the actual control plane components, recording whether each needs a
-   restart.
+5. **Certificate rotation (C3, risks):** done for KubeVirt delivery (experiment 35) and for Kata
+   (experiment 36); repeat with the actual control plane components, recording whether each
+   needs a restart, and repeat the Kata run on bare metal with the target runtime and shim.
 6. **Identity (effort map 4b):** get a SPIRE agent and attestation working inside one Kata
    pod and one KubeVirt guest; record the moving parts and whether an SVID reaches the
    control plane components as files that they reload.
@@ -993,8 +1007,10 @@ VMs, not pods:
 
 # Appendix D: Open questions {-#app-open}
 
-- Does Kata propagate Secret updates into the guest as its design doc says, and how fast
-  (the poll interval is not stated)? Not yet tested.
+- Kata Secret propagation was measured once (experiment 36) on runtime-rs inside a nested
+  VM, and the agent's poll interval is still unstated; it was hidden behind the kubelet's
+  sync. Repeat on bare metal, with the Go shim and with the target runtime, and for
+  Secrets larger than the inotify limit (8 files, 1 MB)?
 - Does virtiofs-delivered config block KubeVirt live migration in current versions? Sources
   differ.
 - Do the real control plane components (kube-apiserver and others) reload certificates on
@@ -1014,11 +1030,14 @@ VMs, not pods:
 - [arXiv 2606.03323](https://arxiv.org/html/2606.03323)
 - [Red Hat Trustee docs, bare metal](https://docs.redhat.com/en/documentation/openshift_sandboxed_containers/1.12/html/deploying_red_hat_build_of_trustee_for_workloads_running_on_bare-metal_servers/trustee-discover_metal-trustee)
 - [Confidential containers on OpenShift bare metal (Red Hat Developer)](https://developers.redhat.com/index%2Ephp/articles/2026/06/04/overview-confidential-containers-openshift-bare-metal)
+- `experiments/34-spire-openbao-secrets/` (this repository): SPIRE JWT-SVID exchanged for an OpenBao secret in an ordinary pod
+- `experiments/35-kubevirt-secret-propagation/` (this repository): Secret rotation reaching a KubeVirt guest
 - [KubeVirt confidential computing docs](https://kubevirt.io/user-guide/cluster_admin/confidential_computing/)
 - [Intel TDX VMs with Trustee on OpenShift](https://developers.redhat.com/articles/2025/11/05/setting-intel-tdx-vms-trustee-openshift)
 - [KubeVirt and Kata use cases (Superuser)](https://superuser.openinfra.org/articles/kubevirt-kata-containers-vm-use-case/)
 - [KubeVirt: disks and volumes](https://kubevirt.io/user-guide/storage/disks_and_volumes/)
 - [KubeVirt: ContainerPath volumes](https://kubevirt.io/user-guide/storage/containerpath_volumes/)
+- `experiments/36-kata-secret-propagation/` (this repository): Secret rotation reaching a Kata pod
 - [Kata design: inotify and watchable mounts](https://github.com/kata-containers/kata-containers/blob/main/docs/design/inotify.md)
 - [vCluster: Kamaji vs vCluster (vendor)](https://www.vcluster.com/blog/kamaji-vs-vcluster-kubernetes-scaling)
 - [Kamaji: tenant control plane](https://kamaji.clastix.io/concepts/tenant-control-plane/)

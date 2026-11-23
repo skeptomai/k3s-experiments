@@ -1,0 +1,43 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+metadata:
+  name: kata-host
+  namespace: kata-secret-test
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ipc8
+  domain:
+    cpu:
+      cores: 4
+      model: host-passthrough   # exposes VMX so the guest has /dev/kvm (nested virt)
+    memory:
+      guest: 8Gi
+    devices:
+      disks:
+        - name: rootdisk
+          disk:
+            bus: virtio
+        - name: cloudinitdisk
+          disk:
+            bus: virtio
+        - name: datadisk
+          serial: DATA
+          disk:
+            bus: virtio
+      interfaces:
+        - name: default
+          masquerade: {}
+  networks:
+    - name: default
+      pod: {}
+  volumes:
+    - name: rootdisk
+      containerDisk:
+        image: 192.168.89.2:5004/ubuntu/ubuntu-cloud-disk:24.04
+    - name: datadisk
+      emptyDisk:
+        capacity: 24Gi
+    - name: cloudinitdisk
+      cloudInitNoCloud:
+        secretRef:
+          name: kata-userdata
