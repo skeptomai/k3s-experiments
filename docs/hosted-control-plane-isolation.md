@@ -397,6 +397,8 @@ flowchart TB
   database the same concern moves to the database [I].
 - **Networking:** ordinary Services and LoadBalancers. Kata bridges the pod network into the
   VM, which may cost some network performance [?].
+- **Konnectivity:** not drawn. If it is kept (see [5.7](#sec-connectivity)), its server runs
+  as a sidecar beside the API server in the same pod, and its agents run on the bare workers [I].
 
 ```{=latex}
 \newpage
@@ -464,6 +466,8 @@ flowchart LR
 - **Beyond what Kamaji offers:** live migration, disk snapshots (useful for an etcd disk),
   and a control plane that behaves like a normal machine. Nobody requires these, but they
   are credited as incident tools under D4 in the [scorecard](#sec-scorecard).
+- **Konnectivity:** not drawn. If it is kept (see [5.7](#sec-connectivity)), its server runs
+  as a process in the guest beside the API server, and its agents run on the bare workers [I].
 
 ## How a control plane gets created {#sec-chain}
 
@@ -766,7 +770,7 @@ Scores are ordinal judgments from 1 to 5 (5 is best for the operator), **propose
 reviewers to challenge**. They are not measurements. Each carries its evidence label.
 
 | | Sub-criterion | Kata | KubeVirt | Basis |
-|--|------------|:--:|:----:|--------------------------|
+|-----|------------------------|:----------:|:-------------:|------------------------------------------------|
 | A1 | Per-control-plane overhead | 4 | 2 | [I] minimal guest vs full OS |
 | A2 | Platform footprint | 4 | 2 | [S] RuntimeClass + per-node shim vs operator, 4 components, ~19 CRDs |
 | B1 | What our controller must build | 4 | 2 | [I] plain-pod resources + one field vs VM resources + guest bootstrap |
